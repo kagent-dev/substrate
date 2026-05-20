@@ -22,6 +22,11 @@ rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "watch", "list"]
+# TODO: Decide whether env source resolution should keep using ate-api's
+# broad read access or move to a more scoped delegation/admission model.
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get"]
 - apiGroups: ["ate.dev"]
   resources: ["actortemplates"]
   verbs: ["get", "watch", "list"]

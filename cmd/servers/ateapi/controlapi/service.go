@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Service implements ateapipb.Control
@@ -40,12 +41,12 @@ type Service struct {
 var _ ateapipb.ControlServer = (*Service)(nil)
 
 // NewService creates a service.
-func NewService(persistence store.Interface, actorTemplateLister listersv1alpha1.ActorTemplateLister, dialer *AteletDialer) *Service {
+func NewService(persistence store.Interface, actorTemplateLister listersv1alpha1.ActorTemplateLister, dialer *AteletDialer, kubeClient kubernetes.Interface) *Service {
 	s := &Service{
 		persistence:         persistence,
 		actorTemplateLister: actorTemplateLister,
 		dialer:              dialer,
-		actorWorkflow:       NewActorWorkflow(persistence, dialer, actorTemplateLister),
+		actorWorkflow:       NewActorWorkflow(persistence, dialer, actorTemplateLister, kubeClient),
 	}
 
 	return s

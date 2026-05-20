@@ -40,6 +40,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,13 +146,16 @@ type FakeAteletServer struct {
 
 	Lock sync.Mutex
 
-	RunCalled bool
+	RunCalled  bool
+	RunRequest *ateletpb.RunRequest
 
-	CheckpointCalled bool
+	CheckpointCalled  bool
+	CheckpointRequest *ateletpb.CheckpointRequest
 
-	RestoreCalled bool
-	FailRestore   error
-	RestoreDelay  time.Duration
+	RestoreCalled  bool
+	RestoreRequest *ateletpb.RestoreRequest
+	FailRestore    error
+	RestoreDelay   time.Duration
 }
 
 func (f *FakeAteletServer) Reset() {
@@ -159,10 +163,13 @@ func (f *FakeAteletServer) Reset() {
 	defer f.Lock.Unlock()
 
 	f.RunCalled = false
+	f.RunRequest = nil
 
 	f.CheckpointCalled = false
+	f.CheckpointRequest = nil
 
 	f.RestoreCalled = false
+	f.RestoreRequest = nil
 	f.FailRestore = nil
 	f.RestoreDelay = 0
 }
@@ -172,6 +179,7 @@ func (f *FakeAteletServer) Run(ctx context.Context, req *ateletpb.RunRequest) (*
 	defer f.Lock.Unlock()
 
 	f.RunCalled = true
+	f.RunRequest = proto.Clone(req).(*ateletpb.RunRequest)
 
 	return &ateletpb.RunResponse{}, nil
 }
@@ -181,6 +189,7 @@ func (f *FakeAteletServer) Checkpoint(ctx context.Context, req *ateletpb.Checkpo
 	defer f.Lock.Unlock()
 
 	f.CheckpointCalled = true
+	f.CheckpointRequest = proto.Clone(req).(*ateletpb.CheckpointRequest)
 
 	return &ateletpb.CheckpointResponse{}, nil
 }
@@ -190,6 +199,7 @@ func (f *FakeAteletServer) Restore(ctx context.Context, req *ateletpb.RestoreReq
 	defer f.Lock.Unlock()
 
 	f.RestoreCalled = true
+	f.RestoreRequest = proto.Clone(req).(*ateletpb.RestoreRequest)
 	if f.RestoreDelay > 0 {
 		time.Sleep(f.RestoreDelay)
 	}
@@ -197,6 +207,16 @@ func (f *FakeAteletServer) Restore(ctx context.Context, req *ateletpb.RestoreReq
 		return nil, f.FailRestore
 	}
 	return &ateletpb.RestoreResponse{}, nil
+}
+
+func (f *FakeAteletServer) lastRestoreRequest() *ateletpb.RestoreRequest {
+	f.Lock.Lock()
+	defer f.Lock.Unlock()
+
+	if f.RestoreRequest == nil {
+		return nil
+	}
+	return proto.Clone(f.RestoreRequest).(*ateletpb.RestoreRequest)
 }
 
 type testContext struct {
@@ -260,7 +280,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 
 	// 4. Initialize Service
 	dialer := NewAteletDialer(workerInformer.GetIndexer(), ateletInformer.GetIndexer())
-	service := NewService(persistence, actorTemplateLister, dialer)
+	service := NewService(persistence, actorTemplateLister, dialer, k8sClient)
 
 	// 5. Start REAL gRPC Server for ATE API
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(StatusErrorInterceptor))
@@ -330,6 +350,17 @@ func namespaceForTest(baseName string) string {
 
 func createTemplate(t *testing.T, tc *testContext, ns string) {
 	t.Helper()
+	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
+		{
+			Name:    "main",
+			Image:   "main",
+			Command: []string{"/main"},
+		},
+	})
+}
+
+func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, containers []atev1alpha1.Container) {
+	t.Helper()
 	actorTemplate := &atev1alpha1.ActorTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tmpl1",
@@ -343,13 +374,7 @@ func createTemplate(t *testing.T, tc *testContext, ns string) {
 				},
 			},
 			PauseImage: "pause",
-			Containers: []atev1alpha1.Container{
-				{
-					Name:    "main",
-					Image:   "main",
-					Command: []string{"/main"},
-				},
-			},
+			Containers: containers,
 			WorkerPoolRef: corev1.ObjectReference{
 				Namespace: ns,
 				Name:      "pool1",
@@ -764,6 +789,106 @@ func TestResumeActor(t *testing.T) {
 
 	if diff := cmp.Diff(wantWorker, actorWorker, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Worker{}, "version")); diff != "" {
 		t.Errorf("Worker state mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestResumeActorResolvesValueFromEnv(t *testing.T) {
+	ns := namespaceForTest("ns-resume-secret-env")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	_, err := tc.k8sClient.CoreV1().ConfigMaps(ns).Create(context.Background(), &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "settings",
+			Namespace: ns,
+		},
+		Data: map[string]string{
+			"interval": "45",
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create ConfigMap: %v", err)
+	}
+
+	_, err = tc.k8sClient.CoreV1().Secrets(ns).Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-keys",
+			Namespace: ns,
+		},
+		Data: map[string][]byte{
+			"anthropic": []byte("sk-test"),
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create secret: %v", err)
+	}
+
+	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
+		{
+			Name:    "main",
+			Image:   "main",
+			Command: []string{"/main"},
+			Env: []corev1.EnvVar{
+				{
+					Name:  "LITERAL",
+					Value: "plain",
+				},
+				{
+					Name: "INTERVAL_SECONDS",
+					ValueFrom: &corev1.EnvVarSource{
+						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "settings"},
+							Key:                  "interval",
+						},
+					},
+				},
+				{
+					Name: "ANTHROPIC_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "api-keys"},
+							Key:                  "anthropic",
+						},
+					},
+				},
+			},
+		},
+	})
+	createWorkerPod(t, tc, ns, "worker-1", "node1")
+
+	_, err = tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+		ActorId:                "id1",
+	})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("ResumeActor failed: %v", err)
+	}
+
+	restoreReq := tc.fakeAtelet.lastRestoreRequest()
+	if restoreReq == nil {
+		t.Fatalf("expected Restore to be called")
+	}
+	if len(restoreReq.GetSpec().GetContainers()) != 1 {
+		t.Fatalf("expected one container in restore request, got %d", len(restoreReq.GetSpec().GetContainers()))
+	}
+	gotEnv := map[string]string{}
+	for _, env := range restoreReq.GetSpec().GetContainers()[0].GetEnv() {
+		gotEnv[env.GetName()] = env.GetValue()
+	}
+	wantEnv := map[string]string{
+		"LITERAL":           "plain",
+		"INTERVAL_SECONDS":  "45",
+		"ANTHROPIC_API_KEY": "sk-test",
+	}
+	if diff := cmp.Diff(wantEnv, gotEnv); diff != "" {
+		t.Errorf("resolved env mismatch (-want +got):\n%s", diff)
 	}
 }
 
