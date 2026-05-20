@@ -46,11 +46,11 @@ func workloadSpecFromActorTemplate(ctx context.Context, kubeClient kubernetes.In
 			Command: ctr.Command,
 		}
 		for _, env := range ctr.Env {
-			ateletEnv, include, err := resolver.resolve(ctx, ctr.Name, env)
+			ateletEnv, err := resolver.resolve(ctx, ctr.Name, env)
 			if err != nil {
 				return nil, err
 			}
-			if include {
+			if ateletEnv != nil {
 				ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
 			}
 		}
@@ -67,49 +67,49 @@ type envResolver struct {
 	secrets    map[string]*corev1.Secret
 }
 
-func (r *envResolver) resolve(ctx context.Context, containerName string, env corev1.EnvVar) (*ateletpb.EnvEntry, bool, error) {
+func (r *envResolver) resolve(ctx context.Context, containerName string, env corev1.EnvVar) (*ateletpb.EnvEntry, error) {
 	envID := fmt.Sprintf("container %q env %q", containerName, env.Name)
 	if env.ValueFrom == nil {
 		return &ateletpb.EnvEntry{
 			Name:  env.Name,
 			Value: env.Value,
-		}, true, nil
+		}, nil
 	}
 
 	if env.Value != "" {
-		return nil, false, status.Errorf(codes.FailedPrecondition, "%s sets both value and valueFrom", envID)
+		return nil, status.Errorf(codes.FailedPrecondition, "%s sets both value and valueFrom", envID)
 	}
 
 	sources := valueFromSourceCount(env.ValueFrom)
 	if sources == 0 {
-		return nil, false, status.Errorf(codes.FailedPrecondition, "%s valueFrom does not set a source", envID)
+		return nil, status.Errorf(codes.FailedPrecondition, "%s valueFrom does not set a source", envID)
 	}
 	if sources > 1 {
-		return nil, false, status.Errorf(codes.FailedPrecondition, "%s combines multiple valueFrom sources", envID)
+		return nil, status.Errorf(codes.FailedPrecondition, "%s combines multiple valueFrom sources", envID)
 	}
 
-	var value string
-	var include bool
-	var err error
-	switch {
-	case env.ValueFrom.ConfigMapKeyRef != nil:
-		value, include, err = r.resolveConfigMapKeyRef(ctx, envID, env.ValueFrom.ConfigMapKeyRef)
-	case env.ValueFrom.SecretKeyRef != nil:
-		value, include, err = r.resolveSecretKeyRef(ctx, envID, env.ValueFrom.SecretKeyRef)
-	default:
-		return nil, false, status.Errorf(codes.FailedPrecondition, "%s uses unsupported valueFrom source; only configMapKeyRef and secretKeyRef are supported", envID)
-	}
+	value, include, err := r.resolveValueFrom(ctx, envID, env.ValueFrom)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if !include {
-		return nil, false, nil
+		return nil, nil
 	}
 
 	return &ateletpb.EnvEntry{
 		Name:  env.Name,
 		Value: value,
-	}, true, nil
+	}, nil
+}
+
+func (r *envResolver) resolveValueFrom(ctx context.Context, envID string, valueFrom *corev1.EnvVarSource) (string, bool, error) {
+	if ref := valueFrom.ConfigMapKeyRef; ref != nil {
+		return r.resolveConfigMapKeyRef(ctx, envID, ref)
+	}
+	if ref := valueFrom.SecretKeyRef; ref != nil {
+		return r.resolveSecretKeyRef(ctx, envID, ref)
+	}
+	return "", false, status.Errorf(codes.FailedPrecondition, "%s uses unsupported valueFrom source; only configMapKeyRef and secretKeyRef are supported", envID)
 }
 
 func valueFromSourceCount(src *corev1.EnvVarSource) int {
