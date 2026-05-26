@@ -55,12 +55,20 @@ Agent Substrate is designed to be **framework and agent harness agnostic**. Beca
 *   **Claude Code & CodeX:** Support for high-density, stateful coding environments that preserve terminal and filesystem state across sessions.
 *   **Model Context Protocol (MCP):** Deploy secure, sandboxed MCP servers as Substrate Actors to provide durable tools for any LLM.
 
+## Ecosystem & Examples
+
+*   **[Agent Executor](https://github.com/google/ax):** A distributed agent runtime that demonstrates building a secure, hyper-scalable agent harness on Agent Substrate (see the [announcement blog](https://cloud.google.com/blog/products/ai-machine-learning/agent-executor-googles-distributed-agent-runtime) and [integration guide](https://github.com/google/ax/blob/main/manifests/README.md)).
+
 ## Status and compatibility
 
 Agent Substrate is currently in VERY early development.  It is not ready for
 production use, and the APIs are almost guaranteed to change.  We are not
 making any guarantees about backward compatibility at this stage, and
 everything in this project may be changed.
+
+### Supported Kubernetes Releases
+
+Currently we aim to support the [latest stable release](https://kubernetes.io/releases/) of Kubernetes, and the previous minor release.
 
 ## Community
 
@@ -79,7 +87,7 @@ goals in the near term.
 
 To quickly set up the complete environment:
 
-1. Make sure you have [`kind`](https://kind.sigs.k8s.io/), [`kubectl`](https://kubernetes.io/docs/tasks/tools/), and [`docker`](https://www.docker.com/) installed and configured on your dev machine.
+1. Make sure you have [Go](https://go.dev/doc/install), [`kubectl`](https://kubernetes.io/docs/tasks/tools/), and [`docker`](https://www.docker.com/) installed and configured on your dev machine. We will automatically manage other dependencies via Go, including [`kind`](https://kind.sigs.k8s.io/).
 
 2. Run the following steps:
 ```shell
@@ -97,7 +105,13 @@ go install ./cmd/kubectl-ate
 
 # create a counter actor and demo it
 kubectl ate create actor my-counter-1 --template ate-demo-counter/counter
-kubectl port-forward -n ate-system svc/atenet-router 8000:80 &
+
+# port-forward the network router to bind to local port `8000`
+kubectl port-forward -n ate-system svc/atenet-router 8000:80
+```
+
+3. In a **separate terminal**, send an HTTP request to increment the counter:
+```shell
 curl -X POST -H "Host: my-counter-1.actors.resources.substrate.ate.dev" -i http://localhost:8000/
 ```
 
@@ -118,7 +132,7 @@ curl -X POST -H "Host: my-counter-1.actors.resources.substrate.ate.dev" -i http:
 
 3. Provision the required GCP resources (GKE cluster, Redis, GCS, and IAM bindings):
    ```bash
-   go run ./cmd/setup --all
+   go run ./tools/setup-gcp --all
    ```
 
 4. Deploy the Agent Substrate system to your cluster (remember to navigate back to root directory of this repo before running the following commands):
@@ -133,10 +147,10 @@ curl -X POST -H "Host: my-counter-1.actors.resources.substrate.ate.dev" -i http:
 
 #### Custom Setup and Deployment
 
-You can run individual setup steps to create GCP resources as needed. See `go run ./cmd/setup --help` for available options. For example:
+You can run individual setup steps to create GCP resources as needed. See `go run ./tools/setup-gcp --help` for available options. For example:
 ```bash
-go run ./cmd/setup --create-cluster
-go run ./cmd/setup --create-gvisor-node-pool
+go run ./tools/setup-gcp --create-cluster
+go run ./tools/setup-gcp --create-gvisor-node-pool
 ```
 
 Similarly, you can deploy or cleanup specific Agent Substrate components using the installation script. See `./hack/install-ate.sh --help` for all options.
@@ -148,7 +162,7 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 ./hack/install-ate-kind.sh --delete-all
 ```
 
-#### Tearing down resources
+#### Tearing down resources (GCP)
 
 If you need to delete the resources created by the setup script, you can use the provided script `hack/teardown.sh`. This script will delete resources in the reverse order of creation and handles partial failures gracefully.
 
@@ -157,6 +171,14 @@ If you need to delete the resources created by the setup script, you can use the
 ```
 
 Or run individual teardown steps as needed (see `./hack/teardown.sh` for available options).
+
+#### Tearing down local `kind` resources
+
+If you need to delete the local `kind` cluster and its registry (if it was created by `hack/create-kind-cluster.sh`):
+
+```bash
+./hack/delete-kind-cluster.sh
+```
 
 ## Demos
 
@@ -176,13 +198,13 @@ We provide several sample applications demonstrating Agent Substrate's capabilit
 
 ### Commands
 
-* `cmd/servers/ateapi`: The core control plane API server exposing gRPC endpoints to manage actor and worker lifecycles.
-* `cmd/servers/atelet`: A node-level DaemonSet that supervises physical worker pods, coordinates snapshotting, and manages state transfers.
-* `cmd/servers/atecontroller`: A Kubernetes controller that reconciles WorkerPool and ActorTemplate custom resources.
-* `cmd/servers/atenet`: A combined networking controller providing DNS, Envoy routing, and proxy sidecars.
-* `cmd/servers/ateom-gvisor`: An interior-pod helper running inside sandboxed worker pods to execute `runsc` checkpoint and restore commands.
-* `cmd/servers/podcertcontroller`: A "polyfill" that provides Pod Certificate signers that
+* `cmd/ateapi`: The core control plane API server exposing gRPC endpoints to manage actor and worker lifecycles.
+* `cmd/atelet`: A node-level DaemonSet that supervises physical worker pods, coordinates snapshotting, and manages state transfers.
+* `cmd/atecontroller`: A Kubernetes controller that reconciles WorkerPool and ActorTemplate custom resources.
+* `cmd/atenet`: A combined networking controller providing DNS, Envoy routing, and proxy sidecars.
+* `cmd/ateom-gvisor`: An interior-pod helper running inside sandboxed worker pods to execute `runsc` checkpoint and restore commands.
+* `cmd/podcertcontroller`: A "polyfill" that provides Pod Certificate signers that
   will eventually ship in upstream Kubernetes (with different names).
 * `cmd/kubectl-ate`: A CLI tool for managing Agent Substrate resources. See its [README](cmd/kubectl-ate/README.md).
-* `cmd/setup`: A provisioning utility to set up the necessary GCP infrastructure resources (GKE, GCS, IAM).
+* `tools/setup-gcp`: A provisioning utility to set up the necessary GCP infrastructure resources (GKE, GCS, IAM).
 * `demos/`: Sample applications demonstrating Agent Substrate capabilities.

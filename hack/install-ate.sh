@@ -103,7 +103,7 @@ run_kubectl_ate() {
 }
 
 run_ko() {
-  ./hack/ko.sh \
+  ./hack/run-tool.sh ko \
     "$@" \
     -- ${KUBECTL_CONTEXT:+--context=${KUBECTL_CONTEXT}}
 }
@@ -313,10 +313,12 @@ deploy_atenet() {
 
 delete_ate_system() {
   log_step "delete_ate_system"
-  if [[ "${ATE_INSTALL_RUSTFS:-false}" == "true" ]]; then
-    run_kubectl delete --ignore-not-found -f manifests/ate-install/kind/rustfs.yaml
+  if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
+    kubectl kustomize manifests/ate-install/kind --load-restrictor LoadRestrictionsNone \
+      | run_kubectl delete --ignore-not-found -f -
+  else
+    run_kubectl delete --ignore-not-found -f manifests/ate-install
   fi
-  run_kubectl delete --ignore-not-found -f manifests/ate-install
   run_kubectl delete --ignore-not-found -f manifests/ate-install/generated
 }
 
