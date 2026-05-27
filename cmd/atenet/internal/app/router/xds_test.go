@@ -24,6 +24,7 @@ import (
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	routev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 )
@@ -116,6 +117,10 @@ func TestXdsServer_UpdateSnapshot(t *testing.T) {
 		if fallbackRoute.GetMatch().GetPrefix() != "/" {
 			t.Errorf("Expected path mapping prefix '/', got '%s'", fallbackRoute.GetMatch().GetPrefix())
 		}
+		routeAction := fallbackRoute.GetRoute()
+		if len(routeAction.GetUpgradeConfigs()) != 1 || routeAction.GetUpgradeConfigs()[0].GetUpgradeType() != websocketUpgradeType {
+			t.Errorf("Expected route websocket upgrade config, got %+v", routeAction.GetUpgradeConfigs())
+		}
 	}
 
 	// Verify listeners generated
@@ -134,6 +139,15 @@ func TestXdsServer_UpdateSnapshot(t *testing.T) {
 		}
 		if sa.GetAddress() != "0.0.0.0" {
 			t.Errorf("Expected address '0.0.0.0', got %s", sa.GetAddress())
+		}
+
+		hcmAny := l.GetFilterChains()[0].GetFilters()[0].GetTypedConfig()
+		hcm := &hcmv3.HttpConnectionManager{}
+		if err := hcmAny.UnmarshalTo(hcm); err != nil {
+			t.Fatalf("Failed to unmarshal HCM: %v", err)
+		}
+		if len(hcm.GetUpgradeConfigs()) != 1 || hcm.GetUpgradeConfigs()[0].GetUpgradeType() != websocketUpgradeType {
+			t.Errorf("Expected HCM websocket upgrade config, got %+v", hcm.GetUpgradeConfigs())
 		}
 	}
 }
