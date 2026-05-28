@@ -64,26 +64,26 @@ func TestWorkloadSpecFromActorTemplateResolvesValueFromEnv(t *testing.T) {
 					Name:    "main",
 					Image:   "main",
 					Command: []string{"/main"},
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
 							Name:  "LITERAL",
 							Value: "plain",
 						},
 						{
 							Name: "INTERVAL_SECONDS",
-							ValueFrom: &corev1.EnvVarSource{
-								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "settings"},
-									Key:                  "interval",
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								ConfigMapKeyRef: &atev1alpha1.ConfigMapKeySelector{
+									Name: "settings",
+									Key:  "interval",
 								},
 							},
 						},
 						{
 							Name: "ANTHROPIC_API_KEY",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "api-keys"},
-									Key:                  "anthropic",
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								SecretKeyRef: &atev1alpha1.SecretKeySelector{
+									Name: "api-keys",
+									Key:  "anthropic",
 								},
 							},
 						},
@@ -134,14 +134,14 @@ func TestWorkloadSpecFromActorTemplateOptionalConfigMapKeyRefSkipsMissingKey(t *
 				{
 					Name:  "main",
 					Image: "main",
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
 							Name: "OPTIONAL",
-							ValueFrom: &corev1.EnvVarSource{
-								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "settings"},
-									Key:                  "missing",
-									Optional:             &optional,
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								ConfigMapKeyRef: &atev1alpha1.ConfigMapKeySelector{
+									Name:     "settings",
+									Key:      "missing",
+									Optional: &optional,
 								},
 							},
 						},
@@ -172,13 +172,13 @@ func TestWorkloadSpecFromActorTemplateConfigMapKeyRefMissingConfigMapFails(t *te
 				{
 					Name:  "main",
 					Image: "main",
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
 							Name: "REQUIRED",
-							ValueFrom: &corev1.EnvVarSource{
-								ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "missing"},
-									Key:                  "key",
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								ConfigMapKeyRef: &atev1alpha1.ConfigMapKeySelector{
+									Name: "missing",
+									Key:  "key",
 								},
 							},
 						},
@@ -204,14 +204,14 @@ func TestWorkloadSpecFromActorTemplateOptionalSecretKeyRefSkipsMissingSecret(t *
 				{
 					Name:  "main",
 					Image: "main",
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
 							Name: "OPTIONAL",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "missing"},
-									Key:                  "key",
-									Optional:             &optional,
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								SecretKeyRef: &atev1alpha1.SecretKeySelector{
+									Name:     "missing",
+									Key:      "key",
+									Optional: &optional,
 								},
 							},
 						},
@@ -242,13 +242,13 @@ func TestWorkloadSpecFromActorTemplateSecretKeyRefMissingSecretFails(t *testing.
 				{
 					Name:  "main",
 					Image: "main",
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
 							Name: "REQUIRED",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "missing"},
-									Key:                  "key",
+							ValueFrom: &atev1alpha1.EnvVarSource{
+								SecretKeyRef: &atev1alpha1.SecretKeySelector{
+									Name: "missing",
+									Key:  "key",
 								},
 							},
 						},
@@ -262,7 +262,7 @@ func TestWorkloadSpecFromActorTemplateSecretKeyRefMissingSecretFails(t *testing.
 	}
 }
 
-func TestWorkloadSpecFromActorTemplateUnsupportedValueFromFails(t *testing.T) {
+func TestWorkloadSpecFromActorTemplateEmptyValueFromFails(t *testing.T) {
 	_, err := workloadSpecFromActorTemplate(context.Background(), fake.NewSimpleClientset(), &atev1alpha1.ActorTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tmpl1",
@@ -273,12 +273,10 @@ func TestWorkloadSpecFromActorTemplateUnsupportedValueFromFails(t *testing.T) {
 				{
 					Name:  "main",
 					Image: "main",
-					Env: []corev1.EnvVar{
+					Env: []atev1alpha1.EnvVar{
 						{
-							Name: "FIELD",
-							ValueFrom: &corev1.EnvVarSource{
-								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
-							},
+							Name:      "EMPTY",
+							ValueFrom: &atev1alpha1.EnvVarSource{},
 						},
 					},
 				},

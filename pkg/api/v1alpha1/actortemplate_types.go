@@ -48,7 +48,7 @@ type Container struct {
 	Ports []corev1.ContainerPort `json:"ports,omitempty"`
 
 	// Environment variables to set in the worker replicas.
-	Env []corev1.EnvVar `json:"env,omitempty"`
+	Env []EnvVar `json:"env,omitempty"`
 }
 
 type SnapshotsConfig struct {

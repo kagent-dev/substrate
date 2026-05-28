@@ -829,26 +829,26 @@ func TestResumeActorResolvesValueFromEnv(t *testing.T) {
 			Name:    "main",
 			Image:   "main",
 			Command: []string{"/main"},
-			Env: []corev1.EnvVar{
+			Env: []atev1alpha1.EnvVar{
 				{
 					Name:  "LITERAL",
 					Value: "plain",
 				},
 				{
 					Name: "INTERVAL_SECONDS",
-					ValueFrom: &corev1.EnvVarSource{
-						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: "settings"},
-							Key:                  "interval",
+					ValueFrom: &atev1alpha1.EnvVarSource{
+						ConfigMapKeyRef: &atev1alpha1.ConfigMapKeySelector{
+							Name: "settings",
+							Key:  "interval",
 						},
 					},
 				},
 				{
 					Name: "ANTHROPIC_API_KEY",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: "api-keys"},
-							Key:                  "anthropic",
+					ValueFrom: &atev1alpha1.EnvVarSource{
+						SecretKeyRef: &atev1alpha1.SecretKeySelector{
+							Name: "api-keys",
+							Key:  "anthropic",
 						},
 					},
 				},

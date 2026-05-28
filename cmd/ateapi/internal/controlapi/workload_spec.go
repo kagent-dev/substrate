@@ -67,7 +67,7 @@ type envResolver struct {
 	secrets    map[string]*corev1.Secret
 }
 
-func (r *envResolver) resolve(ctx context.Context, containerName string, env corev1.EnvVar) (*ateletpb.EnvEntry, error) {
+func (r *envResolver) resolve(ctx context.Context, containerName string, env atev1alpha1.EnvVar) (*ateletpb.EnvEntry, error) {
 	envID := fmt.Sprintf("container %q env %q", containerName, env.Name)
 	if env.ValueFrom == nil {
 		return &ateletpb.EnvEntry{
@@ -102,7 +102,7 @@ func (r *envResolver) resolve(ctx context.Context, containerName string, env cor
 	}, nil
 }
 
-func (r *envResolver) resolveValueFrom(ctx context.Context, envID string, valueFrom *corev1.EnvVarSource) (string, bool, error) {
+func (r *envResolver) resolveValueFrom(ctx context.Context, envID string, valueFrom *atev1alpha1.EnvVarSource) (string, bool, error) {
 	if ref := valueFrom.ConfigMapKeyRef; ref != nil {
 		return r.resolveConfigMapKeyRef(ctx, envID, ref)
 	}
@@ -112,7 +112,7 @@ func (r *envResolver) resolveValueFrom(ctx context.Context, envID string, valueF
 	return "", false, status.Errorf(codes.FailedPrecondition, "%s uses unsupported valueFrom source; only configMapKeyRef and secretKeyRef are supported", envID)
 }
 
-func valueFromSourceCount(src *corev1.EnvVarSource) int {
+func valueFromSourceCount(src *atev1alpha1.EnvVarSource) int {
 	count := 0
 	if src.ConfigMapKeyRef != nil {
 		count++
@@ -120,19 +120,10 @@ func valueFromSourceCount(src *corev1.EnvVarSource) int {
 	if src.SecretKeyRef != nil {
 		count++
 	}
-	if src.FieldRef != nil {
-		count++
-	}
-	if src.ResourceFieldRef != nil {
-		count++
-	}
-	if src.FileKeyRef != nil {
-		count++
-	}
 	return count
 }
 
-func (r *envResolver) resolveConfigMapKeyRef(ctx context.Context, envID string, ref *corev1.ConfigMapKeySelector) (string, bool, error) {
+func (r *envResolver) resolveConfigMapKeyRef(ctx context.Context, envID string, ref *atev1alpha1.ConfigMapKeySelector) (string, bool, error) {
 	if ref.Name == "" {
 		return "", false, status.Errorf(codes.FailedPrecondition, "%s configMapKeyRef.name is required", envID)
 	}
@@ -165,7 +156,7 @@ func (r *envResolver) resolveConfigMapKeyRef(ctx context.Context, envID string, 
 	return value, true, nil
 }
 
-func (r *envResolver) resolveSecretKeyRef(ctx context.Context, envID string, ref *corev1.SecretKeySelector) (string, bool, error) {
+func (r *envResolver) resolveSecretKeyRef(ctx context.Context, envID string, ref *atev1alpha1.SecretKeySelector) (string, bool, error) {
 	if ref.Name == "" {
 		return "", false, status.Errorf(codes.FailedPrecondition, "%s secretKeyRef.name is required", envID)
 	}
