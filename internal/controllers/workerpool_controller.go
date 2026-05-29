@@ -130,10 +130,9 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool) *appsv1ac.Deployment
 		WithSpec(appsv1ac.DeploymentSpec().
 			WithReplicas(wp.Spec.Replicas).
 			WithSelector(metav1ac.LabelSelector().
-				WithMatchLabels(map[string]string{"app": wp.Name})).
+				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
 			WithTemplate(corev1ac.PodTemplateSpec().
 				WithLabels(map[string]string{
-					"app":                 wp.Name,
 					"ate.dev/worker-pool": wp.Name,
 				}).
 				WithSpec(corev1ac.PodSpec().

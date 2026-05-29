@@ -354,7 +354,7 @@ func createTemplate(t *testing.T, tc *testContext, ns string) {
 	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
 		{
 			Name:    "main",
-			Image:   "main",
+			Image:   "main@sha256:abc",
 			Command: []string{"/main"},
 		},
 	})
@@ -374,7 +374,7 @@ func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, cont
 					SHA256Hash: "a397be1abc2420d26bce6c70e6e2ff96c73aaaab929756c56f5e2089ea842b63",
 				},
 			},
-			PauseImage: "pause",
+			PauseImage: "pause@sha256:abc",
 			Containers: containers,
 			WorkerPoolRef: corev1.ObjectReference{
 				Namespace: ns,
@@ -827,7 +827,7 @@ func TestResumeActorResolvesValueFromEnv(t *testing.T) {
 	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
 		{
 			Name:    "main",
-			Image:   "main",
+			Image:   "main@sha256:abc",
 			Command: []string{"/main"},
 			Env: []atev1alpha1.EnvVar{
 				{
