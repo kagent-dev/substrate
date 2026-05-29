@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -37,7 +36,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -46,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
+	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	v1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -81,6 +80,11 @@ type RouterConfig struct {
 	TLSKeyPath        string
 	LogLevel          string
 	MetricsAddr       string
+
+	AteapiAuthMode   string
+	AteapiCAFile     string
+	AteapiServerName string
+	AteapiTokenFile  string
 }
 
 // RouterServer instantiates and coordinates runtime threads executing system modules.
@@ -154,7 +158,7 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().IntVar(&cfg.XdsPort, "port-xds", 18000, "TCP port listening for the xDS dynamic Envoy connections")
 	cmd.Flags().IntVar(&cfg.ExtprocPort, "port-extproc", 50051, "Listen port for the Envoy dynamic External Processing (ext_proc) server")
 	cmd.Flags().StringVar(&cfg.ExtprocAddr, "extproc-address", "127.0.0.1", "Host IP or address of the Envoy External Processing (ext_proc) server")
-	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", NetworkingModeEnvoy, "Networking proxy mode: envoy or agentgateway")
+	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", NetworkingModeAgentgateway, "Networking proxy mode: agentgateway or envoy")
 	cmd.Flags().StringVar(&cfg.EnvoyImage, "envoy-image", "envoyproxy/envoy:v1.30-latest", "Image URI used for dynamically launched router instances")
 	cmd.Flags().StringVar(&cfg.AgentgatewayImage, "agentgateway-image", "cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1", "Image URI used for Agentgateway router instances")
 	cmd.Flags().StringVar(&cfg.TemplatesFile, "actor-templates-file", "", "Path to offline YAML configuration file listing ActorTemplates")
@@ -164,12 +168,17 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.TLSCertPath, "tls-cert-path", "", "Path to the proxy TLS certificate file")
 	cmd.Flags().StringVar(&cfg.TLSKeyPath, "tls-key-path", "", "Path to the proxy TLS private key file")
 
+	cmd.Flags().StringVar(&cfg.AteapiAuthMode, "ateapi-auth", "mtls", "Client auth to ateapi: mtls|jwt. 'mtls' (default) dials with insecure TLS and relies on pod-projected mTLS credentials for identity. 'jwt' verifies the server cert and sends a Bearer SA token.")
+	cmd.Flags().StringVar(&cfg.AteapiCAFile, "ateapi-ca-file", "", "PEM file with CAs trusted to verify the ateapi server cert. Required for jwt.")
+	cmd.Flags().StringVar(&cfg.AteapiServerName, "ateapi-server-name", "", "SNI / hostname expected on the ateapi server cert. Optional.")
+	cmd.Flags().StringVar(&cfg.AteapiTokenFile, "ateapi-token-file", "", "Projected SA token file used as Bearer credential. Required for jwt.")
+
 	return cmd
 }
 
 func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
 	if cfg.NetworkingMode == "" {
-		cfg.NetworkingMode = NetworkingModeEnvoy
+		cfg.NetworkingMode = NetworkingModeAgentgateway
 	}
 
 	var k8sClient client.Client
@@ -203,11 +212,24 @@ func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
 		}
 	}
 
-	conn, err := grpc.NewClient(cfg.AteapiAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})))
+	authMode, err := ateapiauth.ParseMode(cfg.AteapiAuthMode)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --ateapi-auth: %w", err)
+	}
+	dialOpts, err := ateapiauth.DialOptions(ateapiauth.ClientConfig{
+		Mode:       authMode,
+		CAFile:     cfg.AteapiCAFile,
+		ServerName: cfg.AteapiServerName,
+		TokenFile:  cfg.AteapiTokenFile,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building ateapi dial options: %w", err)
+	}
+	conn, err := grpc.NewClient(cfg.AteapiAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish grpc channel to ateapi client: %w", err)
 	}
-	slog.Info("Connecting to ateapi", slog.String("address", cfg.AteapiAddr))
+	slog.Info("Connecting to ateapi", slog.String("address", cfg.AteapiAddr), slog.String("auth", string(authMode)))
 
 	apiClient := ateapipb.NewControlClient(conn)
 

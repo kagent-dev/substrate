@@ -271,6 +271,7 @@ ensure_crds() {
 deploy_crds() {
   log_step "deploy_crds"
   run_ko apply -f manifests/ate-install/generated
+  run_kubectl apply -f manifests/ate-install/role.yaml
 }
 
 deploy_ate_system() {
@@ -278,7 +279,7 @@ deploy_ate_system() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   ensure_apiserver_prerequisites
@@ -335,7 +336,7 @@ deploy_ate_apiserver() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   ensure_apiserver_prerequisites
@@ -349,7 +350,7 @@ deploy_atelet() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   local manifest=""
@@ -369,7 +370,7 @@ deploy_atenet() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   run_ko apply -f "$(atenet_router_manifest)"
