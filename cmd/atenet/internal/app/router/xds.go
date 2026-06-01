@@ -62,6 +62,7 @@ const (
 	IngressHTTPSListener = "ingress_https_listener"
 	RouteName            = "substrate_routes"
 	ClusterName          = "ate-cluster"
+	websocketUpgradeType = "websocket"
 )
 
 // XdsServer implements an aggregated discovery service server for dynamic Envoy router nodes.
@@ -287,6 +288,9 @@ func (x *XdsServer) buildRoutes() *routev3.RouteConfiguration {
 									Cluster: "dynamic_forward_proxy_cluster",
 								},
 								Timeout: durationpb.New(10 * time.Second),
+								UpgradeConfigs: []*routev3.RouteAction_UpgradeConfig{
+									{UpgradeType: websocketUpgradeType},
+								},
 							},
 						},
 					},
@@ -334,6 +338,10 @@ func (x *XdsServer) buildHcm(statPrefix string) *anypb.Any {
 	hcm, _ := anypb.New(&hcmv3.HttpConnectionManager{
 		StatPrefix:        statPrefix,
 		GenerateRequestId: &wrapperspb.BoolValue{Value: true},
+		UpgradeConfigs: []*hcmv3.HttpConnectionManager_UpgradeConfig{
+			{UpgradeType: websocketUpgradeType},
+		},
+		StreamIdleTimeout: durationpb.New(0),
 		AccessLog: []*accesslogv3.AccessLog{
 			{
 				Name: "envoy.access_loggers.stdout",
