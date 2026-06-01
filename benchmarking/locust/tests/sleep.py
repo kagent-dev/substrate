@@ -1,16 +1,16 @@
-#  Copyright 2026 Google LLC
+# Copyright 2026 Google LLC
 #
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from locust import User, task, events
 import time
@@ -40,7 +40,7 @@ class SleepUser(User):
 
     def on_start(self):
         update_user_count(1, self.__class__.__name__)
-        
+
         # Setup gRPC
         target = self.host.replace("http://", "").replace("https://", "")
         with open("/run/servicedns-ca/ca.crt", "rb") as f:
@@ -48,7 +48,7 @@ class SleepUser(User):
         options = [('grpc.ssl_target_name_override', 'api.ate-system.svc')]
         self.channel = grpc.secure_channel(target, grpc.ssl_channel_credentials(root_certificates=ca_cert), options=options)
         self.stub = ateapi_pb2_grpc.ControlStub(self.channel)
-        
+
         # Call CreateActor
         self.actor_id = f"sb-{uuid.uuid4()}"
         try:
@@ -71,7 +71,7 @@ class SleepUser(User):
             )
         except Exception as e:
             print(f"Failed to suspend actor {self.actor_id} during teardown: {e}")
-            
+
         # Delete actor
         try:
             self.stub.DeleteActor(
@@ -79,14 +79,14 @@ class SleepUser(User):
             )
         except Exception as e:
             print(f"Failed to delete actor {self.actor_id}: {e}")
-            
+
         self.channel.close()
 
     @task
     def workload_cycle(self):
         # Start with a half-second sleep
         time.sleep(0.5)
-        
+
         # Suspend
         start_time = time.time()
         with tracer.start_as_current_span("SuspendActor") as span:
