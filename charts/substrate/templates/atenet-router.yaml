@@ -120,7 +120,7 @@ spec:
 {{- end }}
       containers:
       - name: atenet-router
-        image: {{ .Values.images.atenet }}
+        image: {{ include "substrate.componentImage" (list "atenet" .) }}
         args:
         - "router"
         - "--standalone"

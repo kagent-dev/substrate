@@ -49,7 +49,7 @@ spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atelet" .) }}
       containers:
       - name: atelet
-        image: {{ .Values.images.atelet }}
+        image: {{ include "substrate.componentImage" (list "atelet" .) }}
         args:
         - --gcp-auth-for-image-pulls={{ .Values.atelet.gcpAuthForImagePulls }}
 {{- with .Values.atelet.extraArgs }}

@@ -53,7 +53,7 @@ spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-controller" .) }}
       containers:
       - name: ate-controller
-        image: {{ .Values.images.atecontroller }}
+        image: {{ include "substrate.componentImage" (list "atecontroller" .) }}
 {{- if eq .Values.auth.mode "jwt" }}
         args:
         - "--ateapi-auth=jwt"

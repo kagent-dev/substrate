@@ -62,7 +62,7 @@ spec:
 {{- end }}
       containers:
       - name: ate-api-server
-        image: {{ .Values.images.ateapi }}
+        image: {{ include "substrate.componentImage" (list "ateapi" .) }}
         args:
         - "--grpc-listen-addr=0.0.0.0:443"
 {{- if eq .Values.auth.mode "mtls" }}

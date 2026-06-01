@@ -30,6 +30,8 @@ helm template substrate "${CHART_DIR}" \
   --namespace ate-system \
   --set auth.mode=mtls \
   --set createNamespace=true \
+  --set image.registry=ko://github.com/agent-substrate/substrate/cmd \
+  --set image.tag="<none>" \
   > "${TMP_DIR}/all.yaml"
 
 # Split into per-source files so the directory structure mirrors the chart

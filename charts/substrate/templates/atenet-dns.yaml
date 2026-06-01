@@ -128,7 +128,7 @@ spec:
           successThreshold: 1
           failureThreshold: 3
       - name: dns-controller
-        image: {{ .Values.images.atenet }}
+        image: {{ include "substrate.componentImage" (list "atenet" .) }}
         args:
         - "dns"
         - "--log-level=debug"

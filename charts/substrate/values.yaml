@@ -78,13 +78,13 @@ ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 otel:
   endpoint: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
 
+image:
+  registry: ko://github.com/agent-substrate/substrate/cmd
+  tag: ""
+
 images:
-  ateapi: ko://github.com/agent-substrate/substrate/cmd/ateapi
-  atecontroller: ko://github.com/agent-substrate/substrate/cmd/atecontroller
-  atelet: ko://github.com/agent-substrate/substrate/cmd/atelet
-  atenet: ko://github.com/agent-substrate/substrate/cmd/atenet
-  podcertcontroller: ko://github.com/agent-substrate/substrate/cmd/podcertcontroller
   valkey: valkey/valkey:8.0
   envoy: envoyproxy/envoy:v1.30-latest
   coredns: coredns/coredns:1.11.1
   busybox: busybox:1.36
+

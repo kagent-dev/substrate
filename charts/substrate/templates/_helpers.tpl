@@ -24,6 +24,32 @@ colliding.
 {{- end -}}
 
 {{/*
+Build an image reference for a substrate component binary.
+
+Usage:
+  {{ include "substrate.componentImage" (list "ateapi" .) }}
+
+Produces  {image.registry}/{name}:{tag}  where tag is resolved as:
+  1. image.tag value, if set and not the sentinel "<none>"
+  2. .Chart.AppVersion, if image.tag is empty
+  3. no tag (no colon) when image.tag is the sentinel "<none>"
+
+The "<none>" sentinel is used by hack/render-manifests.sh so that ko:// refs
+are emitted without a tag, letting `ko resolve` supply the digest at build time.
+*/}}
+{{- define "substrate.componentImage" -}}
+{{- $name := index . 0 -}}
+{{- $ctx := index . 1 -}}
+{{- $registry := $ctx.Values.image.registry -}}
+{{- $tag := $ctx.Values.image.tag | default $ctx.Chart.AppVersion -}}
+{{- if ne $tag "<none>" -}}
+{{- printf "%s/%s:%s" $registry $name $tag -}}
+{{- else -}}
+{{- printf "%s/%s" $registry $name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate auth.mode at template time.
 */}}
 {{- define "substrate.validateAuthMode" -}}
