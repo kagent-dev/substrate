@@ -42,6 +42,8 @@ The `ActorTemplate` defines the code, environment, and state-management policies
 | `pauseImage` | `string` | **Required.** The image used for the sandbox root (e.g. `gcr.io/gke-release/pause`). |
 | `runsc` | `RunscConfig` | **Required.** Multi-platform configuration for fetching the gVisor binary. |
 
+Container environment variables support literal `value` entries, `valueFrom.configMapKeyRef`, and `valueFrom.secretKeyRef`. References are resolved by `ate-api-server` from the `ActorTemplate` namespace when an actor is resumed; the default install grants ate-api `get` access for ConfigMaps and Secrets so manifests do not need custom per-namespace RBAC. Other Kubernetes `valueFrom` sources are not supported yet. Since environment variables are part of process state, recreate the template snapshot when rotating a Secret or ConfigMap that an actor reads at startup.
+
 ### Workload Connectivity (Uniform DNS)
 Substrate has standardized on a **Uniform DNS Mesh**. You no longer need to define `SessionDiscovery` rules. Every actor created from a template is automatically reachable through the **Substrate Router** via its unique ID:
 

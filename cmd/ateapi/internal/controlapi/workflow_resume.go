@@ -16,8 +16,11 @@ package controlapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"log/slog"
 	"math/rand"
 	"time"
@@ -29,7 +32,9 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 )
 
 // ResumeInput holds the immutable parameters requested by the client.
@@ -40,8 +45,11 @@ type ResumeInput struct {
 
 // ResumeState holds the mutable state loaded and modified during execution.
 type ResumeState struct {
-	Actor         *ateapipb.Actor
-	ActorTemplate *atev1alpha1.ActorTemplate
+	Actor                 *ateapipb.Actor
+	ActorTemplate         *atev1alpha1.ActorTemplate
+	LastResolvedEnvSHA256 string
+	LastResolvedEnvAt     *timestamppb.Timestamp
+	SnapshotInvalidated   bool
 }
 
 type LoadActorForResumeStep struct {
@@ -157,7 +165,8 @@ func (s *AssignWorkerStep) findFreeWorker(workers []*ateapipb.Worker, workerPool
 }
 
 type CallAteletRestoreStep struct {
-	dialer *AteletDialer
+	dialer     *AteletDialer
+	kubeClient kubernetes.Interface
 }
 
 func (s *CallAteletRestoreStep) Name() string { return "CallAteletRestore" }
@@ -171,24 +180,15 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 	}
 	client := ateletpb.NewAteomHerderClient(ateletConn)
 
-	workloadSpec := &ateletpb.WorkloadSpec{
-		PauseImage: state.ActorTemplate.Spec.PauseImage,
+	workloadSpec, err := workloadSpecFromActorTemplate(ctx, s.kubeClient, state.ActorTemplate)
+	if err != nil {
+		return err
 	}
-	for _, ctr := range state.ActorTemplate.Spec.Containers {
-		ateletCtr := &ateletpb.Container{
-			Name:    ctr.Name,
-			Image:   ctr.Image,
-			Command: ctr.Command,
-		}
-		for _, env := range ctr.Env {
-			ateletEnv := &ateletpb.EnvEntry{
-				Name:  env.Name,
-				Value: env.Value,
-			}
-			ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
-		}
-		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)
-	}
+	state.LastResolvedEnvSHA256 = workloadSpecEnvSHA256(workloadSpec)
+	state.LastResolvedEnvAt = timestamppb.Now()
+	envChangedSinceSnapshot := state.Actor.GetLastSnapshot() != "" &&
+		state.Actor.GetLastResolvedEnvSha256() != "" &&
+		state.Actor.GetLastResolvedEnvSha256() != state.LastResolvedEnvSHA256
 
 	runscCfg := &ateletpb.RunscConfig{}
 	if state.ActorTemplate.Spec.Runsc.AMD64 != nil {
@@ -209,7 +209,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 		runscCfg.Authentication = authnCfg
 	}
 
-	if state.Actor.LastSnapshot != "" {
+	if state.Actor.LastSnapshot != "" && !envChangedSinceSnapshot {
 		slog.InfoContext(ctx, "Actor has snapshot; Restoring from snapshot")
 
 		req := &ateletpb.RestoreRequest{
@@ -226,6 +226,28 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 		if err != nil {
 			return fmt.Errorf("while restoring workload: %w", err)
 		}
+		return nil
+	} else if envChangedSinceSnapshot {
+		state.SnapshotInvalidated = true
+		slog.InfoContext(ctx, "Actor snapshot env hash differs from resolved env hash; Booting from ActorTemplate spec",
+			slog.String("actor_id", state.Actor.GetActorId()),
+			slog.String("old_env_sha256", state.Actor.GetLastResolvedEnvSha256()),
+			slog.String("new_env_sha256", state.LastResolvedEnvSHA256),
+		)
+		req := &ateletpb.RunRequest{
+			TargetAteomNamespace:   state.Actor.GetAteomPodNamespace(),
+			TargetAteomName:        state.Actor.GetAteomPodName(),
+			ActorTemplateNamespace: state.Actor.GetActorTemplateNamespace(),
+			ActorTemplateName:      state.Actor.GetActorTemplateName(),
+			ActorId:                state.Actor.GetActorId(),
+			Runsc:                  runscCfg,
+			Spec:                   workloadSpec,
+		}
+		_, err = client.Run(ctx, req)
+		if err != nil {
+			return fmt.Errorf("while creating workload from spec after env change invalidated snapshot: %w", err)
+		}
+
 		return nil
 	} else if state.ActorTemplate.Status.GoldenSnapshot != "" && !input.Boot {
 		slog.InfoContext(ctx, "Actor has no snapshot; ActorTemplate has golden snapshot; Restoring from golden snapshot")
@@ -270,6 +292,24 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 
 func (s *CallAteletRestoreStep) RetryBackoff() *wait.Backoff { return nil }
 
+func workloadSpecEnvSHA256(spec *ateletpb.WorkloadSpec) string {
+	h := sha256.New()
+	for _, ctr := range spec.GetContainers() {
+		writeHashString(h, ctr.GetName())
+		for _, env := range ctr.GetEnv() {
+			writeHashString(h, env.GetName())
+			writeHashString(h, env.GetValue())
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func writeHashString(h hash.Hash, s string) {
+	fmt.Fprintf(h, "%d:", len(s))
+	h.Write([]byte(s))
+	h.Write([]byte{0})
+}
+
 type FinalizeRunningStep struct {
 	store store.Interface
 }
@@ -285,6 +325,11 @@ func (s *FinalizeRunningStep) Execute(ctx context.Context, input *ResumeInput, s
 	}
 
 	latestActor.Status = ateapipb.Actor_STATUS_RUNNING
+	latestActor.LastResolvedEnvSha256 = state.LastResolvedEnvSHA256
+	latestActor.LastResolvedEnvAt = state.LastResolvedEnvAt
+	if state.SnapshotInvalidated {
+		latestActor.LastSnapshot = ""
+	}
 	err = s.store.UpdateActor(ctx, latestActor, latestActor.GetVersion())
 	if err == nil {
 		state.Actor = latestActor
