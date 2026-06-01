@@ -25,6 +25,7 @@ package ateapipb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -104,8 +105,16 @@ type Actor struct {
 	AteomPodIp             string                 `protobuf:"bytes,8,opt,name=ateom_pod_ip,json=ateomPodIp,proto3" json:"ateom_pod_ip,omitempty"`
 	LastSnapshot           string                 `protobuf:"bytes,9,opt,name=last_snapshot,json=lastSnapshot,proto3" json:"last_snapshot,omitempty"`
 	InProgressSnapshot     string                 `protobuf:"bytes,10,opt,name=in_progress_snapshot,json=inProgressSnapshot,proto3" json:"in_progress_snapshot,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// SHA256 fingerprint of the environment values resolved for the most recent
+	// successful resume. When resuming from a snapshot, these values are written
+	// to /proc/gvisor/spec_environ; already-running user processes keep their
+	// original in-memory environment until they explicitly refresh from that
+	// file.
+	LastResolvedEnvSha256 string `protobuf:"bytes,11,opt,name=last_resolved_env_sha256,json=lastResolvedEnvSha256,proto3" json:"last_resolved_env_sha256,omitempty"`
+	// Time at which last_resolved_env_sha256 was computed.
+	LastResolvedEnvAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=last_resolved_env_at,json=lastResolvedEnvAt,proto3" json:"last_resolved_env_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -206,6 +215,20 @@ func (x *Actor) GetInProgressSnapshot() string {
 		return x.InProgressSnapshot
 	}
 	return ""
+}
+
+func (x *Actor) GetLastResolvedEnvSha256() string {
+	if x != nil {
+		return x.LastResolvedEnvSha256
+	}
+	return ""
+}
+
+func (x *Actor) GetLastResolvedEnvAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastResolvedEnvAt
+	}
+	return nil
 }
 
 type GetActorRequest struct {
@@ -1255,7 +1278,7 @@ var File_ateapi_proto protoreflect.FileDescriptor
 
 const file_ateapi_proto_rawDesc = "" +
 	"\n" +
-	"\fateapi.proto\x12\x06ateapi\"\x9b\x04\n" +
+	"\fateapi.proto\x12\x06ateapi\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa1\x05\n" +
 	"\x05Actor\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x03R\aversion\x128\n" +
@@ -1268,7 +1291,9 @@ const file_ateapi_proto_rawDesc = "" +
 	"ateomPodIp\x12#\n" +
 	"\rlast_snapshot\x18\t \x01(\tR\flastSnapshot\x120\n" +
 	"\x14in_progress_snapshot\x18\n" +
-	" \x01(\tR\x12inProgressSnapshot\"v\n" +
+	" \x01(\tR\x12inProgressSnapshot\x127\n" +
+	"\x18last_resolved_env_sha256\x18\v \x01(\tR\x15lastResolvedEnvSha256\x12K\n" +
+	"\x14last_resolved_env_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\x11lastResolvedEnvAt\"v\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSTATUS_RESUMING\x10\x01\x12\x12\n" +
@@ -1363,63 +1388,65 @@ func file_ateapi_proto_rawDescGZIP() []byte {
 var file_ateapi_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_ateapi_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_ateapi_proto_goTypes = []any{
-	(Actor_Status)(0),            // 0: ateapi.Actor.Status
-	(*Actor)(nil),                // 1: ateapi.Actor
-	(*GetActorRequest)(nil),      // 2: ateapi.GetActorRequest
-	(*GetActorResponse)(nil),     // 3: ateapi.GetActorResponse
-	(*CreateActorRequest)(nil),   // 4: ateapi.CreateActorRequest
-	(*CreateActorResponse)(nil),  // 5: ateapi.CreateActorResponse
-	(*SuspendActorRequest)(nil),  // 6: ateapi.SuspendActorRequest
-	(*SuspendActorResponse)(nil), // 7: ateapi.SuspendActorResponse
-	(*ResumeActorRequest)(nil),   // 8: ateapi.ResumeActorRequest
-	(*ResumeActorResponse)(nil),  // 9: ateapi.ResumeActorResponse
-	(*DeleteActorRequest)(nil),   // 10: ateapi.DeleteActorRequest
-	(*DeleteActorResponse)(nil),  // 11: ateapi.DeleteActorResponse
-	(*ListWorkersRequest)(nil),   // 12: ateapi.ListWorkersRequest
-	(*ListWorkersResponse)(nil),  // 13: ateapi.ListWorkersResponse
-	(*ListActorsRequest)(nil),    // 14: ateapi.ListActorsRequest
-	(*ListActorsResponse)(nil),   // 15: ateapi.ListActorsResponse
-	(*Worker)(nil),               // 16: ateapi.Worker
-	(*DebugClearRequest)(nil),    // 17: ateapi.DebugClearRequest
-	(*DebugClearResponse)(nil),   // 18: ateapi.DebugClearResponse
-	(*MintJWTRequest)(nil),       // 19: ateapi.MintJWTRequest
-	(*MintJWTResponse)(nil),      // 20: ateapi.MintJWTResponse
-	(*MintCertRequest)(nil),      // 21: ateapi.MintCertRequest
-	(*MintCertResponse)(nil),     // 22: ateapi.MintCertResponse
+	(Actor_Status)(0),             // 0: ateapi.Actor.Status
+	(*Actor)(nil),                 // 1: ateapi.Actor
+	(*GetActorRequest)(nil),       // 2: ateapi.GetActorRequest
+	(*GetActorResponse)(nil),      // 3: ateapi.GetActorResponse
+	(*CreateActorRequest)(nil),    // 4: ateapi.CreateActorRequest
+	(*CreateActorResponse)(nil),   // 5: ateapi.CreateActorResponse
+	(*SuspendActorRequest)(nil),   // 6: ateapi.SuspendActorRequest
+	(*SuspendActorResponse)(nil),  // 7: ateapi.SuspendActorResponse
+	(*ResumeActorRequest)(nil),    // 8: ateapi.ResumeActorRequest
+	(*ResumeActorResponse)(nil),   // 9: ateapi.ResumeActorResponse
+	(*DeleteActorRequest)(nil),    // 10: ateapi.DeleteActorRequest
+	(*DeleteActorResponse)(nil),   // 11: ateapi.DeleteActorResponse
+	(*ListWorkersRequest)(nil),    // 12: ateapi.ListWorkersRequest
+	(*ListWorkersResponse)(nil),   // 13: ateapi.ListWorkersResponse
+	(*ListActorsRequest)(nil),     // 14: ateapi.ListActorsRequest
+	(*ListActorsResponse)(nil),    // 15: ateapi.ListActorsResponse
+	(*Worker)(nil),                // 16: ateapi.Worker
+	(*DebugClearRequest)(nil),     // 17: ateapi.DebugClearRequest
+	(*DebugClearResponse)(nil),    // 18: ateapi.DebugClearResponse
+	(*MintJWTRequest)(nil),        // 19: ateapi.MintJWTRequest
+	(*MintJWTResponse)(nil),       // 20: ateapi.MintJWTResponse
+	(*MintCertRequest)(nil),       // 21: ateapi.MintCertRequest
+	(*MintCertResponse)(nil),      // 22: ateapi.MintCertResponse
+	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
 }
 var file_ateapi_proto_depIdxs = []int32{
 	0,  // 0: ateapi.Actor.status:type_name -> ateapi.Actor.Status
-	1,  // 1: ateapi.GetActorResponse.actor:type_name -> ateapi.Actor
-	1,  // 2: ateapi.CreateActorResponse.actor:type_name -> ateapi.Actor
-	1,  // 3: ateapi.SuspendActorResponse.actor:type_name -> ateapi.Actor
-	1,  // 4: ateapi.ResumeActorResponse.actor:type_name -> ateapi.Actor
-	16, // 5: ateapi.ListWorkersResponse.workers:type_name -> ateapi.Worker
-	1,  // 6: ateapi.ListActorsResponse.actors:type_name -> ateapi.Actor
-	2,  // 7: ateapi.Control.GetActor:input_type -> ateapi.GetActorRequest
-	4,  // 8: ateapi.Control.CreateActor:input_type -> ateapi.CreateActorRequest
-	6,  // 9: ateapi.Control.SuspendActor:input_type -> ateapi.SuspendActorRequest
-	8,  // 10: ateapi.Control.ResumeActor:input_type -> ateapi.ResumeActorRequest
-	10, // 11: ateapi.Control.DeleteActor:input_type -> ateapi.DeleteActorRequest
-	12, // 12: ateapi.Control.ListWorkers:input_type -> ateapi.ListWorkersRequest
-	14, // 13: ateapi.Control.ListActors:input_type -> ateapi.ListActorsRequest
-	17, // 14: ateapi.Control.DebugClear:input_type -> ateapi.DebugClearRequest
-	19, // 15: ateapi.SessionIdentity.MintJWT:input_type -> ateapi.MintJWTRequest
-	21, // 16: ateapi.SessionIdentity.MintCert:input_type -> ateapi.MintCertRequest
-	3,  // 17: ateapi.Control.GetActor:output_type -> ateapi.GetActorResponse
-	5,  // 18: ateapi.Control.CreateActor:output_type -> ateapi.CreateActorResponse
-	7,  // 19: ateapi.Control.SuspendActor:output_type -> ateapi.SuspendActorResponse
-	9,  // 20: ateapi.Control.ResumeActor:output_type -> ateapi.ResumeActorResponse
-	11, // 21: ateapi.Control.DeleteActor:output_type -> ateapi.DeleteActorResponse
-	13, // 22: ateapi.Control.ListWorkers:output_type -> ateapi.ListWorkersResponse
-	15, // 23: ateapi.Control.ListActors:output_type -> ateapi.ListActorsResponse
-	18, // 24: ateapi.Control.DebugClear:output_type -> ateapi.DebugClearResponse
-	20, // 25: ateapi.SessionIdentity.MintJWT:output_type -> ateapi.MintJWTResponse
-	22, // 26: ateapi.SessionIdentity.MintCert:output_type -> ateapi.MintCertResponse
-	17, // [17:27] is the sub-list for method output_type
-	7,  // [7:17] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	23, // 1: ateapi.Actor.last_resolved_env_at:type_name -> google.protobuf.Timestamp
+	1,  // 2: ateapi.GetActorResponse.actor:type_name -> ateapi.Actor
+	1,  // 3: ateapi.CreateActorResponse.actor:type_name -> ateapi.Actor
+	1,  // 4: ateapi.SuspendActorResponse.actor:type_name -> ateapi.Actor
+	1,  // 5: ateapi.ResumeActorResponse.actor:type_name -> ateapi.Actor
+	16, // 6: ateapi.ListWorkersResponse.workers:type_name -> ateapi.Worker
+	1,  // 7: ateapi.ListActorsResponse.actors:type_name -> ateapi.Actor
+	2,  // 8: ateapi.Control.GetActor:input_type -> ateapi.GetActorRequest
+	4,  // 9: ateapi.Control.CreateActor:input_type -> ateapi.CreateActorRequest
+	6,  // 10: ateapi.Control.SuspendActor:input_type -> ateapi.SuspendActorRequest
+	8,  // 11: ateapi.Control.ResumeActor:input_type -> ateapi.ResumeActorRequest
+	10, // 12: ateapi.Control.DeleteActor:input_type -> ateapi.DeleteActorRequest
+	12, // 13: ateapi.Control.ListWorkers:input_type -> ateapi.ListWorkersRequest
+	14, // 14: ateapi.Control.ListActors:input_type -> ateapi.ListActorsRequest
+	17, // 15: ateapi.Control.DebugClear:input_type -> ateapi.DebugClearRequest
+	19, // 16: ateapi.SessionIdentity.MintJWT:input_type -> ateapi.MintJWTRequest
+	21, // 17: ateapi.SessionIdentity.MintCert:input_type -> ateapi.MintCertRequest
+	3,  // 18: ateapi.Control.GetActor:output_type -> ateapi.GetActorResponse
+	5,  // 19: ateapi.Control.CreateActor:output_type -> ateapi.CreateActorResponse
+	7,  // 20: ateapi.Control.SuspendActor:output_type -> ateapi.SuspendActorResponse
+	9,  // 21: ateapi.Control.ResumeActor:output_type -> ateapi.ResumeActorResponse
+	11, // 22: ateapi.Control.DeleteActor:output_type -> ateapi.DeleteActorResponse
+	13, // 23: ateapi.Control.ListWorkers:output_type -> ateapi.ListWorkersResponse
+	15, // 24: ateapi.Control.ListActors:output_type -> ateapi.ListActorsResponse
+	18, // 25: ateapi.Control.DebugClear:output_type -> ateapi.DebugClearResponse
+	20, // 26: ateapi.SessionIdentity.MintJWT:output_type -> ateapi.MintJWTResponse
+	22, // 27: ateapi.SessionIdentity.MintCert:output_type -> ateapi.MintCertResponse
+	18, // [18:28] is the sub-list for method output_type
+	8,  // [8:18] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_ateapi_proto_init() }

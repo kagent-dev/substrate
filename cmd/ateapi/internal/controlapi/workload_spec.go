@@ -142,9 +142,11 @@ func (r *envResolver) resolveConfigMapKeyRef(ctx context.Context, envID string, 
 			}
 			return "", false, status.Errorf(codes.FailedPrecondition, "%s references missing ConfigMap %s/%s", envID, r.namespace, ref.Name)
 		}
-		return "", false, fmt.Errorf("while resolving %s configMapKeyRef %s/%s: %w", envID, r.namespace, ref.Name, err)
+		return "", false, status.Errorf(codes.Internal, "while resolving %s configMapKeyRef %s/%s: %v", envID, r.namespace, ref.Name, err)
 	}
 
+	// Kubernetes ConfigMapKeyRef currently reads Data, not BinaryData. If that
+	// changes, revisit this behavior: https://github.com/kubernetes/kubernetes/issues/139132
 	value, ok := configMap.Data[ref.Key]
 	if !ok {
 		if isOptional(ref.Optional) {
@@ -175,7 +177,7 @@ func (r *envResolver) resolveSecretKeyRef(ctx context.Context, envID string, ref
 			}
 			return "", false, status.Errorf(codes.FailedPrecondition, "%s references missing secret %s/%s", envID, r.namespace, ref.Name)
 		}
-		return "", false, fmt.Errorf("while resolving %s secretKeyRef %s/%s: %w", envID, r.namespace, ref.Name, err)
+		return "", false, status.Errorf(codes.Internal, "while resolving %s secretKeyRef %s/%s: %v", envID, r.namespace, ref.Name, err)
 	}
 
 	value, ok := secret.Data[ref.Key]

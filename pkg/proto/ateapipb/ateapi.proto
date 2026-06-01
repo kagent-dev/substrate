@@ -18,6 +18,8 @@ syntax = "proto3";
 
 package ateapi;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
 
 
@@ -70,6 +72,16 @@ message Actor {
 
   string last_snapshot        = 9;
   string in_progress_snapshot = 10;
+
+  // SHA256 fingerprint of the environment values resolved for the most recent
+  // successful resume. When resuming from a snapshot, these values are written
+  // to /proc/gvisor/spec_environ; already-running user processes keep their
+  // original in-memory environment until they explicitly refresh from that
+  // file.
+  string last_resolved_env_sha256 = 11;
+
+  // Time at which last_resolved_env_sha256 was computed.
+  google.protobuf.Timestamp last_resolved_env_at = 12;
 }
 
 message GetActorRequest {

@@ -758,7 +758,7 @@ func TestResumeActor(t *testing.T) {
 			AteomPodIp:             "127.0.0.1",
 		},
 	}
-	if diff := cmp.Diff(want, getResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Actor{}, "version")); diff != "" {
+	if diff := cmp.Diff(want, getResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Actor{}, "version", "last_resolved_env_sha256", "last_resolved_env_at")); diff != "" {
 		t.Errorf("GetActor response mismatch (-want +got):\n%s", diff)
 	}
 
@@ -890,6 +890,135 @@ func TestResumeActorResolvesValueFromEnv(t *testing.T) {
 	}
 	if diff := cmp.Diff(wantEnv, gotEnv); diff != "" {
 		t.Errorf("resolved env mismatch (-want +got):\n%s", diff)
+	}
+
+	getResp, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+	if got, want := getResp.GetActor().GetLastResolvedEnvSha256(), workloadSpecEnvSHA256(restoreReq.GetSpec()); got != want {
+		t.Errorf("last_resolved_env_sha256 = %q, want %q", got, want)
+	}
+	if getResp.GetActor().GetLastResolvedEnvAt() == nil {
+		t.Errorf("expected last_resolved_env_at to be set")
+	}
+}
+
+func TestResumeActorEnvHashChangeInvalidatesSnapshot(t *testing.T) {
+	ns := namespaceForTest("ns-resume-env-drift")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	_, err := tc.k8sClient.CoreV1().ConfigMaps(ns).Create(context.Background(), &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "settings",
+			Namespace: ns,
+		},
+		Data: map[string]string{
+			"interval": "45",
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create ConfigMap: %v", err)
+	}
+
+	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
+		{
+			Name:    "main",
+			Image:   "main@sha256:abc",
+			Command: []string{"/main"},
+			Env: []atev1alpha1.EnvVar{
+				{
+					Name: "INTERVAL_SECONDS",
+					ValueFrom: &atev1alpha1.EnvVarSource{
+						ConfigMapKeyRef: &atev1alpha1.ConfigMapKeySelector{
+							Name: "settings",
+							Key:  "interval",
+						},
+					},
+				},
+			},
+		},
+	})
+	createWorkerPod(t, tc, ns, "worker-1", "node1")
+
+	_, err = tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+		ActorId:                "id1",
+	})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("initial ResumeActor failed: %v", err)
+	}
+	firstGet, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+	firstEnvHash := firstGet.GetActor().GetLastResolvedEnvSha256()
+	if firstEnvHash == "" {
+		t.Fatalf("expected first resume to record an env hash")
+	}
+
+	_, err = tc.client.SuspendActor(context.Background(), &ateapipb.SuspendActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("SuspendActor failed: %v", err)
+	}
+	suspended, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("GetActor after suspend failed: %v", err)
+	}
+	if suspended.GetActor().GetLastSnapshot() == "" {
+		t.Fatalf("expected suspend to record a snapshot")
+	}
+
+	cm, err := tc.k8sClient.CoreV1().ConfigMaps(ns).Get(context.Background(), "settings", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get ConfigMap: %v", err)
+	}
+	cm.Data["interval"] = "90"
+	if _, err := tc.k8sClient.CoreV1().ConfigMaps(ns).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to update ConfigMap: %v", err)
+	}
+
+	tc.fakeAtelet.Reset()
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("second ResumeActor failed: %v", err)
+	}
+	if !tc.fakeAtelet.RunCalled {
+		t.Fatalf("expected env hash change to boot from spec")
+	}
+	if tc.fakeAtelet.RestoreCalled {
+		t.Fatalf("expected env hash change to skip snapshot restore")
+	}
+
+	resumed, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{
+		ActorId: "id1",
+	})
+	if err != nil {
+		t.Fatalf("GetActor after second resume failed: %v", err)
+	}
+	if resumed.GetActor().GetLastResolvedEnvSha256() == firstEnvHash {
+		t.Fatalf("expected env hash to change after ConfigMap update")
+	}
+	if resumed.GetActor().GetLastSnapshot() != "" {
+		t.Fatalf("expected invalidated snapshot reference to be cleared, got %q", resumed.GetActor().GetLastSnapshot())
 	}
 }
 
@@ -1068,7 +1197,7 @@ func TestSuspendActor(t *testing.T) {
 		},
 	}
 
-	if diff := cmp.Diff(want, getResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Actor{}, "version"), protocmp.IgnoreFields(&ateapipb.Actor{}, "last_snapshot")); diff != "" {
+	if diff := cmp.Diff(want, getResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Actor{}, "version", "last_snapshot", "last_resolved_env_sha256", "last_resolved_env_at")); diff != "" {
 		t.Errorf("GetActor response mismatch (-want +got):\n%s", diff)
 	}
 
