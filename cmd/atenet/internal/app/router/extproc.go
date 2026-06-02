@@ -1,16 +1,16 @@
-//  Copyright 2026 Google LLC
+// Copyright 2026 Google LLC
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package router
 
@@ -124,8 +124,7 @@ func (s *ExtProcServer) handleRequestHeaders(
 
 	actorID, err := parseActorID(metadata.host)
 	if err != nil {
-		// Host is invalid, respond with 404.
-		return nil, metadata, "", notFoundErr
+		return nil, metadata, "", invalidHostErr(metadata.host, err)
 	}
 
 	slog.InfoContext(ctx, "ResumeActor", slog.String("actorID", actorID))
@@ -137,12 +136,13 @@ func (s *ExtProcServer) handleRequestHeaders(
 		slog.Any("err", err))
 
 	if err != nil {
-		return nil, metadata, "", fmt.Errorf("error resuming actor %s: %w", actorID, err)
+		return nil, metadata, "", mapResumeError(actorID, err)
 	}
 
 	workerIP := actor.GetAteomPodIp()
 	if ip := net.ParseIP(workerIP); ip == nil {
-		return nil, metadata, "", fmt.Errorf("actor %q did not have a valid IP %q", actorID, workerIP)
+		return nil, metadata, "", newReqError(envoy_type.StatusCode_InternalServerError,
+			"actor %q routing failed", actorID)
 	}
 
 	// TODO(bowei) -- handle more than port 80 on the actor.

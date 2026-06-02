@@ -1,16 +1,16 @@
-#  Copyright 2026 Google LLC
+# Copyright 2026 Google LLC
 #
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from locust import User, task, events
 from locust.exception import StopUser
@@ -47,7 +47,7 @@ class AteAPIUser(User):
 
     def on_start(self):
         update_user_count(1, self.__class__.__name__)
-        
+
         # Setup gRPC
         # Strip protocol prefix if present
         target = self.host.replace("http://", "").replace("https://", "")
@@ -56,7 +56,7 @@ class AteAPIUser(User):
         options = [('grpc.ssl_target_name_override', 'api.ate-system.svc')]
         self.channel = grpc.secure_channel(target, grpc.ssl_channel_credentials(root_certificates=ca_cert), options=options)
         self.stub = ateapi_pb2_grpc.ControlStub(self.channel)
-        
+
         # Call CreateActor
         self.actor_id = str(uuid.uuid4())
         try:
@@ -69,7 +69,7 @@ class AteAPIUser(User):
             )
         except Exception as e:
             print(f"Failed to create actor: {e}")
-        
+
     def on_stop(self):
         update_user_count(-1, self.__class__.__name__)
         try:
