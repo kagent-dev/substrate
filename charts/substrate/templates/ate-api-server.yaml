@@ -87,6 +87,7 @@ spec:
         - "--client-jwt-audience={{ .Values.auth.jwt.audience }}"
         - "--session-id-jwt-pool=/run/session-id-jwt-pool/pool.json"
         - "--session-id-ca-pool=/run/session-id-ca-pool/pool.json"
+        - "--client-jwt-ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 {{- end }}
         env:
         - name: OTEL_EXPORTER_OTLP_ENDPOINT

@@ -81,7 +81,8 @@ apply_chart() {
   local rendered
   rendered=$(helm template substrate "${ROOT}/charts/substrate" \
     --namespace "${NS}" \
-    -f "${ROOT}/hack/values-kind-jwt.yaml")
+    -f "${ROOT}/hack/values-kind-jwt.yaml" \
+    --set 'image.tag=<none>')
 
   # ko resolve replaces ko:// refs with built+pushed image refs.
   echo "${rendered}" | bash "${ROOT}/hack/run-tool.sh" ko resolve -f - \

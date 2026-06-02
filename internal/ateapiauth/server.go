@@ -24,6 +24,7 @@ package ateapiauth
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -62,6 +63,11 @@ type ServerConfig struct {
 	Mode     Mode
 	Issuer   string // OIDC issuer URL for JWT verification
 	Audience string // expected audience claim for JWT verification
+
+	// HTTPClient is used for OIDC discovery and JWKS fetches. Nil uses http.DefaultClient.
+	// Set this to a client that trusts the cluster CA when verifying tokens issued by
+	// the in-cluster Kubernetes API server (https://kubernetes.default.svc.cluster.local).
+	HTTPClient *http.Client
 
 	// Now returns the current time; nil uses time.Now. Exposed for tests.
 	Now func() time.Time
@@ -123,7 +129,7 @@ func authenticate(ctx context.Context, cfg ServerConfig) (context.Context, error
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
-	claims, err := k8sjwt.Verify(ctx, bearer, cfg.Issuer, cfg.Audience, now())
+	claims, err := k8sjwt.Verify(ctx, cfg.HTTPClient, bearer, cfg.Issuer, cfg.Audience, now())
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid bearer token: %v", err)
 	}

@@ -1,0 +1,26 @@
+{{- if eq .Values.auth.mode "jwt" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "substrate.fullname" (list "oidc-discovery-viewer" .) }}
+rules:
+- nonResourceURLs:
+  - /.well-known/openid-configuration
+  - /openid/v1/jwks
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "substrate.fullname" (list "oidc-discovery-viewer" .) }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "substrate.fullname" (list "ate-api-server" .) }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "substrate.fullname" (list "oidc-discovery-viewer" .) }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

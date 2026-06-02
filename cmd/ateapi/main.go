@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/controlapi"
@@ -66,8 +68,9 @@ var (
 	sessionIDCAPoolFile = pflag.String("session-id-ca-pool", "", "The file that contains the CA pool for signing session JWTs")
 	workerpoolCACerts   = pflag.String("workerpool-ca-certs", "", "The file that contains the CA for verifying workerpool client certificates.")
 
-	showVersion = pflag.Bool("version", false, "Print version and exit.")
-	authMode    = pflag.String("auth-mode", "mtls", "Auth mode for incoming gRPC: mtls|jwt. 'mtls' (default) relies on transport-level mTLS for client identity. 'jwt' additionally requires a Kubernetes ServiceAccount Bearer token on every RPC.")
+	showVersion     = pflag.Bool("version", false, "Print version and exit.")
+	authMode        = pflag.String("auth-mode", "mtls", "Auth mode for incoming gRPC: mtls|jwt. 'mtls' (default) relies on transport-level mTLS for client identity. 'jwt' additionally requires a Kubernetes ServiceAccount Bearer token on every RPC.")
+	clientJWTCAFile = pflag.String("client-jwt-ca-cert", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt", "CA cert file used to verify TLS when fetching the OIDC discovery document and JWKS for JWT authentication. Defaults to the in-cluster service account CA.")
 )
 
 func main() {
@@ -141,7 +144,9 @@ func main() {
 	dialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer())
 	sm := controlapi.NewService(redisPersistence, actorTemplateLister, dialer, clientset)
 
-	sessionIdentitySrv := sessionidentity.New(*clientJWTIssuer, *clientJWTAudience, *sessionIDJWTPoolFile, *sessionIDCAPoolFile, *workerpoolCACerts)
+	jwtHTTPClient := buildJWTHTTPClient(ctx, *clientJWTCAFile)
+
+	sessionIdentitySrv := sessionidentity.New(*clientJWTIssuer, *clientJWTAudience, *sessionIDJWTPoolFile, *sessionIDCAPoolFile, *workerpoolCACerts, jwtHTTPClient)
 
 	lisCfg := &net.ListenConfig{}
 	lis, err := lisCfg.Listen(ctx, "tcp", *listenAddr)
@@ -150,9 +155,10 @@ func main() {
 	}
 
 	authCfg := ateapiauth.ServerConfig{
-		Mode:     authModeParsed,
-		Issuer:   *clientJWTIssuer,
-		Audience: *clientJWTAudience,
+		Mode:       authModeParsed,
+		Issuer:     *clientJWTIssuer,
+		Audience:   *clientJWTAudience,
+		HTTPClient: jwtHTTPClient,
 	}
 
 	mux := grpc.NewServer(
@@ -349,4 +355,49 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		ClientAuth:     tls.VerifyClientCertIfGiven,
 		ClientCAs:      clientCAs,
 	}), nil
+}
+
+const saTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+// buildJWTHTTPClient returns an *http.Client that trusts caFile for TLS
+// verification and injects the pod's ServiceAccount Bearer token, used when
+// fetching the OIDC discovery document and JWKS from the in-cluster Kubernetes
+// API server. Returns nil (use http.DefaultClient) if caFile is empty or unreadable.
+func buildJWTHTTPClient(ctx context.Context, caFile string) *http.Client {
+	if caFile == "" {
+		return nil
+	}
+	ca, err := os.ReadFile(caFile)
+	if err != nil {
+		slog.WarnContext(ctx, "Could not read JWT CA cert file; OIDC discovery will use system trust", slog.String("path", caFile), slog.Any("err", err))
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(ca) {
+		slog.WarnContext(ctx, "Could not parse JWT CA cert file; OIDC discovery will use system trust", slog.String("path", caFile))
+		return nil
+	}
+	return &http.Client{
+		Transport: &saTokenTransport{
+			base: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: pool},
+			},
+		},
+	}
+}
+
+// saTokenTransport injects the pod's ServiceAccount Bearer token on every
+// request. Reads the token file fresh on each request so token rotation is
+// handled automatically.
+type saTokenTransport struct {
+	base http.RoundTripper
+}
+
+func (t *saTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	token, err := os.ReadFile(saTokenFile)
+	if err == nil && len(token) > 0 {
+		req = req.Clone(req.Context())
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
+	}
+	return t.base.RoundTrip(req)
 }
