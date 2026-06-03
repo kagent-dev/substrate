@@ -53,6 +53,11 @@ jobs:
             fi
           fi
           echo "value=${TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs.create_release }}" == "true" ]]; then
+            echo "tags=${TAG},latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${TAG}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -78,7 +83,7 @@ jobs:
           KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
         run: |
           ./hack/run-tool.sh ko build \
-            --tags "${{ steps.tag.outputs.value }},latest" \
+            --tags "${{ steps.tag.outputs.tags }}" \
             --platform linux/amd64,linux/arm64 \
             --bare \
             ./cmd/ateapi \
