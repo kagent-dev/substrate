@@ -30,12 +30,6 @@ const (
 	PhaseFailed            PhaseType = "Failed"
 )
 
-type EnvVar struct {
-	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
-	// +optional
-	Value string `json:"value,omitempty" protobuf:"bytes,2,opt,name=value"`
-}
-
 // A single application container that you want to run within a WorkerPool.
 type Container struct {
 	// Name of the container.
