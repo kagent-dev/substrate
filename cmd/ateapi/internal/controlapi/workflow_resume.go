@@ -171,24 +171,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 	}
 	client := ateletpb.NewAteomHerderClient(ateletConn)
 
-	workloadSpec := &ateletpb.WorkloadSpec{
-		PauseImage: state.ActorTemplate.Spec.PauseImage,
-	}
-	for _, ctr := range state.ActorTemplate.Spec.Containers {
-		ateletCtr := &ateletpb.Container{
-			Name:    ctr.Name,
-			Image:   ctr.Image,
-			Command: ctr.Command,
-		}
-		for _, env := range ctr.Env {
-			ateletEnv := &ateletpb.EnvEntry{
-				Name:  env.Name,
-				Value: env.Value,
-			}
-			ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
-		}
-		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)
-	}
+	workloadSpec := buildAteletWorkloadSpec(state.ActorTemplate)
 
 	runscCfg := &ateletpb.RunscConfig{}
 	if state.ActorTemplate.Spec.Runsc.AMD64 != nil {

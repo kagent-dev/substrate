@@ -53,3 +53,32 @@ spec:
     name: counter
   snapshotsConfig:
     location: gs://${BUCKET_NAME}/ate-demo-counter/
+  egressPolicy:
+    defaultAction: Deny
+    allow:
+    - name: kube-dns
+      to:
+      - ipBlock:
+          cidr: 10.96.0.10/32
+      ports:
+      - port: 53
+        protocol: UDP
+      - port: 53
+        protocol: TCP
+    - name: example-http
+      to:
+      - host: example.com
+      ports:
+      - port: 80
+        protocol: TCP
+    - name: example-https
+      to:
+      - host: example.com
+      ports:
+      - port: 443
+        protocol: TCP
+      tls:
+        mode: Require
+        required: true
+    audit:
+      logs: true

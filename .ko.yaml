@@ -19,5 +19,6 @@ defaultPlatforms:
   - linux/arm64
 
 baseImageOverrides:
+  github.com/agent-substrate/substrate/cmd/ateom-gvisor: cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1
   github.com/agent-substrate/substrate/demos/sandbox: alpine
   github.com/agent-substrate/substrate/demos/agent-secret: alpine

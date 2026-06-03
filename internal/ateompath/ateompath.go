@@ -48,6 +48,21 @@ func AteomPath(ateomNamespace, ateomName string) string {
 	)
 }
 
+func EgressAgentgatewayDir(ateomNamespace, ateomName string) string {
+	return filepath.Join(
+		AteomPath(ateomNamespace, ateomName),
+		"egress-agentgateway",
+	)
+}
+
+func EgressAgentgatewayConfigPath(ateomNamespace, ateomName string) string {
+	return filepath.Join(EgressAgentgatewayDir(ateomNamespace, ateomName), "config.yaml")
+}
+
+func EgressAgentgatewayTLSDir(ateomNamespace, ateomName string) string {
+	return filepath.Join(EgressAgentgatewayDir(ateomNamespace, ateomName), "tls")
+}
+
 func AteomSocketPath(ateomNamespace, ateomName string) string {
 	return filepath.Join(
 		AteomPath(ateomNamespace, ateomName),

@@ -115,6 +115,7 @@ func (x *RunWorkloadRequest) GetSpec() *WorkloadSpec {
 type WorkloadSpec struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Containers    []*Container           `protobuf:"bytes,1,rep,name=containers,proto3" json:"containers,omitempty"`
+	EgressPolicy  *EgressPolicy          `protobuf:"bytes,2,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -152,6 +153,13 @@ func (*WorkloadSpec) Descriptor() ([]byte, []int) {
 func (x *WorkloadSpec) GetContainers() []*Container {
 	if x != nil {
 		return x.Containers
+	}
+	return nil
+}
+
+func (x *WorkloadSpec) GetEgressPolicy() *EgressPolicy {
+	if x != nil {
+		return x.EgressPolicy
 	}
 	return nil
 }
@@ -200,6 +208,594 @@ func (x *Container) GetName() string {
 	return ""
 }
 
+type EgressPolicy struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DefaultAction string                 `protobuf:"bytes,1,opt,name=default_action,json=defaultAction,proto3" json:"default_action,omitempty"`
+	Allow         []*EgressPolicyRule    `protobuf:"bytes,2,rep,name=allow,proto3" json:"allow,omitempty"`
+	Deny          []*EgressPolicyRule    `protobuf:"bytes,3,rep,name=deny,proto3" json:"deny,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressPolicy) Reset() {
+	*x = EgressPolicy{}
+	mi := &file_ateom_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressPolicy) ProtoMessage() {}
+
+func (x *EgressPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressPolicy.ProtoReflect.Descriptor instead.
+func (*EgressPolicy) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *EgressPolicy) GetDefaultAction() string {
+	if x != nil {
+		return x.DefaultAction
+	}
+	return ""
+}
+
+func (x *EgressPolicy) GetAllow() []*EgressPolicyRule {
+	if x != nil {
+		return x.Allow
+	}
+	return nil
+}
+
+func (x *EgressPolicy) GetDeny() []*EgressPolicyRule {
+	if x != nil {
+		return x.Deny
+	}
+	return nil
+}
+
+type EgressPolicyRule struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	To            []*EgressPolicyDestination `protobuf:"bytes,1,rep,name=to,proto3" json:"to,omitempty"`
+	Ports         []*EgressPort              `protobuf:"bytes,2,rep,name=ports,proto3" json:"ports,omitempty"`
+	Tls           *EgressTLSPolicy           `protobuf:"bytes,3,opt,name=tls,proto3" json:"tls,omitempty"`
+	Credentials   *EgressCredentialPolicy    `protobuf:"bytes,4,opt,name=credentials,proto3" json:"credentials,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressPolicyRule) Reset() {
+	*x = EgressPolicyRule{}
+	mi := &file_ateom_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressPolicyRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressPolicyRule) ProtoMessage() {}
+
+func (x *EgressPolicyRule) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressPolicyRule.ProtoReflect.Descriptor instead.
+func (*EgressPolicyRule) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *EgressPolicyRule) GetTo() []*EgressPolicyDestination {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+func (x *EgressPolicyRule) GetPorts() []*EgressPort {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *EgressPolicyRule) GetTls() *EgressTLSPolicy {
+	if x != nil {
+		return x.Tls
+	}
+	return nil
+}
+
+func (x *EgressPolicyRule) GetCredentials() *EgressCredentialPolicy {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
+}
+
+type EgressPolicyDestination struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Cidr          string                 `protobuf:"bytes,2,opt,name=cidr,proto3" json:"cidr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressPolicyDestination) Reset() {
+	*x = EgressPolicyDestination{}
+	mi := &file_ateom_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressPolicyDestination) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressPolicyDestination) ProtoMessage() {}
+
+func (x *EgressPolicyDestination) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressPolicyDestination.ProtoReflect.Descriptor instead.
+func (*EgressPolicyDestination) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *EgressPolicyDestination) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *EgressPolicyDestination) GetCidr() string {
+	if x != nil {
+		return x.Cidr
+	}
+	return ""
+}
+
+type EgressPort struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Port          uint32                 `protobuf:"varint,1,opt,name=port,proto3" json:"port,omitempty"`
+	Protocol      string                 `protobuf:"bytes,2,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressPort) Reset() {
+	*x = EgressPort{}
+	mi := &file_ateom_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressPort) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressPort) ProtoMessage() {}
+
+func (x *EgressPort) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressPort.ProtoReflect.Descriptor instead.
+func (*EgressPort) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *EgressPort) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *EgressPort) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+type EgressTLSPolicy struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Mode          string                    `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
+	Required      bool                      `protobuf:"varint,2,opt,name=required,proto3" json:"required,omitempty"`
+	Intercept     *EgressTLSInterceptPolicy `protobuf:"bytes,3,opt,name=intercept,proto3" json:"intercept,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressTLSPolicy) Reset() {
+	*x = EgressTLSPolicy{}
+	mi := &file_ateom_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressTLSPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressTLSPolicy) ProtoMessage() {}
+
+func (x *EgressTLSPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressTLSPolicy.ProtoReflect.Descriptor instead.
+func (*EgressTLSPolicy) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *EgressTLSPolicy) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *EgressTLSPolicy) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *EgressTLSPolicy) GetIntercept() *EgressTLSInterceptPolicy {
+	if x != nil {
+		return x.Intercept
+	}
+	return nil
+}
+
+type EgressTLSInterceptPolicy struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	IssuerSecretRef  *SecretReference       `protobuf:"bytes,1,opt,name=issuer_secret_ref,json=issuerSecretRef,proto3" json:"issuer_secret_ref,omitempty"`
+	ValidateUpstream bool                   `protobuf:"varint,2,opt,name=validate_upstream,json=validateUpstream,proto3" json:"validate_upstream,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *EgressTLSInterceptPolicy) Reset() {
+	*x = EgressTLSInterceptPolicy{}
+	mi := &file_ateom_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressTLSInterceptPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressTLSInterceptPolicy) ProtoMessage() {}
+
+func (x *EgressTLSInterceptPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressTLSInterceptPolicy.ProtoReflect.Descriptor instead.
+func (*EgressTLSInterceptPolicy) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *EgressTLSInterceptPolicy) GetIssuerSecretRef() *SecretReference {
+	if x != nil {
+		return x.IssuerSecretRef
+	}
+	return nil
+}
+
+func (x *EgressTLSInterceptPolicy) GetValidateUpstream() bool {
+	if x != nil {
+		return x.ValidateUpstream
+	}
+	return false
+}
+
+type EgressCredentialPolicy struct {
+	state         protoimpl.MessageState       `protogen:"open.v1"`
+	Inject        []*EgressCredentialInjection `protobuf:"bytes,1,rep,name=inject,proto3" json:"inject,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressCredentialPolicy) Reset() {
+	*x = EgressCredentialPolicy{}
+	mi := &file_ateom_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressCredentialPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressCredentialPolicy) ProtoMessage() {}
+
+func (x *EgressCredentialPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressCredentialPolicy.ProtoReflect.Descriptor instead.
+func (*EgressCredentialPolicy) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *EgressCredentialPolicy) GetInject() []*EgressCredentialInjection {
+	if x != nil {
+		return x.Inject
+	}
+	return nil
+}
+
+type EgressCredentialInjection struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Header        string                     `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
+	ValueFrom     *EgressCredentialValueFrom `protobuf:"bytes,2,opt,name=value_from,json=valueFrom,proto3" json:"value_from,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressCredentialInjection) Reset() {
+	*x = EgressCredentialInjection{}
+	mi := &file_ateom_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressCredentialInjection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressCredentialInjection) ProtoMessage() {}
+
+func (x *EgressCredentialInjection) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressCredentialInjection.ProtoReflect.Descriptor instead.
+func (*EgressCredentialInjection) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *EgressCredentialInjection) GetHeader() string {
+	if x != nil {
+		return x.Header
+	}
+	return ""
+}
+
+func (x *EgressCredentialInjection) GetValueFrom() *EgressCredentialValueFrom {
+	if x != nil {
+		return x.ValueFrom
+	}
+	return nil
+}
+
+type EgressCredentialValueFrom struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SecretKeyRef  *SecretKeySelector     `protobuf:"bytes,1,opt,name=secret_key_ref,json=secretKeyRef,proto3" json:"secret_key_ref,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressCredentialValueFrom) Reset() {
+	*x = EgressCredentialValueFrom{}
+	mi := &file_ateom_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressCredentialValueFrom) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressCredentialValueFrom) ProtoMessage() {}
+
+func (x *EgressCredentialValueFrom) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressCredentialValueFrom.ProtoReflect.Descriptor instead.
+func (*EgressCredentialValueFrom) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *EgressCredentialValueFrom) GetSecretKeyRef() *SecretKeySelector {
+	if x != nil {
+		return x.SecretKeyRef
+	}
+	return nil
+}
+
+type SecretReference struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretReference) Reset() {
+	*x = SecretReference{}
+	mi := &file_ateom_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretReference) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretReference) ProtoMessage() {}
+
+func (x *SecretReference) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretReference.ProtoReflect.Descriptor instead.
+func (*SecretReference) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SecretReference) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SecretReference) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+type SecretKeySelector struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SecretKeySelector) Reset() {
+	*x = SecretKeySelector{}
+	mi := &file_ateom_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecretKeySelector) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecretKeySelector) ProtoMessage() {}
+
+func (x *SecretKeySelector) ProtoReflect() protoreflect.Message {
+	mi := &file_ateom_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecretKeySelector.ProtoReflect.Descriptor instead.
+func (*SecretKeySelector) Descriptor() ([]byte, []int) {
+	return file_ateom_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SecretKeySelector) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SecretKeySelector) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
 type RunWorkloadResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -208,7 +804,7 @@ type RunWorkloadResponse struct {
 
 func (x *RunWorkloadResponse) Reset() {
 	*x = RunWorkloadResponse{}
-	mi := &file_ateom_proto_msgTypes[3]
+	mi := &file_ateom_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +816,7 @@ func (x *RunWorkloadResponse) String() string {
 func (*RunWorkloadResponse) ProtoMessage() {}
 
 func (x *RunWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ateom_proto_msgTypes[3]
+	mi := &file_ateom_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +829,7 @@ func (x *RunWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*RunWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_ateom_proto_rawDescGZIP(), []int{3}
+	return file_ateom_proto_rawDescGZIP(), []int{14}
 }
 
 type CheckpointWorkloadRequest struct {
@@ -258,7 +854,7 @@ type CheckpointWorkloadRequest struct {
 
 func (x *CheckpointWorkloadRequest) Reset() {
 	*x = CheckpointWorkloadRequest{}
-	mi := &file_ateom_proto_msgTypes[4]
+	mi := &file_ateom_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +866,7 @@ func (x *CheckpointWorkloadRequest) String() string {
 func (*CheckpointWorkloadRequest) ProtoMessage() {}
 
 func (x *CheckpointWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ateom_proto_msgTypes[4]
+	mi := &file_ateom_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +879,7 @@ func (x *CheckpointWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*CheckpointWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_ateom_proto_rawDescGZIP(), []int{4}
+	return file_ateom_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CheckpointWorkloadRequest) GetActorTemplateNamespace() string {
@@ -336,7 +932,7 @@ type CheckpointWorkloadResponse struct {
 
 func (x *CheckpointWorkloadResponse) Reset() {
 	*x = CheckpointWorkloadResponse{}
-	mi := &file_ateom_proto_msgTypes[5]
+	mi := &file_ateom_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -348,7 +944,7 @@ func (x *CheckpointWorkloadResponse) String() string {
 func (*CheckpointWorkloadResponse) ProtoMessage() {}
 
 func (x *CheckpointWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ateom_proto_msgTypes[5]
+	mi := &file_ateom_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -361,7 +957,7 @@ func (x *CheckpointWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*CheckpointWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_ateom_proto_rawDescGZIP(), []int{5}
+	return file_ateom_proto_rawDescGZIP(), []int{16}
 }
 
 type RestoreWorkloadRequest struct {
@@ -379,7 +975,7 @@ type RestoreWorkloadRequest struct {
 
 func (x *RestoreWorkloadRequest) Reset() {
 	*x = RestoreWorkloadRequest{}
-	mi := &file_ateom_proto_msgTypes[6]
+	mi := &file_ateom_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -391,7 +987,7 @@ func (x *RestoreWorkloadRequest) String() string {
 func (*RestoreWorkloadRequest) ProtoMessage() {}
 
 func (x *RestoreWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ateom_proto_msgTypes[6]
+	mi := &file_ateom_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -404,7 +1000,7 @@ func (x *RestoreWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*RestoreWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_ateom_proto_rawDescGZIP(), []int{6}
+	return file_ateom_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RestoreWorkloadRequest) GetActorTemplateNamespace() string {
@@ -457,7 +1053,7 @@ type RestoreWorkloadResponse struct {
 
 func (x *RestoreWorkloadResponse) Reset() {
 	*x = RestoreWorkloadResponse{}
-	mi := &file_ateom_proto_msgTypes[7]
+	mi := &file_ateom_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -469,7 +1065,7 @@ func (x *RestoreWorkloadResponse) String() string {
 func (*RestoreWorkloadResponse) ProtoMessage() {}
 
 func (x *RestoreWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ateom_proto_msgTypes[7]
+	mi := &file_ateom_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -482,7 +1078,7 @@ func (x *RestoreWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*RestoreWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_ateom_proto_rawDescGZIP(), []int{7}
+	return file_ateom_proto_rawDescGZIP(), []int{18}
 }
 
 var File_ateom_proto protoreflect.FileDescriptor
@@ -496,13 +1092,51 @@ const file_ateom_proto_rawDesc = "" +
 	"\bactor_id\x18\x03 \x01(\tR\aactorId\x12\x1d\n" +
 	"\n" +
 	"runsc_path\x18\x04 \x01(\tR\trunscPath\x12'\n" +
-	"\x04spec\x18\x05 \x01(\v2\x13.ateom.WorkloadSpecR\x04spec\"@\n" +
+	"\x04spec\x18\x05 \x01(\v2\x13.ateom.WorkloadSpecR\x04spec\"z\n" +
 	"\fWorkloadSpec\x120\n" +
 	"\n" +
 	"containers\x18\x01 \x03(\v2\x10.ateom.ContainerR\n" +
-	"containers\"\x1f\n" +
+	"containers\x128\n" +
+	"\regress_policy\x18\x02 \x01(\v2\x13.ateom.EgressPolicyR\fegressPolicy\"\x1f\n" +
 	"\tContainer\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x15\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x91\x01\n" +
+	"\fEgressPolicy\x12%\n" +
+	"\x0edefault_action\x18\x01 \x01(\tR\rdefaultAction\x12-\n" +
+	"\x05allow\x18\x02 \x03(\v2\x17.ateom.EgressPolicyRuleR\x05allow\x12+\n" +
+	"\x04deny\x18\x03 \x03(\v2\x17.ateom.EgressPolicyRuleR\x04deny\"\xd6\x01\n" +
+	"\x10EgressPolicyRule\x12.\n" +
+	"\x02to\x18\x01 \x03(\v2\x1e.ateom.EgressPolicyDestinationR\x02to\x12'\n" +
+	"\x05ports\x18\x02 \x03(\v2\x11.ateom.EgressPortR\x05ports\x12(\n" +
+	"\x03tls\x18\x03 \x01(\v2\x16.ateom.EgressTLSPolicyR\x03tls\x12?\n" +
+	"\vcredentials\x18\x04 \x01(\v2\x1d.ateom.EgressCredentialPolicyR\vcredentials\"A\n" +
+	"\x17EgressPolicyDestination\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04cidr\x18\x02 \x01(\tR\x04cidr\"<\n" +
+	"\n" +
+	"EgressPort\x12\x12\n" +
+	"\x04port\x18\x01 \x01(\rR\x04port\x12\x1a\n" +
+	"\bprotocol\x18\x02 \x01(\tR\bprotocol\"\x80\x01\n" +
+	"\x0fEgressTLSPolicy\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\x12\x1a\n" +
+	"\brequired\x18\x02 \x01(\bR\brequired\x12=\n" +
+	"\tintercept\x18\x03 \x01(\v2\x1f.ateom.EgressTLSInterceptPolicyR\tintercept\"\x8b\x01\n" +
+	"\x18EgressTLSInterceptPolicy\x12B\n" +
+	"\x11issuer_secret_ref\x18\x01 \x01(\v2\x16.ateom.SecretReferenceR\x0fissuerSecretRef\x12+\n" +
+	"\x11validate_upstream\x18\x02 \x01(\bR\x10validateUpstream\"R\n" +
+	"\x16EgressCredentialPolicy\x128\n" +
+	"\x06inject\x18\x01 \x03(\v2 .ateom.EgressCredentialInjectionR\x06inject\"t\n" +
+	"\x19EgressCredentialInjection\x12\x16\n" +
+	"\x06header\x18\x01 \x01(\tR\x06header\x12?\n" +
+	"\n" +
+	"value_from\x18\x02 \x01(\v2 .ateom.EgressCredentialValueFromR\tvalueFrom\"[\n" +
+	"\x19EgressCredentialValueFrom\x12>\n" +
+	"\x0esecret_key_ref\x18\x01 \x01(\v2\x18.ateom.SecretKeySelectorR\fsecretKeyRef\"C\n" +
+	"\x0fSecretReference\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"9\n" +
+	"\x11SecretKeySelector\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\"\x15\n" +
 	"\x13RunWorkloadResponse\"\x98\x02\n" +
 	"\x19CheckpointWorkloadRequest\x128\n" +
 	"\x18actor_template_namespace\x18\x01 \x01(\tR\x16actorTemplateNamespace\x12.\n" +
@@ -539,33 +1173,56 @@ func file_ateom_proto_rawDescGZIP() []byte {
 	return file_ateom_proto_rawDescData
 }
 
-var file_ateom_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_ateom_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_ateom_proto_goTypes = []any{
 	(*RunWorkloadRequest)(nil),         // 0: ateom.RunWorkloadRequest
 	(*WorkloadSpec)(nil),               // 1: ateom.WorkloadSpec
 	(*Container)(nil),                  // 2: ateom.Container
-	(*RunWorkloadResponse)(nil),        // 3: ateom.RunWorkloadResponse
-	(*CheckpointWorkloadRequest)(nil),  // 4: ateom.CheckpointWorkloadRequest
-	(*CheckpointWorkloadResponse)(nil), // 5: ateom.CheckpointWorkloadResponse
-	(*RestoreWorkloadRequest)(nil),     // 6: ateom.RestoreWorkloadRequest
-	(*RestoreWorkloadResponse)(nil),    // 7: ateom.RestoreWorkloadResponse
+	(*EgressPolicy)(nil),               // 3: ateom.EgressPolicy
+	(*EgressPolicyRule)(nil),           // 4: ateom.EgressPolicyRule
+	(*EgressPolicyDestination)(nil),    // 5: ateom.EgressPolicyDestination
+	(*EgressPort)(nil),                 // 6: ateom.EgressPort
+	(*EgressTLSPolicy)(nil),            // 7: ateom.EgressTLSPolicy
+	(*EgressTLSInterceptPolicy)(nil),   // 8: ateom.EgressTLSInterceptPolicy
+	(*EgressCredentialPolicy)(nil),     // 9: ateom.EgressCredentialPolicy
+	(*EgressCredentialInjection)(nil),  // 10: ateom.EgressCredentialInjection
+	(*EgressCredentialValueFrom)(nil),  // 11: ateom.EgressCredentialValueFrom
+	(*SecretReference)(nil),            // 12: ateom.SecretReference
+	(*SecretKeySelector)(nil),          // 13: ateom.SecretKeySelector
+	(*RunWorkloadResponse)(nil),        // 14: ateom.RunWorkloadResponse
+	(*CheckpointWorkloadRequest)(nil),  // 15: ateom.CheckpointWorkloadRequest
+	(*CheckpointWorkloadResponse)(nil), // 16: ateom.CheckpointWorkloadResponse
+	(*RestoreWorkloadRequest)(nil),     // 17: ateom.RestoreWorkloadRequest
+	(*RestoreWorkloadResponse)(nil),    // 18: ateom.RestoreWorkloadResponse
 }
 var file_ateom_proto_depIdxs = []int32{
-	1, // 0: ateom.RunWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
-	2, // 1: ateom.WorkloadSpec.containers:type_name -> ateom.Container
-	1, // 2: ateom.CheckpointWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
-	1, // 3: ateom.RestoreWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
-	0, // 4: ateom.Ateom.RunWorkload:input_type -> ateom.RunWorkloadRequest
-	4, // 5: ateom.Ateom.CheckpointWorkload:input_type -> ateom.CheckpointWorkloadRequest
-	6, // 6: ateom.Ateom.RestoreWorkload:input_type -> ateom.RestoreWorkloadRequest
-	3, // 7: ateom.Ateom.RunWorkload:output_type -> ateom.RunWorkloadResponse
-	5, // 8: ateom.Ateom.CheckpointWorkload:output_type -> ateom.CheckpointWorkloadResponse
-	7, // 9: ateom.Ateom.RestoreWorkload:output_type -> ateom.RestoreWorkloadResponse
-	7, // [7:10] is the sub-list for method output_type
-	4, // [4:7] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	1,  // 0: ateom.RunWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
+	2,  // 1: ateom.WorkloadSpec.containers:type_name -> ateom.Container
+	3,  // 2: ateom.WorkloadSpec.egress_policy:type_name -> ateom.EgressPolicy
+	4,  // 3: ateom.EgressPolicy.allow:type_name -> ateom.EgressPolicyRule
+	4,  // 4: ateom.EgressPolicy.deny:type_name -> ateom.EgressPolicyRule
+	5,  // 5: ateom.EgressPolicyRule.to:type_name -> ateom.EgressPolicyDestination
+	6,  // 6: ateom.EgressPolicyRule.ports:type_name -> ateom.EgressPort
+	7,  // 7: ateom.EgressPolicyRule.tls:type_name -> ateom.EgressTLSPolicy
+	9,  // 8: ateom.EgressPolicyRule.credentials:type_name -> ateom.EgressCredentialPolicy
+	8,  // 9: ateom.EgressTLSPolicy.intercept:type_name -> ateom.EgressTLSInterceptPolicy
+	12, // 10: ateom.EgressTLSInterceptPolicy.issuer_secret_ref:type_name -> ateom.SecretReference
+	10, // 11: ateom.EgressCredentialPolicy.inject:type_name -> ateom.EgressCredentialInjection
+	11, // 12: ateom.EgressCredentialInjection.value_from:type_name -> ateom.EgressCredentialValueFrom
+	13, // 13: ateom.EgressCredentialValueFrom.secret_key_ref:type_name -> ateom.SecretKeySelector
+	1,  // 14: ateom.CheckpointWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
+	1,  // 15: ateom.RestoreWorkloadRequest.spec:type_name -> ateom.WorkloadSpec
+	0,  // 16: ateom.Ateom.RunWorkload:input_type -> ateom.RunWorkloadRequest
+	15, // 17: ateom.Ateom.CheckpointWorkload:input_type -> ateom.CheckpointWorkloadRequest
+	17, // 18: ateom.Ateom.RestoreWorkload:input_type -> ateom.RestoreWorkloadRequest
+	14, // 19: ateom.Ateom.RunWorkload:output_type -> ateom.RunWorkloadResponse
+	16, // 20: ateom.Ateom.CheckpointWorkload:output_type -> ateom.CheckpointWorkloadResponse
+	18, // 21: ateom.Ateom.RestoreWorkload:output_type -> ateom.RestoreWorkloadResponse
+	19, // [19:22] is the sub-list for method output_type
+	16, // [16:19] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_ateom_proto_init() }
@@ -579,7 +1236,7 @@ func file_ateom_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ateom_proto_rawDesc), len(file_ateom_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

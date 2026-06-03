@@ -47,8 +47,9 @@ import (
 )
 
 var (
-	podNamespace = flag.String("pod-namespace", "", "The namespace of the current pod")
-	podName      = flag.String("pod-name", "", "The name of the current pod")
+	podNamespace             = flag.String("pod-namespace", "", "The namespace of the current pod")
+	podName                  = flag.String("pod-name", "", "The name of the current pod")
+	egressAgentgatewayBinary = flag.String("egress-agentgateway-binary", "/app/agentgateway", "Path to the agentgateway binary used for local egress policy enforcement.")
 
 	reapLock sync.RWMutex
 )
@@ -133,7 +134,12 @@ func do(ctx context.Context) error {
 	}
 
 	actorLogger := ateom.NewActorLogger(syncedWriter, metadata.OnGCE())
-	ateomService := NewService(interiorNetNS, actorLogger)
+	egressGateway, err := newEgressAgentgatewayManager(ctx, *egressAgentgatewayBinary, *podNamespace, *podName)
+	if err != nil {
+		return fmt.Errorf("while initializing egress agentgateway manager: %w", err)
+	}
+	defer egressGateway.Stop(ctx)
+	ateomService := NewService(interiorNetNS, actorLogger, egressGateway)
 
 	svr := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -160,15 +166,17 @@ type AteomService struct {
 
 	interiorNetNS netns.NsHandle
 	actorLogger   *ateom.ActorLogger
+	egressGateway *egressAgentgatewayManager
 }
 
 var _ ateompb.AteomServer = (*AteomService)(nil)
 
 // NewService creates a new AteomService.
-func NewService(interiorNetNS netns.NsHandle, actorLogger *ateom.ActorLogger) *AteomService {
+func NewService(interiorNetNS netns.NsHandle, actorLogger *ateom.ActorLogger, egressGateway *egressAgentgatewayManager) *AteomService {
 	svc := &AteomService{
 		interiorNetNS: interiorNetNS,
 		actorLogger:   actorLogger,
+		egressGateway: egressGateway,
 	}
 	return svc
 }
@@ -184,7 +192,10 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	//   * Correct runsc version is downloaded and placed on disk.
 	//   * All OCI bundles are set up, including for "pause" container.
 
-	if err := s.setupActorNetwork(ctx); err != nil {
+	if err := s.egressGateway.ApplyPolicy(ctx, req.GetSpec().GetEgressPolicy()); err != nil {
+		return nil, fmt.Errorf("while configuring egress agentgateway: %w", err)
+	}
+	if err := s.setupActorNetwork(ctx, req.GetSpec().GetEgressPolicy()); err != nil {
 		return nil, fmt.Errorf("while setting up actor network: %w", err)
 	}
 	defer func() {
@@ -286,6 +297,9 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	if err := s.cleanupActorNetwork(ctx); err != nil {
 		return nil, fmt.Errorf("while cleaning up actor network: %w", err)
 	}
+	if err := s.egressGateway.ApplyPolicy(ctx, nil); err != nil {
+		return nil, fmt.Errorf("while clearing egress agentgateway config: %w", err)
+	}
 
 	s.actorLogger.EmitLifecycleLog("Actor checkpointed", req.GetActorId(), req.GetActorTemplateName(), req.GetActorTemplateNamespace())
 
@@ -304,7 +318,10 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	//   * All OCI bundles are set up, including for "pause" container.
 	//   * Checkpoint downloaded and placed on disk
 
-	if err := s.setupActorNetwork(ctx); err != nil {
+	if err := s.egressGateway.ApplyPolicy(ctx, req.GetSpec().GetEgressPolicy()); err != nil {
+		return nil, fmt.Errorf("while configuring egress agentgateway: %w", err)
+	}
+	if err := s.setupActorNetwork(ctx, req.GetSpec().GetEgressPolicy()); err != nil {
 		return nil, fmt.Errorf("while setting up actor network: %w", err)
 	}
 	defer func() {
@@ -353,7 +370,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	return &ateompb.RestoreWorkloadResponse{}, nil
 }
 
-func (s *AteomService) setupActorNetwork(ctx context.Context) (retErr error) {
+func (s *AteomService) setupActorNetwork(ctx context.Context, egressPolicy *ateompb.EgressPolicy) (retErr error) {
 	// Build a fresh point-to-point network between the worker pod netns and the
 	// gVisor interior netns. The worker side keeps the pod's real eth0, creates
 	// ateom0 as the gateway, and moves only the veth peer into the actor netns.
@@ -425,7 +442,7 @@ func (s *AteomService) setupActorNetwork(ctx context.Context) (retErr error) {
 	if err := enableIPv4Forwarding(); err != nil {
 		return err
 	}
-	if err := installActorNftablesRules(podIP); err != nil {
+	if err := installActorNftablesRules(ctx, podIP); err != nil {
 		return err
 	}
 
@@ -581,7 +598,7 @@ func enableIPv4Forwarding() error {
 	return nil
 }
 
-func installActorNftablesRules(podIP net.IP) error {
+func installActorNftablesRules(ctx context.Context, podIP net.IP) error {
 	// Install a dedicated nftables table for the active actor. Keeping all
 	// rules in an ateom-owned table makes cleanup simple and avoids mutating
 	// Kubernetes or CNI-managed chains directly.
@@ -594,9 +611,8 @@ func installActorNftablesRules(podIP net.IP) error {
 	//     actor veth IP on TCP/80, preserving existing inbound behavior.
 	//   * forward: accept forwarded packets between the actor veth and pod eth0.
 	//
-	// This is not the final egress policy path. The later AgentGateway phase
-	// should replace the broad masquerade path with transparent TCP capture and
-	// default-deny rules.
+	// Egress policy is enforced by the local agentgateway instance. These
+	// nftables rules only provide transparent capture and forwarding plumbing.
 	if err := removeActorNftablesRules(); err != nil {
 		return err
 	}
@@ -615,6 +631,8 @@ func installActorNftablesRules(podIP net.IP) error {
 		Hooknum:  nftables.ChainHookPrerouting,
 		Priority: nftables.ChainPriorityNATDest,
 	})
+	addTransparentHTTPEgressRedirect(c, table, prerouting)
+
 	// TODO: Support inbound UDP DNAT for actors that expose UDP protocols such
 	// as QUIC.
 	// TODO: Replace the hard-coded HTTP port with the actor's configured
@@ -655,22 +673,17 @@ func installActorNftablesRules(podIP net.IP) error {
 		Exprs: append(ipSourceEqual(actorVethIP), &expr.Masq{}),
 	})
 
-	acceptPolicy := nftables.ChainPolicyAccept
+	forwardPolicy := nftables.ChainPolicyAccept
 	forward := c.AddChain(&nftables.Chain{
 		Name:     "forward",
 		Table:    table,
 		Type:     nftables.ChainTypeFilter,
 		Hooknum:  nftables.ChainHookForward,
 		Priority: nftables.ChainPriorityFilter,
-		Policy:   &acceptPolicy,
+		Policy:   &forwardPolicy,
 	})
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: forward,
-		Exprs: []expr.Any{
-			&expr.Verdict{Kind: expr.VerdictAccept},
-		},
-	})
+	addBaseForwardRules(c, table, forward)
+	addEgressAgentgatewayForwardRules(c, table, forward)
 
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("while installing actor nftables rules: %w", err)
@@ -700,6 +713,83 @@ func removeActorNftablesRules() error {
 	return nil
 }
 
+func addBaseForwardRules(c *nftables.Conn, table *nftables.Table, forward *nftables.Chain) {
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: forward,
+		Exprs: append(establishedOrRelated(), &expr.Verdict{Kind: expr.VerdictAccept}),
+	})
+
+	inboundExprs := append(ipDestinationEqual(actorVethIP), tcpDestinationPortEqual(80)...)
+	inboundExprs = append(inboundExprs, &expr.Verdict{Kind: expr.VerdictAccept})
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: forward,
+		Exprs: inboundExprs,
+	})
+}
+
+func addTransparentHTTPEgressRedirect(c *nftables.Conn, table *nftables.Table, prerouting *nftables.Chain) {
+	addTransparentEgressRedirect(c, table, prerouting, 80, egressAgentgatewayHTTPPort)
+	addTransparentEgressRedirect(c, table, prerouting, 443, egressAgentgatewayHTTPSPort)
+}
+
+func addTransparentEgressRedirect(c *nftables.Conn, table *nftables.Table, prerouting *nftables.Chain, originalPort uint16, proxyPort uint16) {
+	exprs := append(ipSourceEqual(actorVethIP), tcpDestinationPortEqual(originalPort)...)
+	exprs = append(exprs,
+		&expr.Immediate{
+			Register: 1,
+			Data:     net.ParseIP(actorVethGateway).To4(),
+		},
+		&expr.Immediate{
+			Register: 2,
+			Data:     binaryutil.BigEndian.PutUint16(proxyPort),
+		},
+		&expr.NAT{
+			Type:        expr.NATTypeDestNAT,
+			Family:      unix.NFPROTO_IPV4,
+			RegAddrMin:  1,
+			RegProtoMin: 2,
+		},
+	)
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: prerouting,
+		Exprs: exprs,
+	})
+}
+
+func addEgressAgentgatewayForwardRules(c *nftables.Conn, table *nftables.Table, forward *nftables.Chain) {
+	for _, port := range []uint16{egressAgentgatewayHTTPPort, egressAgentgatewayHTTPSPort} {
+		exprs := append(ipSourceEqual(actorVethIP), ipDestinationEqual(actorVethGateway)...)
+		exprs = append(exprs, tcpDestinationPortEqual(port)...)
+		exprs = append(exprs, &expr.Verdict{Kind: expr.VerdictAccept})
+		c.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: forward,
+			Exprs: exprs,
+		})
+	}
+}
+
+func establishedOrRelated() []expr.Any {
+	return []expr.Any{
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1,
+			DestRegister:   1,
+			Len:            4,
+			Mask:           binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED),
+			Xor:            binaryutil.NativeEndian.PutUint32(0),
+		},
+		&expr.Cmp{
+			Op:       expr.CmpOpNeq,
+			Register: 1,
+			Data:     binaryutil.NativeEndian.PutUint32(0),
+		},
+	}
+}
+
 func ipSourceEqual(ip string) []expr.Any {
 	return ipPayloadEqual(12, ip)
 }
@@ -725,12 +815,20 @@ func ipPayloadEqual(offset uint32, ip string) []expr.Any {
 }
 
 func tcpDestinationPortEqual(port uint16) []expr.Any {
+	return destinationPortEqual("TCP", port)
+}
+
+func destinationPortEqual(protocol string, port uint16) []expr.Any {
+	proto := byte(unix.IPPROTO_TCP)
+	if protocol == "UDP" {
+		proto = unix.IPPROTO_UDP
+	}
 	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 		&expr.Cmp{
 			Op:       expr.CmpOpEq,
 			Register: 1,
-			Data:     []byte{unix.IPPROTO_TCP},
+			Data:     []byte{proto},
 		},
 		&expr.Payload{
 			DestRegister: 1,

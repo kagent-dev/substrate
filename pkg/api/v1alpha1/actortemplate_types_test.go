@@ -16,6 +16,7 @@ package v1alpha1
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,48 @@ func TestActorTemplateDeepCopy(t *testing.T) {
 			},
 			SnapshotsConfig: SnapshotsConfig{
 				Location: "gs://test-bucket/test-folder",
+			},
+			EgressPolicy: &EgressPolicy{
+				DefaultAction: EgressPolicyActionDeny,
+				Allow: []EgressPolicyRule{
+					{
+						Name: "openai",
+						To: []EgressPolicyDestination{
+							{Host: "api.openai.com"},
+						},
+						Ports: []EgressPort{
+							{Port: 443, Protocol: corev1.ProtocolTCP},
+						},
+						TLS: &EgressTLSPolicy{
+							Mode:     EgressTLSModeRequire,
+							Required: true,
+						},
+						RateLimit: []EgressRateLimit{
+							{
+								Type:   EgressRateLimitTypeTokens,
+								Max:    60000,
+								Window: metav1.Duration{Duration: time.Minute},
+							},
+						},
+						Headers: &EgressHeaderPolicy{
+							Redact: []string{"authorization", "x-api-key"},
+						},
+					},
+				},
+				Deny: []EgressPolicyRule{
+					{
+						Name: "metadata",
+						To: []EgressPolicyDestination{
+							{Host: "metadata.google.internal"},
+							{IPBlock: &EgressIPBlock{CIDR: "169.254.169.254/32"}},
+						},
+					},
+				},
+				Audit: &EgressAuditPolicy{
+					Logs:          true,
+					Traces:        true,
+					RedactHeaders: []string{"authorization"},
+				},
 			},
 		},
 		Status: ActorTemplateStatus{

@@ -59,6 +59,210 @@ type SnapshotsConfig struct {
 	Location string `json:"location"`
 }
 
+type EgressPolicyAction string
+
+const (
+	EgressPolicyActionAllow EgressPolicyAction = "Allow"
+	EgressPolicyActionDeny  EgressPolicyAction = "Deny"
+)
+
+type EgressTLSMode string
+
+const (
+	EgressTLSModeRequire   EgressTLSMode = "Require"
+	EgressTLSModeOriginate EgressTLSMode = "Originate"
+	EgressTLSModeIntercept EgressTLSMode = "Intercept"
+	EgressTLSModeDisable   EgressTLSMode = "Disable"
+)
+
+type EgressRateLimitType string
+
+const (
+	EgressRateLimitTypeRequests EgressRateLimitType = "Requests"
+	EgressRateLimitTypeTokens   EgressRateLimitType = "Tokens"
+)
+
+type EgressTLSPolicy struct {
+	// Mode controls how TLS is handled for matching egress traffic.
+	//
+	// +kubebuilder:validation:Enum=Require;Originate;Intercept;Disable
+	// +optional
+	Mode EgressTLSMode `json:"mode,omitempty"`
+
+	// Required controls whether matching egress traffic must use TLS.
+	// +optional
+	Required bool `json:"required,omitempty"`
+
+	// Intercept configures explicit TLS interception for matching egress traffic.
+	// This requires an L7 egress gateway; network-layer enforcement cannot
+	// perform TLS interception.
+	// +optional
+	Intercept *EgressTLSInterceptPolicy `json:"intercept,omitempty"`
+}
+
+type EgressTLSInterceptPolicy struct {
+	// IssuerSecretRef references the CA material used by the egress gateway to
+	// issue certificates for intercepted TLS traffic.
+	// +optional
+	IssuerSecretRef *corev1.SecretReference `json:"issuerSecretRef,omitempty"`
+
+	// ValidateUpstream controls whether the egress gateway validates the
+	// upstream service certificate before proxying intercepted traffic.
+	// +optional
+	ValidateUpstream bool `json:"validateUpstream,omitempty"`
+}
+
+type EgressIPBlock struct {
+	// CIDR is an IP address range in CIDR notation.
+	// +required
+	CIDR string `json:"cidr"`
+}
+
+type EgressPolicyDestination struct {
+	// Host is the DNS name to match for egress traffic.
+	// +optional
+	Host string `json:"host,omitempty"`
+
+	// IPBlock is the IP range to match for egress traffic.
+	// +optional
+	IPBlock *EgressIPBlock `json:"ipBlock,omitempty"`
+}
+
+type EgressPort struct {
+	// Port is the destination port number.
+	// +required
+	Port int32 `json:"port"`
+
+	// Protocol is the transport protocol for this port.
+	// +optional
+	Protocol corev1.Protocol `json:"protocol,omitempty"`
+}
+
+type EgressRateLimit struct {
+	// Type selects request-based or LLM token-based rate limiting.
+	//
+	// +kubebuilder:validation:Enum=Requests;Tokens
+	// +required
+	Type EgressRateLimitType `json:"type"`
+
+	// Max is the maximum number of requests or tokens allowed during Window.
+	// +required
+	Max int64 `json:"max"`
+
+	// Window is the time window for this limit, such as 1m or 1h.
+	// +required
+	Window metav1.Duration `json:"window"`
+
+	// Dimensions selects the bucket keys used by the enforcement layer, such as
+	// actor, template, or namespace.
+	// +optional
+	Dimensions []string `json:"dimensions,omitempty"`
+}
+
+type EgressHeaderPolicy struct {
+	// Redact is the list of headers that must be redacted from egress logs and traces.
+	// +optional
+	Redact []string `json:"redact,omitempty"`
+}
+
+type EgressCredentialPolicy struct {
+	// Inject configures credentials that the egress gateway injects into
+	// matching outbound requests. Values are referenced from Kubernetes Secrets;
+	// the policy does not contain credential material.
+	// +optional
+	Inject []EgressCredentialInjection `json:"inject,omitempty"`
+}
+
+type EgressCredentialInjection struct {
+	// Header is the outbound HTTP header name to set.
+	// +required
+	Header string `json:"header"`
+
+	// ValueFrom selects the source of the injected credential value.
+	// +required
+	ValueFrom EgressCredentialValueFrom `json:"valueFrom"`
+}
+
+type EgressCredentialValueFrom struct {
+	// SecretKeyRef selects a key in a Kubernetes Secret.
+	// +optional
+	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+}
+
+type EgressPolicyRule struct {
+	// Name is an optional human-readable identifier for this rule.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// To lists the destinations matched by this rule.
+	// +optional
+	To []EgressPolicyDestination `json:"to,omitempty"`
+
+	// Ports is the list of destination ports matched by this rule.
+	// If empty, the rule applies to all destination ports.
+	// +optional
+	Ports []EgressPort `json:"ports,omitempty"`
+
+	// Paths is the list of exact HTTP paths matched by this rule.
+	// +optional
+	Paths []string `json:"paths,omitempty"`
+
+	// PathPrefixes is the list of HTTP path prefixes matched by this rule.
+	// +optional
+	PathPrefixes []string `json:"pathPrefixes,omitempty"`
+
+	// TLS defines transport security requirements for this destination.
+	// +optional
+	TLS *EgressTLSPolicy `json:"tls,omitempty"`
+
+	// RateLimit defines request or token rate limits for matching traffic.
+	// +optional
+	RateLimit []EgressRateLimit `json:"rateLimit,omitempty"`
+
+	// Headers defines logging and trace handling for headers on matching traffic.
+	// +optional
+	Headers *EgressHeaderPolicy `json:"headers,omitempty"`
+
+	// Credentials configures explicit egress gateway credential injection for
+	// matching outbound requests.
+	// +optional
+	Credentials *EgressCredentialPolicy `json:"credentials,omitempty"`
+}
+
+type EgressAuditPolicy struct {
+	// Logs enables egress access logs for actors created from this template.
+	// +optional
+	Logs bool `json:"logs,omitempty"`
+
+	// Traces enables egress tracing for actors created from this template.
+	// +optional
+	Traces bool `json:"traces,omitempty"`
+
+	// RedactHeaders is the list of headers that must be redacted from audit output.
+	// +optional
+	RedactHeaders []string `json:"redactHeaders,omitempty"`
+}
+
+type EgressPolicy struct {
+	// DefaultAction is applied when no allow rule matches.
+	//
+	// +kubebuilder:validation:Enum=Allow;Deny
+	// +optional
+	DefaultAction EgressPolicyAction `json:"defaultAction,omitempty"`
+
+	// Allow contains destination rules actors created from this template may reach.
+	// +optional
+	Allow []EgressPolicyRule `json:"allow,omitempty"`
+
+	// Deny contains destination rules actors created from this template may not reach.
+	// +optional
+	Deny []EgressPolicyRule `json:"deny,omitempty"`
+
+	// Audit configures egress logging and tracing for actors created from this template.
+	// +optional
+	Audit *EgressAuditPolicy `json:"audit,omitempty"`
+}
+
 // ActorTemplateSpec defined desired spec of an actor.
 type ActorTemplateSpec struct {
 	// PauseImage is the container to use as the root sandbox container.
@@ -90,6 +294,11 @@ type ActorTemplateSpec struct {
 	//
 	// +required
 	Runsc RunscConfig `json:"runsc,omitempty"`
+
+	// EgressPolicy defines the default outbound network policy for actors
+	// created from this template.
+	// +optional
+	EgressPolicy *EgressPolicy `json:"egressPolicy,omitempty"`
 }
 
 type GCPAuthenticationConfig struct {

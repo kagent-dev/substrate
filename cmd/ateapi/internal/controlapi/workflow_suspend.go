@@ -142,25 +142,8 @@ func (s *CallAteletSuspendStep) Execute(ctx context.Context, input *SuspendInput
 		ActorTemplateName:      state.Actor.GetActorTemplateName(),
 		ActorId:                state.Actor.GetActorId(),
 		Runsc:                  runscCfg,
-		Spec: &ateletpb.WorkloadSpec{
-			PauseImage: state.ActorTemplate.Spec.PauseImage,
-		},
-		SnapshotUriPrefix: state.Actor.GetInProgressSnapshot(),
-	}
-	for _, ctr := range state.ActorTemplate.Spec.Containers {
-		ateletCtr := &ateletpb.Container{
-			Name:    ctr.Name,
-			Image:   ctr.Image,
-			Command: ctr.Command,
-		}
-		for _, env := range ctr.Env {
-			ateletEnv := &ateletpb.EnvEntry{
-				Name:  env.Name,
-				Value: env.Value,
-			}
-			ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
-		}
-		req.Spec.Containers = append(req.Spec.Containers, ateletCtr)
+		Spec:                   buildAteletWorkloadSpec(state.ActorTemplate),
+		SnapshotUriPrefix:      state.Actor.GetInProgressSnapshot(),
 	}
 	_, err = client.Checkpoint(ctx, req)
 	if err != nil {
