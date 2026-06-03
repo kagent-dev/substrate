@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -106,9 +107,17 @@ run_kubectl_ate() {
 }
 
 run_ko() {
-  ./hack/run-tool.sh ko \
-    "$@" \
-    -- ${KUBECTL_CONTEXT:+--context=${KUBECTL_CONTEXT}}
+  # Only ko subcommands that delegate to kubectl (apply, create, delete, run)
+  # accept args after `--`. ko build, resolve, deps, login etc. reject
+  # `--context=...` as an unknown subcommand and abort the install.
+  case "${1:-}" in
+    apply|create|delete|run)
+      ./hack/run-tool.sh ko "$@" ${KUBECTL_CONTEXT:+-- --context="${KUBECTL_CONTEXT}"}
+      ;;
+    *)
+      ./hack/run-tool.sh ko "$@"
+      ;;
+  esac
 }
 
 set_atenet_router() {
@@ -181,7 +190,7 @@ create_valkey_ca_certs_secret() {
   ca_certs=$(echo "${der_base64}" | base64 --decode | openssl x509 -inform der -outform pem)
 
   run_kubectl create secret generic valkey-ca-certs \
-    --from-literal=ca.crt="$(echo "${ca_certs}")" \
+    --from-literal=ca.crt="${ca_certs}" \
     -n ate-system \
     --dry-run=client -o yaml \
     | run_kubectl apply -f -
