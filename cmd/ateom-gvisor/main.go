@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -524,12 +525,15 @@ func (s *AteomService) cleanupActorNetwork(ctx context.Context) error {
 		return err
 	}
 
+	var cleanupErr error
 	if link, err := netlink.LinkByName(hostVethName); err == nil {
 		if err := netlink.LinkDel(link); err != nil {
-			return fmt.Errorf("while deleting host veth: %w", err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while deleting host veth: %w", err))
+			slog.WarnContext(ctx, "Failed to delete host veth; continuing actor netns cleanup", "err", err)
 		}
 	} else if _, ok := err.(netlink.LinkNotFoundError); !ok {
-		return fmt.Errorf("while looking up host veth: %w", err)
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while looking up host veth: %w", err))
+		slog.WarnContext(ctx, "Failed to look up host veth; continuing actor netns cleanup", "err", err)
 	}
 
 	if err := netNSDo(ctx, s.interiorNetNS, func(_ context.Context) error {
@@ -547,10 +551,10 @@ func (s *AteomService) cleanupActorNetwork(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("while cleaning interior netns links: %w", err)
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while cleaning interior netns links: %w", err))
 	}
 
-	return nil
+	return cleanupErr
 }
 
 func podIPv4() (net.IP, error) {
@@ -599,6 +603,10 @@ func installActorNftablesRules(podIP net.IP) error {
 	// Install a dedicated nftables table for the active actor. Keeping all
 	// rules in an ateom-owned table makes cleanup simple and avoids mutating
 	// Kubernetes or CNI-managed chains directly.
+	//
+	// TODO: Add IPv6 veth addressing, forwarding, and nftables rules once actor
+	// networking supports dual-stack pods. The current compatibility path is
+	// IPv4-only.
 	//
 	// The temporary compatibility rules do three things:
 	//
