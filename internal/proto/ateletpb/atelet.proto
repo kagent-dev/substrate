@@ -73,6 +73,7 @@ message RunscConfig {
 message WorkloadSpec {
   repeated Container containers  = 1;
   string             pause_image = 2;
+  repeated ResolvedVolume volumes = 3;
 }
 
 message Container {
@@ -80,6 +81,27 @@ message Container {
   string            image   = 2;
   repeated string   command = 3;
   repeated EnvEntry env     = 4;
+  repeated VolumeMount volume_mounts = 5;
+}
+
+// VolumeFile is a single file within a resolved volume root.
+message VolumeFile {
+  string relative_path = 1;
+  bytes content = 2;
+  uint32 mode = 3;
+}
+
+// ResolvedVolume is a template volume after Kubernetes sources are resolved.
+message ResolvedVolume {
+  string name = 1;
+  repeated VolumeFile files = 2;
+}
+
+message VolumeMount {
+  string name = 1;
+  string mount_path = 2;
+  string sub_path = 3;
+  bool read_only = 4;
 }
 
 message EnvEntry {

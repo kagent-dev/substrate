@@ -51,6 +51,11 @@ type Container struct {
 
 	// Environment variables to set in the worker replicas.
 	Env []EnvVar `json:"env,omitempty"`
+
+	// VolumeMounts mount named volumes from spec.volumes into this container.
+	// +optional
+	// +listType=atomic
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
 type SnapshotsConfig struct {
@@ -77,6 +82,14 @@ type ActorTemplateSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=10
 	Containers []Container `json:"containers,omitempty"`
+
+	// Volumes available to containers in this ActorTemplate.
+	// Supported sources: configMap, secret, emptyDir.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=32
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
 
 	// Snapshots configuration for the actor.
 	// +required

@@ -497,6 +497,10 @@ func (s *AteomHerder) prepareOCIBundles(
 ) error {
 	netnsPath := ateompath.AteomNetNSPath(targetAteomUid)
 
+	if err := materializeVolumes(actorTemplateNamespace, actorTemplateName, actorID, spec.GetVolumes()); err != nil {
+		return fmt.Errorf("materialize actor volumes: %w", err)
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 
 	// Pause container.
@@ -514,6 +518,7 @@ func (s *AteomHerder) prepareOCIBundles(
 				"io.kubernetes.cri.container-name": "pause",
 			},
 			netnsPath,
+			nil,
 		); err != nil {
 			return fmt.Errorf("while creating pause OCI bundle: %w", err)
 		}
@@ -528,6 +533,10 @@ func (s *AteomHerder) prepareOCIBundles(
 			envs = append(envs, fmt.Sprintf("%s=%s", env.GetName(), env.GetValue()))
 		}
 		g.Go(func() error {
+			bindMounts, err := containerBindMounts(actorTemplateNamespace, actorTemplateName, actorID, ctr.GetVolumeMounts())
+			if err != nil {
+				return fmt.Errorf("while resolving %q volume mounts: %w", ctr.GetName(), err)
+			}
 			if err := prepareOCIDirectory(
 				gCtx,
 				s.pullCache,
@@ -542,6 +551,7 @@ func (s *AteomHerder) prepareOCIBundles(
 					"io.kubernetes.cri.container-name": ctr.GetName(),
 				},
 				netnsPath,
+				bindMounts,
 			); err != nil {
 				return fmt.Errorf("while creating %q OCI bundle: %w", ctr.GetName(), err)
 			}

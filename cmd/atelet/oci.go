@@ -34,7 +34,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-func prepareOCIDirectory(ctx context.Context, pullCache *memorypullcache.MemoryPullCache, actorTemplateNamespace, actorTemplateName, actorID, containerName, ref string, args []string, env []string, annotations map[string]string, netns string) error {
+func prepareOCIDirectory(ctx context.Context, pullCache *memorypullcache.MemoryPullCache, actorTemplateNamespace, actorTemplateName, actorID, containerName, ref string, args []string, env []string, annotations map[string]string, netns string, extraMounts []containerBindMount) error {
 	tracer := otel.Tracer("prepareOCIDirectory")
 
 	ctx, span := tracer.Start(ctx, "prepareOCIDirectory")
@@ -112,7 +112,7 @@ func prepareOCIDirectory(ctx context.Context, pullCache *memorypullcache.MemoryP
 			Readonly: false,
 		},
 		Hostname: "runsc",
-		Mounts: []specs.Mount{
+		Mounts: append([]specs.Mount{
 			{
 				Destination: "/proc",
 				Type:        "proc",
@@ -140,7 +140,7 @@ func prepareOCIDirectory(ctx context.Context, pullCache *memorypullcache.MemoryP
 				Source:      "/etc/resolv.conf",
 				Options:     []string{"ro"},
 			},
-		},
+		}, bindMountsToOCISpec(extraMounts)...),
 		Linux: &specs.Linux{
 			Namespaces: []specs.LinuxNamespace{
 				{

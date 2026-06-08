@@ -53,8 +53,22 @@ func workloadSpecFromActorTemplate(ctx context.Context, kubeClient kubernetes.In
 				ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
 			}
 		}
+		for _, mount := range ctr.VolumeMounts {
+			ateletCtr.VolumeMounts = append(ateletCtr.VolumeMounts, &ateletpb.VolumeMount{
+				Name:      mount.Name,
+				MountPath: mount.MountPath,
+				SubPath:   mount.SubPath,
+				ReadOnly:  mount.ReadOnly,
+			})
+		}
 		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)
 	}
+
+	volumes, err := resolveVolumes(ctx, kubeClient, actorTemplate)
+	if err != nil {
+		return nil, err
+	}
+	workloadSpec.Volumes = volumes
 
 	return workloadSpec, nil
 }

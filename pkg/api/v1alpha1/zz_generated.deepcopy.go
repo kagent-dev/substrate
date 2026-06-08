@@ -93,6 +93,13 @@ func (in *ActorTemplateSpec) DeepCopyInto(out *ActorTemplateSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.Volumes != nil {
+		in, out := &in.Volumes, &out.Volumes
+		*out = make([]v1.Volume, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	out.SnapshotsConfig = in.SnapshotsConfig
 	out.WorkerPoolRef = in.WorkerPoolRef
 	in.Runsc.DeepCopyInto(&out.Runsc)
@@ -167,6 +174,13 @@ func (in *Container) DeepCopyInto(out *Container) {
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env
 		*out = make([]EnvVar, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.VolumeMounts != nil {
+		in, out := &in.VolumeMounts, &out.VolumeMounts
+		*out = make([]v1.VolumeMount, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

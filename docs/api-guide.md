@@ -36,13 +36,60 @@ The `ActorTemplate` defines the code, environment, and state-management policies
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `containers` | `[]Container` | **Required.** The workload definition (image, command, env, ports). |
+| `containers` | `[]Container` | **Required.** The workload definition (image, command, env, ports, volumeMounts). |
+| `volumes` | `[]corev1.Volume` | Optional. Named volumes mounted into containers. Supports `configMap`, `secret`, and `emptyDir` sources. |
 | `workerPoolRef` | `ObjectReference` | **Required.** Pointer to the `WorkerPool` that provides the physical pods for this template. |
 | `snapshotsConfig` | `SnapshotsConfig` | **Required.** GCS bucket and folder where memory snapshots are stored. |
 | `pauseImage` | `string` | **Required.** The image used for the sandbox root (e.g. `gcr.io/gke-release/pause`). |
 | `runsc` | `RunscConfig` | **Required.** Multi-platform configuration for fetching the gVisor binary. |
 
 Container environment variables support literal `value` entries and `valueFrom.secretKeyRef`. Secret references are resolved by `ate-api-server` from the `ActorTemplate` namespace when an actor cold-starts or first resumes; the resolved values are sent to atelet but are not serialized into the public Actor API. Other Kubernetes `valueFrom` sources are not supported yet. Secret changes do not automatically restart actors or invalidate snapshots; rotating a Secret requires an explicit actor or template lifecycle action.
+
+### Volumes
+
+`ActorTemplate` supports Pod-like volumes for injecting files into actor containers without changing the container image. Supported volume sources:
+
+| Source | Description |
+| :--- | :--- |
+| `configMap` | Files from a ConfigMap in the same namespace as the `ActorTemplate`. |
+| `secret` | Files from a Secret in the same namespace as the `ActorTemplate`. |
+| `emptyDir` | Writable scratch space materialized on the worker at cold boot. |
+
+Each container mounts volumes with `volumeMounts` (`name`, `mountPath`, optional `subPath`, `readOnly`). At cold boot, `ate-api-server` resolves ConfigMap and Secret data from the Kubernetes API, and `atelet` stages the files on the worker and bind-mounts them into the gVisor sandbox. Volume content is captured in the Golden Snapshot, so harness actors restored from that snapshot see the same files without re-resolving the ConfigMap.
+
+**RBAC:** `ate-api-server` reads referenced ConfigMaps and Secrets from the `ActorTemplate` namespace using its service account. Grant `get`/`list` on those objects in tenant namespaces, similar to secret env resolution.
+
+**Example:** mount a ConfigMap of agent skills at `/sandbox/skills`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-skills
+  namespace: ate-demo
+data:
+  SKILL.md: |
+    # My skill
+---
+apiVersion: ate.dev/v1alpha1
+kind: ActorTemplate
+metadata:
+  name: skill-agent
+  namespace: ate-demo
+spec:
+  # ... runsc, pauseImage, workerPoolRef, snapshotsConfig ...
+  volumes:
+  - name: skills
+    configMap:
+      name: agent-skills
+  containers:
+  - name: agent
+    image: gcr.io/my-project/my-agent:latest
+    volumeMounts:
+    - name: skills
+      mountPath: /sandbox/skills
+      readOnly: true
+```
 
 ### Workload Connectivity (Uniform DNS)
 Substrate has standardized on a **Uniform DNS Mesh**. You no longer need to define `SessionDiscovery` rules. Every actor created from a template is automatically reachable through the **Substrate Router** via its unique ID:

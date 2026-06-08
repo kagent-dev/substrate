@@ -82,6 +82,15 @@ func OCIBundleDir(actorTemplateNamespace, actorTemplateName, actorID string) str
 	)
 }
 
+// VolumeDir returns the host staging directory for a named ActorTemplate volume.
+func VolumeDir(actorTemplateNamespace, actorTemplateName, actorID, volumeName string) string {
+	return filepath.Join(
+		ActorPath(actorTemplateNamespace, actorTemplateName, actorID),
+		"volumes",
+		volumeName,
+	)
+}
+
 func OCIBundlePath(actorTemplateNamespace, actorTemplateName, actorID, containerName string) string {
 	return filepath.Join(
 		OCIBundleDir(actorTemplateNamespace, actorTemplateName, actorID),
