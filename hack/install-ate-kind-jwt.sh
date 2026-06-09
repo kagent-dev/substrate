@@ -46,6 +46,10 @@ run_kubectl() {
   kubectl ${KUBECTL_CONTEXT:+--context=${KUBECTL_CONTEXT}} "$@"
 }
 
+run_helm() {
+  helm ${KUBECTL_CONTEXT:+--kube-context=${KUBECTL_CONTEXT}} "$@"
+}
+
 log_step() {
   echo -e "\033[1;36m[step]:\033[0m $1"
 }
@@ -155,7 +159,7 @@ apply_chart() {
 
 apply_crds() {
   log_step "apply_crds"
-  run_kubectl apply -f "${ROOT}/manifests/ate-install/generated"
+  run_helm upgrade --install substrate-crds "${ROOT}/charts/substrate-crds"
 }
 
 bootstrap_session_id_secrets() {

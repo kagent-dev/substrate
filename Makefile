@@ -103,3 +103,8 @@ helm-template:
 .PHONY: verify-helm-template
 verify-helm-template:
 	@./hack/render-manifests.sh --check
+
+# Verify that the CRD chart mirrors the generated CRDs.
+.PHONY: verify-crd-chart
+verify-crd-chart:
+	@./hack/verify/crd-chart.sh
