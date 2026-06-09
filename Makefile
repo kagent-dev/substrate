@@ -44,10 +44,11 @@ build: build-images build-atectl
 
 .PHONY: build-images
 build-images:
-	$(KO) build --ldflags "$(LDFLAGS)" ./cmd/ateapi
-	$(KO) build --ldflags "$(LDFLAGS)" ./cmd/atelet
-	$(KO) build --ldflags "$(LDFLAGS)" ./cmd/podcertcontroller
-	$(KO) build --ldflags "$(LDFLAGS)" ./cmd/atenet
+	$(KO) build --base-import-paths --ldflags "$(LDFLAGS)" ./cmd/ateapi
+	$(KO) build --base-import-paths --ldflags "$(LDFLAGS)" ./cmd/atecontroller
+	$(KO) build --base-import-paths --ldflags "$(LDFLAGS)" ./cmd/atelet
+	$(KO) build --base-import-paths --ldflags "$(LDFLAGS)" ./cmd/podcertcontroller
+	$(KO) build --base-import-paths --ldflags "$(LDFLAGS)" ./cmd/atenet
 
 .PHONY: build-atectl
 build-atectl:

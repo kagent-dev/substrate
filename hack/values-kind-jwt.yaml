@@ -25,7 +25,7 @@ auth:
     serverCertSecret: ateapi-tls
     caBundleConfigMap: ateapi-ca
 
-createNamespace: true
+createNamespace: false
 
 # In-cluster OTel collector deployed alongside via manifests/ate-install/kind/otel-collector.yaml
 otel:

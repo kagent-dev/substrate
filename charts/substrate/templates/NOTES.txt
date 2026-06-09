@@ -10,11 +10,12 @@ must enable these explicitly. To install without them, pick auth.mode=jwt.
 {{- else }}
 JWT mode is active.
 
-Required out-of-band resources (you must create these before pods become healthy):
-  1. Secret {{ .Values.auth.jwt.serverCertSecret }} (kubernetes.io/tls) in {{ .Release.Namespace }}
-     — server certificate for ateapi + atenet Envoy listener.
-  2. ConfigMap {{ .Values.auth.jwt.caBundleConfigMap }} in {{ .Release.Namespace }} with key "ca.crt"
-     — CA bundle clients use to verify the ateapi server.
-
-See charts/substrate/README.md for an openssl bootstrap snippet.
+{{- if .Values.auth.jwt.bootstrap.enabled }}
+JWT bootstrap resources are managed by this chart. Existing key material is
+reused on upgrade.
+{{- else }}
+JWT bootstrap is disabled. Provide {{ .Values.auth.jwt.serverCertSecret }},
+{{ .Values.auth.jwt.caBundleConfigMap }}, session-id-jwt-pool, and
+session-id-ca-pool before pods become healthy.
+{{- end }}
 {{- end }}

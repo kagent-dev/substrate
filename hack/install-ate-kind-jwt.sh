@@ -22,12 +22,9 @@
 # KIND_ENABLE_PODCERT=false hack/create-kind-cluster.sh.
 #
 # Steps:
-#   1. Bootstrap a self-signed Secret/ateapi-tls + ConfigMap/ateapi-ca via
-#      openssl (the chart references these but expects them to exist
-#      out-of-band).
-#   2. Render the chart with auth.mode=jwt + kind-specific values, resolve
+#   1. Render the chart with auth.mode=jwt + kind-specific values, resolve
 #      ko:// image refs against a local registry, and apply.
-#   3. Apply the kind-only extras (rustfs storage, OTel collector) from
+#   2. Apply the kind-only extras (rustfs storage, OTel collector) from
 #      manifests/ate-install/kind/.
 set -o errexit -o nounset -o pipefail
 
@@ -105,51 +102,13 @@ data:
 EOF
 }
 
-# Generate a self-signed CA + server cert pair and install them as the
-# Secret/ConfigMap pair the chart references. Idempotent: skips if both
-# resources already exist.
-bootstrap_jwt_tls() {
-  log_step "bootstrap_jwt_tls"
-  if run_kubectl get secret -n "${NS}" ateapi-tls >/dev/null 2>&1 \
-     && run_kubectl get configmap -n "${NS}" ateapi-ca >/dev/null 2>&1; then
-    echo "Secret/ateapi-tls and ConfigMap/ateapi-ca already present — skipping."
-    return
-  fi
-
-  local tmp
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' RETURN
-
-  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-    -subj "/CN=ateapi-ca" \
-    -keyout "${tmp}/ca.key" -out "${tmp}/ca.crt" >/dev/null 2>&1
-
-  openssl req -newkey rsa:2048 -nodes \
-    -subj "/CN=api.${NS}.svc" \
-    -keyout "${tmp}/server.key" -out "${tmp}/server.csr" >/dev/null 2>&1
-
-  cat > "${tmp}/server.ext" <<EOF
-subjectAltName = DNS:api.${NS}.svc,DNS:api.${NS}.svc.cluster.local,DNS:atenet-router.${NS}.svc
-EOF
-  openssl x509 -req -in "${tmp}/server.csr" -CA "${tmp}/ca.crt" -CAkey "${tmp}/ca.key" \
-    -CAcreateserial -out "${tmp}/server.crt" -days 365 \
-    -extfile "${tmp}/server.ext" >/dev/null 2>&1
-
-  run_kubectl -n "${NS}" create secret tls ateapi-tls \
-    --cert="${tmp}/server.crt" --key="${tmp}/server.key" \
-    --dry-run=client -o yaml | run_kubectl apply -f -
-
-  run_kubectl -n "${NS}" create configmap ateapi-ca \
-    --from-file=ca.crt="${tmp}/ca.crt" \
-    --dry-run=client -o yaml | run_kubectl apply -f -
-}
-
 apply_chart() {
   log_step "apply_chart (helm template | ko resolve | kubectl apply)"
   local rendered
   rendered=$(helm template substrate "${ROOT}/charts/substrate" \
     --namespace "${NS}" \
     -f "${ROOT}/hack/values-kind-jwt.yaml" \
+    --set image.registry=ko://github.com/agent-substrate/substrate/cmd \
     --set 'image.tag=<none>')
 
   # ko resolve replaces ko:// refs with built+pushed image refs.
@@ -160,25 +119,6 @@ apply_chart() {
 apply_crds() {
   log_step "apply_crds"
   run_helm upgrade --install substrate-crds "${ROOT}/charts/substrate-crds"
-}
-
-bootstrap_session_id_secrets() {
-  log_step "bootstrap_session_id_secrets"
-  run_kubectl get secret -n "${NS}" session-id-jwt-pool >/dev/null 2>&1 \
-    || kubectl-ate admin make-jwt-pool --key-id="1" --name="session-id-jwt-pool" --secret-namespace="${NS}"
-  run_kubectl get secret -n "${NS}" session-id-ca-pool >/dev/null 2>&1 \
-    || kubectl-ate admin make-ca-pool --ca-id="1" --name="session-id-ca-pool" --secret-namespace="${NS}"
-}
-
-bootstrap_envvars_configmap() {
-  log_step "bootstrap_envvars_configmap"
-  run_kubectl get configmap -n "${NS}" ate-api-server-envvars >/dev/null 2>&1 && return
-  run_kubectl create configmap -n "${NS}" ate-api-server-envvars \
-    --from-literal=ATE_API_REDIS_ADDRESS="valkey-cluster.${NS}.svc:6379" \
-    --from-literal=ATE_API_REDIS_USE_IAM_AUTH="false" \
-    --from-literal=ATE_API_REDIS_TLS_SERVER_NAME="" \
-    --from-literal=ATE_API_REDIS_CLIENT_CERT="" \
-    --dry-run=client -o yaml | run_kubectl apply -f -
 }
 
 apply_kind_extras() {
@@ -199,9 +139,6 @@ wait_rollouts() {
 ensure_namespace
 ensure_kind_local_registry
 apply_crds
-bootstrap_jwt_tls
-bootstrap_session_id_secrets
-bootstrap_envvars_configmap
 apply_chart
 apply_kind_extras
 wait_rollouts
