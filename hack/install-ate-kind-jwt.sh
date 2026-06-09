@@ -33,9 +33,12 @@ set -o errexit -o nounset -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NS="${NS:-ate-system}"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kind}"
 KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}"
 KO_DOCKER_REPO="${KO_DOCKER_REPO:-localhost:5001}"
 KO_DEFAULTPLATFORMS="${KO_DEFAULTPLATFORMS:-linux/$(go env GOARCH)}"
+reg_name="kind-registry"
+reg_port="5001"
 
 export KO_DOCKER_REPO KO_DEFAULTPLATFORMS
 
@@ -50,6 +53,52 @@ log_step() {
 ensure_namespace() {
   log_step "ensure_namespace ${NS}"
   run_kubectl create namespace "${NS}" --dry-run=client -o yaml | run_kubectl apply -f -
+}
+
+ensure_kind_local_registry() {
+  log_step "ensure_kind_local_registry"
+
+  if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)" == "true" ]; then
+    if ! docker port "${reg_name}" | grep -q "${reg_port}"; then
+      echo "Registry exists but is not mapped to port ${reg_port}. Recreating..."
+      docker rm -f "${reg_name}"
+    fi
+  fi
+
+  if [ "$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)" != "true" ]; then
+    docker run \
+      -d --restart=always \
+      --label created-by=agent-substrate \
+      -p "127.0.0.1:${reg_port}:5000" \
+      -p "[::1]:${reg_port}:5000" \
+      --network bridge --name "${reg_name}" \
+      registry:3
+  fi
+
+  if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' "${reg_name}")" = "null" ]; then
+    docker network connect "kind" "${reg_name}"
+  fi
+
+  local registry_dir="/etc/containerd/certs.d/localhost:${reg_port}"
+  local node
+  for node in $("${ROOT}"/hack/kind.sh get nodes --name "${KIND_CLUSTER_NAME}"); do
+    docker exec "${node}" mkdir -p "${registry_dir}"
+    cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
+[host."http://${reg_name}:5000"]
+EOF
+  done
+
+  cat <<EOF | run_kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:${reg_port}"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+EOF
 }
 
 # Generate a self-signed CA + server cert pair and install them as the
@@ -144,6 +193,7 @@ wait_rollouts() {
 }
 
 ensure_namespace
+ensure_kind_local_registry
 apply_crds
 bootstrap_jwt_tls
 bootstrap_session_id_secrets

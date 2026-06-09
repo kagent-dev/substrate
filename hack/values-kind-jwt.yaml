@@ -31,6 +31,10 @@ createNamespace: true
 otel:
   endpoint: http://opentelemetry-collector.otel-system.svc:4317
 
+monitoring:
+  gkePodMonitoring:
+    enabled: false
+
 atelet:
   gcpAuthForImagePulls: false
   storageBackend: s3

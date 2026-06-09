@@ -92,6 +92,10 @@ ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 otel:
   endpoint: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
 
+monitoring:
+  gkePodMonitoring:
+    enabled: true
+
 image:
   registry: ko://github.com/agent-substrate/substrate/cmd
   tag: ""

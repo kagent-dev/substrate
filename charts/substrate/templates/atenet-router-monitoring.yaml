@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- if .Values.monitoring.gkePodMonitoring.enabled }}
 # Scrape the Envoy sidecar's admin /stats/prometheus endpoint so its end-to-end
 # request-latency histogram (envoy_http_downstream_rq_time, milliseconds) reaches
 # Google Managed Prometheus. This is E2E *context* for the per-stage latency
@@ -35,3 +36,4 @@ spec:
   - port: admin
     path: /stats/prometheus
     interval: 30s
+{{- end }}
