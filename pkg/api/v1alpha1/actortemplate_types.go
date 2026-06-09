@@ -90,9 +90,16 @@ type ActorTemplateSpec struct {
 	WorkerPoolRef corev1.ObjectReference `json:"workerPoolRef"`
 
 	// Parameters for fetching the runsc binary to use.
+	// Required when the referenced WorkerPool uses the GVisor backend.
 	//
-	// +required
+	// +optional
 	Runsc RunscConfig `json:"runsc,omitempty"`
+
+	// Parameters for fetching the cloud-hypervisor binary to use.
+	// Required when the referenced WorkerPool uses the CloudHypervisor backend.
+	//
+	// +optional
+	CloudHypervisor *CloudHypervisorConfig `json:"cloudHypervisor,omitempty"`
 }
 
 type GCPAuthenticationConfig struct {
@@ -133,6 +140,35 @@ type RunscConfig struct {
 	ARM64 *RunscPlatformConfig `json:"arm64,omitempty"`
 
 	// How should atelet authenticate to download the runsc binary?
+	Authentication AuthenticationConfig `json:"authentication,omitempty"`
+}
+
+// CloudHypervisorPlatformConfig holds the download location for a single-arch cloud-hypervisor binary.
+type CloudHypervisorPlatformConfig struct {
+	// The SHA256 hash of the binary to download.
+	//
+	// +required
+	SHA256Hash string `json:"sha256Hash,omitempty"`
+
+	// A gs:// or s3:// URL pointing to the cloud-hypervisor binary.
+	//
+	// +required
+	URL string `json:"url,omitempty"`
+}
+
+// CloudHypervisorConfig holds parameters for fetching the cloud-hypervisor binary.
+type CloudHypervisorConfig struct {
+	// Configuration for the amd64 binary.
+	//
+	// +optional
+	AMD64 *CloudHypervisorPlatformConfig `json:"amd64,omitempty"`
+
+	// Configuration for the arm64 binary.
+	//
+	// +optional
+	ARM64 *CloudHypervisorPlatformConfig `json:"arm64,omitempty"`
+
+	// How should atelet authenticate to download the binary?
 	Authentication AuthenticationConfig `json:"authentication,omitempty"`
 }
 

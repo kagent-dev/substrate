@@ -18,6 +18,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// AteomBackend selects the workload execution backend for a WorkerPool.
+// +kubebuilder:validation:Enum=GVisor;CloudHypervisor
+type AteomBackend string
+
+const (
+	// AteomBackendGVisor uses gVisor (runsc) for sandboxed container execution.
+	AteomBackendGVisor AteomBackend = "GVisor"
+
+	// AteomBackendCloudHypervisor uses Cloud Hypervisor for microVM-based execution.
+	AteomBackendCloudHypervisor AteomBackend = "CloudHypervisor"
+)
+
 type WorkerPoolSpec struct {
 	// Replicas is the number of worker pods to run.
 	// +required
@@ -27,6 +39,12 @@ type WorkerPoolSpec struct {
 	// AteomImage is the ateom container image to deploy as workers.
 	// +required
 	AteomImage string `json:"ateomImage"`
+
+	// Backend selects the workload execution backend.
+	// Defaults to GVisor if unset.
+	// +optional
+	// +kubebuilder:default=GVisor
+	Backend AteomBackend `json:"backend,omitempty"`
 }
 
 type WorkerPoolStatus struct {
