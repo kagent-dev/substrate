@@ -78,8 +78,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+{{- if .Values.otel.endpoint }}
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: {{ .Values.otel.endpoint }}
+          value: {{ .Values.otel.endpoint | quote }}
+{{- end }}
         - name: ATE_STORAGE_BACKEND
           value: {{ .Values.atelet.storageBackend | quote }}
 {{- with .Values.atelet.extraEnv }}

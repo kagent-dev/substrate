@@ -75,11 +75,11 @@ valkey:
   replicas: 6
   storageSize: 1Gi
 
-# atelet daemonset overrides. Defaults match GKE; kind/dev installs override
-# via hack/values-kind-jwt.yaml. extraArgs / extraEnv are appended verbatim
-# for installer-specific knobs (e.g. AWS_* for rustfs/S3 storage).
+# atelet daemonset overrides. Defaults avoid cloud-specific integrations.
+# extraArgs / extraEnv are appended verbatim for installer-specific knobs
+# (e.g. AWS_* for rustfs/S3 storage).
 atelet:
-  gcpAuthForImagePulls: true
+  gcpAuthForImagePulls: false
   storageBackend: gcs
   extraArgs: []
   extraEnv: []
@@ -101,11 +101,11 @@ redis:
 ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 
 otel:
-  endpoint: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
+  endpoint: ""
 
 monitoring:
   gkePodMonitoring:
-    enabled: true
+    enabled: false
 
 image:
   registry: ghcr.io/kagent-dev/substrate

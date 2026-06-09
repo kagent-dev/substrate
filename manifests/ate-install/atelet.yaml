@@ -68,7 +68,7 @@ spec:
       - name: atelet
         image: ko://github.com/agent-substrate/substrate/cmd/atelet
         args:
-        - --gcp-auth-for-image-pulls=true
+        - --gcp-auth-for-image-pulls=false
         securityContext:
           privileged: true
         env:
@@ -76,8 +76,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
         - name: ATE_STORAGE_BACKEND
           value: "gcs"
         ports:

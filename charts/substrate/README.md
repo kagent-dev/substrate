@@ -67,3 +67,6 @@ See `values.yaml` for the full set; the important keys:
 | `valkey.replicas` | `6` | StatefulSet size |
 | `redis.clusterAddress` | `""` (in-cluster) | Override to use external Redis |
 | `redis.useIAMAuth` | `false` | Google IAM auth |
+| `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
+| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces/metrics |
+| `monitoring.gkePodMonitoring.enabled` | `false` | Enable only on clusters with the GKE/GMP `PodMonitoring` CRD |

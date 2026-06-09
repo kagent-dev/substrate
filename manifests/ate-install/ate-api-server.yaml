@@ -116,8 +116,6 @@ spec:
               fieldPath: metadata.uid
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),service.instance.id=$(POD_UID)
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
         envFrom:
         - configMapRef:
             name: ate-api-server-envvars
