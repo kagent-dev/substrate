@@ -38,7 +38,7 @@ fi
 # ATE_DEMOS is an array that registers the prefix name of the demo functions.
 ATE_DEMOS=()
 
-ATE_INSTALL_ATENET_ROUTER="${ATE_INSTALL_ATENET_ROUTER:-envoy}"
+ATE_INSTALL_ATENET_ROUTER="${ATE_INSTALL_ATENET_ROUTER:-agentgateway}"
 
 # Include demos.
 source "${ROOT}"/hack/install-demo-counter.sh
@@ -62,7 +62,7 @@ function usage() {
   echo "Overall infrastructure (all infrastructure components):"
   echo ""
   echo "  --deploy-ate-system                    Deploy core system (CRDs, atelet, apiserver)"
-  echo "  --router=envoy|agentgateway            Select atenet-router implementation (default: envoy)"
+  echo "  --router=envoy|agentgateway            Select atenet-router implementation (default: agentgateway)"
   echo "  --delete-ate-system                    Delete core system"
   echo "  --delete-all                           Delete core system and all registered demos"
   echo ""

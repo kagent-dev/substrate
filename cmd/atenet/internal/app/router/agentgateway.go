@@ -116,6 +116,9 @@ binds:
 }
 
 func (p agentgatewayProvider) routeBlock(name string) string {
+	extprocHost := fmt.Sprintf("%s:%d", p.cfg.ExtprocAddr, p.cfg.ExtprocPort)
+	// processingOptions limit ext_proc to request headers only; agentgateway defaults
+	// break WebSocket upgrades because this server only handles headers.
 	return fmt.Sprintf(`- name: %s
   matches:
   - path:
@@ -124,9 +127,16 @@ func (p agentgatewayProvider) routeBlock(name string) string {
     extProc:
       host: %q
       failureMode: failClosed
+      processingOptions:
+        requestBodyMode: none
+        responseBodyMode: none
+        requestHeaderMode: send
+        responseHeaderMode: skip
+        requestTrailerMode: skip
+        responseTrailerMode: skip
   backends:
   - dynamic: {}
-`, name, fmt.Sprintf("%s:%d", p.cfg.ExtprocAddr, p.cfg.ExtprocPort))
+`, name, extprocHost)
 }
 
 func indent(s string, spaces int) string {
