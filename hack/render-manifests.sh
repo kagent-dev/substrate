@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Render the substrate Helm chart into manifests/ate-install/ (mTLS-mode
 # install) — the canonical kubectl-apply install path. The chart at
 # charts/substrate/ is the single source of truth; this script only renders.
@@ -101,4 +116,5 @@ fi
 mkdir -p "${OUT_DIR}"
 find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' -delete
 cp "${TMP_DIR}/out/"*.yaml "${OUT_DIR}/"
-echo "Rendered $(ls "${OUT_DIR}"/*.yaml | wc -l | xargs) manifest files into ${OUT_DIR}"
+rendered_count="$(find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' | wc -l | xargs)"
+echo "Rendered ${rendered_count} manifest files into ${OUT_DIR}"

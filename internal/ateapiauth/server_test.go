@@ -86,7 +86,7 @@ func TestBearerToken(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var ctx context.Context = context.Background()
+			ctx := context.Background()
 			if tc.hdr != "" {
 				ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", tc.hdr))
 			}

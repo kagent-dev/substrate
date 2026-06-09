@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Generate the controller ClusterRole into the Helm chart and templatize its
 # name so multi-release installs do not collide on a cluster-scoped resource.
 #
@@ -13,7 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ROOT}/charts/substrate/templates/role.yaml"
 
 bash "${ROOT}/hack/run-tool.sh" controller-gen \
-  "rbac:headerFile=${ROOT}/hack/boilerplate/yaml.txt,roleName=ate-controller" \
+  "rbac:headerFile=${ROOT}/hack/boilerplate/sh.txt,roleName=ate-controller" \
   paths="${ROOT}/internal/controllers/..." \
   "output:rbac:artifacts:config=${ROOT}/charts/substrate/templates/"
 

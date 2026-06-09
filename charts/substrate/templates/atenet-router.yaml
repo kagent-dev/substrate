@@ -1,3 +1,19 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -101,6 +117,9 @@ spec:
     metadata:
       labels:
         app: atenet-router
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atenet-router" .) }}
 {{- if eq .Values.auth.mode "jwt" }}
@@ -143,6 +162,23 @@ spec:
 {{- else }}
         - "--envoy-cert-path=/run/envoy-tls/credential-bundle.pem"
 {{- end }}
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),service.instance.id=$(POD_UID)
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint }}
         ports:
         - name: xds
           containerPort: 18000
@@ -150,6 +186,8 @@ spec:
           containerPort: 50051
         - name: status
           containerPort: 4040
+        - name: metrics
+          containerPort: 9090
 {{- if eq .Values.auth.mode "jwt" }}
         volumeMounts:
         - name: ateapi-ca
