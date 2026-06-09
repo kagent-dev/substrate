@@ -77,25 +77,18 @@ func (c *Client) put(ctx context.Context, path string, body any) error {
 // --- API types ---
 
 type PayloadConfig struct {
-	Kernel  string `json:"kernel"`
-	Cmdline string `json:"cmdline,omitempty"`
+	Kernel    string `json:"kernel"`
+	Initramfs string `json:"initramfs,omitempty"`
+	Cmdline   string `json:"cmdline,omitempty"`
 }
 
 type MemoryConfig struct {
-	Size string `json:"size"`
+	Size uint64 `json:"size"`
 }
 
 type CpusConfig struct {
 	BootVcpus int `json:"boot_vcpus"`
 	MaxVcpus  int `json:"max_vcpus"`
-}
-
-// FsConfig wires a virtiofsd socket into the VM as a virtio-fs device.
-type FsConfig struct {
-	Tag       string `json:"tag"`
-	Socket    string `json:"socket"`
-	NumQueues int    `json:"num_queues"`
-	QueueSize int    `json:"queue_size"`
 }
 
 // NetConfig attaches a tap device to the VM as a virtio-net device.
@@ -113,7 +106,6 @@ type VmConfig struct {
 	Payload *PayloadConfig `json:"payload"`
 	Memory  *MemoryConfig  `json:"memory,omitempty"`
 	Cpus    *CpusConfig    `json:"cpus,omitempty"`
-	Fs      []FsConfig     `json:"fs,omitempty"`
 	Net     []NetConfig    `json:"net,omitempty"`
 	Serial  *SerialConfig  `json:"serial,omitempty"`
 	Console *SerialConfig  `json:"console,omitempty"`

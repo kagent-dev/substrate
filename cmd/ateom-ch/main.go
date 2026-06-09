@@ -112,10 +112,8 @@ func do(ctx context.Context) error {
 // runningActor holds handles to the processes and resources of the live VM.
 type runningActor struct {
 	chCmd      *exec.Cmd
-	vfCmd      *exec.Cmd
 	chClient   *ch.Client
 	tapActorID string
-	vfsockPath string
 }
 
 // AteomService implements ateompb.AteomServer using Cloud Hypervisor.

@@ -21,7 +21,6 @@ import "path/filepath"
 const (
 	// Binaries baked into the ateom-ch container image.
 	cloudHypervisorBin = "/usr/local/bin/cloud-hypervisor"
-	virtiofsdBin       = "/usr/local/bin/virtiofsd"
 	guestKernel        = "/usr/local/share/ateom-ch/vmlinux"
 
 	// basePath is the host directory mounted into the ateom-ch container,
@@ -31,24 +30,14 @@ const (
 	// atelet's existing bundle-preparation logic needs no changes for phase 2.
 	basePath = "/var/lib/ateom-gvisor"
 
-	// runtimeBasePath holds per-pod cloud-hypervisor API sockets and virtiofsd
-	// sockets.  Kept on tmpfs (/run) so it survives only for the pod lifetime.
+	// runtimeBasePath holds per-pod cloud-hypervisor API sockets.
+	// Kept on tmpfs (/run) so it survives only for the pod lifetime.
 	runtimeBasePath = "/run/ateom-ch"
 )
 
 // chSockPath returns the cloud-hypervisor API unix socket for this pod.
 func chSockPath(podUID string) string {
 	return filepath.Join(runtimeBasePath, podUID, "ch.sock")
-}
-
-// chPidFile returns the pidfile for the cloud-hypervisor process.
-func chPidFile(podUID string) string {
-	return filepath.Join(runtimeBasePath, podUID, "ch.pid")
-}
-
-// virtiofsdSockPath returns the virtiofsd socket for a given actor+container.
-func virtiofsdSockPath(podUID, actorID, containerName string) string {
-	return filepath.Join(runtimeBasePath, podUID, actorID+"-"+containerName+".virtiofsd.sock")
 }
 
 // actorRuntimeDir is the runtime directory for a running actor.

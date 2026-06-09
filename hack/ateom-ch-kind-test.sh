@@ -68,9 +68,8 @@ EOF
 "${ROOT}/hack/kind.sh" create cluster \
     --name "${CLUSTER}" \
     --config /tmp/ateom-ch-kind-config.yaml
-export KUBECONFIG
-KUBECONFIG="$(${ROOT}/hack/kind.sh get kubeconfig --name "${CLUSTER}" 2>/dev/null)" || \
-    KUBECONFIG="${HOME}/.kube/config"
+# kind already merged the context into ~/.kube/config on cluster creation.
+export KUBECONFIG="${HOME}/.kube/config"
 
 # Verify /dev/kvm is visible inside the kind node.
 KINDNODE="$( "${ROOT}/hack/kind.sh" get nodes --name "${CLUSTER}" | head -1 )"
@@ -151,9 +150,12 @@ RESTORE_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/restore-state"
 echo ""
 echo "→ Running ateom-ch lifecycle test inside pod..."
 
-kubectl --context "kind-${CLUSTER}" exec "${POD}" \
-    --namespace "${NAMESPACE}" \
-    -- bash -euo pipefail -s <<SCRIPT
+# Write test script to a tmpfile, copy into pod, then execute.
+# (kubectl exec -- bash -s <<HEREDOC doesn't forward stdin reliably in scripts.)
+TMPSCRIPT="$(mktemp /tmp/ateom-ch-test-XXXX.sh)"
+trap 'rm -f "${TMPSCRIPT}"' EXIT
+
+cat > "${TMPSCRIPT}" <<SCRIPT
 
 set -euo pipefail
 
@@ -214,7 +216,8 @@ echo ""
 echo "  Socket ready: \${SOCKET}"
 
 grpc() {
-    grpcurl -plaintext -unix "\${SOCKET}" -d "\$2" "ateom.Ateom/\$1"
+    local method="\$1" body="\$2"
+    grpcurl -plaintext -unix -d "\${body}" "\${SOCKET}" "ateom.Ateom/\${method}"
 }
 
 # ── 3. RunWorkload ────────────────────────────────────────────────────────────
@@ -292,6 +295,13 @@ echo "PASS: ateom-ch RunWorkload → Checkpoint → Restore → Checkpoint"
 echo "────────────────────────────────────────────────"
 
 SCRIPT
+
+kubectl --context "kind-${CLUSTER}" cp \
+    "${TMPSCRIPT}" "${NAMESPACE}/${POD}:/tmp/ateom-ch-test.sh"
+
+kubectl --context "kind-${CLUSTER}" exec "${POD}" \
+    --namespace "${NAMESPACE}" \
+    -- bash -euo pipefail /tmp/ateom-ch-test.sh
 
 echo ""
 echo "Test passed."
