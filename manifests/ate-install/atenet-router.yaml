@@ -125,6 +125,7 @@ spec:
         image: ko://github.com/agent-substrate/substrate/cmd/atenet
         args:
         - "router"
+        - "--networking-mode=envoy"
         - "--standalone"
         - "--namespace=ate-system"
         - "--port-http=8080"
@@ -134,7 +135,8 @@ spec:
         - "--ateapi-address=api.ate-system.svc:443"
         - "--status-port=4040"
         - "--port-https=8443"
-        - "--envoy-cert-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
+        - "--tls-cert-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
+        - "--tls-key-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         env:
         - name: POD_NAME
           valueFrom:
