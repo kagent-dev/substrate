@@ -1,0 +1,197 @@
+#  Copyright 2026 Google LLC
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: atenet-router
+  namespace: ate-system
+  labels:
+    app: atenet-router
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: atenet-router
+rules:
+- apiGroups:
+  - "ate.dev"
+  resources:
+  - actortemplates
+  verbs:
+  - get
+  - watch
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atenet-router
+subjects:
+- kind: ServiceAccount
+  name: atenet-router
+  namespace: ate-system
+roleRef:
+  kind: ClusterRole
+  name: atenet-router
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atenet-router-agentgateway-config
+  namespace: ate-system
+data:
+  config.yaml: |
+    binds:
+    - port: 8080
+      listeners:
+      - name: http
+        protocol: HTTP
+        routes:
+        - name: substrate-http
+          matches:
+          - path:
+              pathPrefix: /
+          policies:
+            extProc:
+              host: "127.0.0.1:50051"
+              processingOptions:
+                requestBodyMode: none
+                responseBodyMode: none
+                requestHeaderMode: send
+                responseHeaderMode: skip
+                requestTrailerMode: skip
+                responseTrailerMode: skip
+          backends:
+          - dynamic: {}
+    - port: 8443
+      listeners:
+      - name: https
+        protocol: HTTPS
+        tls:
+          cert: "/run/servicedns.podcert.ate.dev/cert.pem"
+          key: "/run/servicedns.podcert.ate.dev/key.pem"
+        routes:
+        - name: substrate-https
+          matches:
+          - path:
+              pathPrefix: /
+          policies:
+            extProc:
+              host: "127.0.0.1:50051"
+              processingOptions:
+                requestBodyMode: none
+                responseBodyMode: none
+                requestHeaderMode: send
+                responseHeaderMode: skip
+                requestTrailerMode: skip
+                responseTrailerMode: skip
+          backends:
+          - dynamic: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atenet-router
+  namespace: ate-system
+  labels:
+    app: atenet-router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atenet-router
+  template:
+    metadata:
+      labels:
+        app: atenet-router
+    spec:
+      serviceAccountName: atenet-router
+      containers:
+      - name: atenet-router
+        image: ko://github.com/agent-substrate/substrate/cmd/atenet
+        args:
+        - "router"
+        - "--networking-mode=agentgateway"
+        - "--standalone"
+        - "--namespace=ate-system"
+        - "--port-http=8080"
+        - "--port-extproc=50051"
+        - "--extproc-address=127.0.0.1"
+        - "--ateapi-address=api.ate-system.svc:443"
+        - "--status-port=4040"
+        - "--port-https=8443"
+        - "--tls-cert-path=/run/servicedns.podcert.ate.dev/cert.pem"
+        - "--tls-key-path=/run/servicedns.podcert.ate.dev/key.pem"
+        ports:
+        - name: extproc
+          containerPort: 50051
+        - name: status
+          containerPort: 4040
+      - name: agentgateway
+        image: cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1
+        args:
+        - "-f"
+        - "/etc/agentgateway/config.yaml"
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: https
+          containerPort: 8443
+        - name: readiness
+          containerPort: 15021
+        - name: metrics
+          containerPort: 15020
+        readinessProbe:
+          httpGet:
+            path: /healthz/ready
+            port: 15021
+          periodSeconds: 10
+        volumeMounts:
+        - name: agentgateway-config
+          mountPath: /etc/agentgateway
+        - name: "servicedns"
+          mountPath: "/run/servicedns.podcert.ate.dev"
+      volumes:
+      - name: agentgateway-config
+        configMap:
+          name: atenet-router-agentgateway-config
+      - name: "servicedns"
+        projected:
+          sources:
+          - podCertificate:
+              signerName: servicedns.podcert.ate.dev/identity
+              keyType: ECDSAP256
+              certificateChainPath: cert.pem
+              keyPath: key.pem
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atenet-router
+  namespace: ate-system
+spec:
+  type: ClusterIP
+  selector:
+    app: atenet-router
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP
