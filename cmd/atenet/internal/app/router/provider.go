@@ -44,10 +44,10 @@ type proxyProvider interface {
 
 func newProxyProvider(cfg RouterConfig) (proxyProvider, error) {
 	switch strings.ToLower(cfg.NetworkingMode) {
-	case "", NetworkingModeEnvoy:
-		return envoyProvider{cfg: cfg}, nil
-	case NetworkingModeAgentgateway:
+	case "", NetworkingModeAgentgateway:
 		return agentgatewayProvider{cfg: cfg}, nil
+	case NetworkingModeEnvoy:
+		return envoyProvider{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unsupported networking mode %q", cfg.NetworkingMode)
 	}
