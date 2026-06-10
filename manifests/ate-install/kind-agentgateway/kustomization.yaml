@@ -20,7 +20,7 @@ resources:
   - ../ate-controller.yaml
   - ../kind/atelet
   - ../atenet-dns.yaml
-  - ../atenet-router-agentgateway.yaml
+  - ../atenet-router.yaml
   - ../valkey.yaml
   - ../pod-certificate-controller.yaml
   - ../kind/rustfs.yaml
