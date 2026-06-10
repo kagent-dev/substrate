@@ -2,19 +2,25 @@
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ateom-ch      ./cmd/ateom-ch
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /testinit       ./hack/testinit
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ateom-ch  ./cmd/ateom-ch
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /testinit  ./hack/testinit
 
 # Runtime stage: ateom-ch + Cloud Hypervisor ecosystem binaries.
 # Ubuntu 24.04 ships virtiofsd in its main repo; Debian bookworm does not.
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates iproute2 cpio \
+        curl ca-certificates iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
+# virtiofsd — latest static musl binary from upstream (v1.13+, supports DEVICE_STATE).
+RUN curl -fsSL \
+    "https://gitlab.com/virtio-fs/virtiofsd/-/jobs/artifacts/main/raw/target/x86_64-unknown-linux-musl/release/virtiofsd?job=publish" \
+    -o /usr/local/bin/virtiofsd \
+    && chmod +x /usr/local/bin/virtiofsd
+
 # cloud-hypervisor — static binary, no libc dependency.
-ARG CH_VERSION=v43.0
+ARG CH_VERSION=v52.0
 RUN curl -fsSL \
     "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}/cloud-hypervisor-static" \
     -o /usr/local/bin/cloud-hypervisor \
@@ -34,7 +40,7 @@ RUN curl -fsSL \
     | tar xz -C /usr/local/bin grpcurl
 
 COPY --from=build /ateom-ch  /usr/local/bin/ateom-ch
-# testinit is used to populate the OCI bundle rootfs inside the test pod.
+# testinit is used inside the VM as PID 1 during kind-cluster tests.
 COPY --from=build /testinit  /usr/local/share/ateom-ch/testinit
 
 ENTRYPOINT ["/usr/local/bin/ateom-ch"]

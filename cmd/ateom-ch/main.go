@@ -102,6 +102,8 @@ func do(ctx context.Context) error {
 	ateompb.RegisterAteomServer(svr, svc)
 	reflection.Register(svr)
 
+	svc.warmUp(ctx)
+
 	slog.InfoContext(ctx, "ateom-ch listening", slog.String("sock", sockPath))
 	if err := svr.Serve(lis); err != nil {
 		return fmt.Errorf("grpc serve: %w", err)
@@ -112,8 +114,10 @@ func do(ctx context.Context) error {
 // runningActor holds handles to the processes and resources of the live VM.
 type runningActor struct {
 	chCmd      *exec.Cmd
+	vfCmd      *exec.Cmd
 	chClient   *ch.Client
 	tapActorID string
+	vfsockPath string
 }
 
 // AteomService implements ateompb.AteomServer using Cloud Hypervisor.
@@ -123,6 +127,10 @@ type AteomService struct {
 	lock        sync.Mutex
 	podUID      string
 	actorLogger *ateom.ActorLogger
+
+	// prewarm holds a pre-started CH process ready for VmCreate or VmRestore.
+	// Nil until warmUp completes or doPrewarm fires. Consumed by acquireVM.
+	prewarm *prewarmCHState
 
 	// running is non-nil when a VM is currently executing.
 	running *runningActor

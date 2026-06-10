@@ -299,9 +299,21 @@ SCRIPT
 kubectl --context "kind-${CLUSTER}" cp \
     "${TMPSCRIPT}" "${NAMESPACE}/${POD}:/tmp/ateom-ch-test.sh"
 
+# kubectl exec can return non-zero due to WebSocket stream teardown noise even
+# when the remote script exits 0. Stream output into a tmpfile so we can check
+# for the PASS marker regardless of kubectl's own exit code.
+_out="$(mktemp)"
 kubectl --context "kind-${CLUSTER}" exec "${POD}" \
     --namespace "${NAMESPACE}" \
-    -- bash -euo pipefail /tmp/ateom-ch-test.sh
+    -- bash -euo pipefail /tmp/ateom-ch-test.sh \
+    2>/dev/null | tee "${_out}" || true
+if ! grep -q "^PASS:" "${_out}"; then
+  rm -f "${_out}"
+  echo "" >&2
+  echo "FAIL: test script did not print PASS marker" >&2
+  exit 1
+fi
+rm -f "${_out}"
 
 echo ""
 echo "Test passed."

@@ -33,11 +33,12 @@ import (
 )
 
 const (
-	vmMemoryBytes = 128 * 1024 * 1024 // 128 MiB
+	vmMemoryBytes = 64 * 1024 * 1024 // 64 MiB — keeps VmRestore under ~50ms
 	vmVcpus       = 2
+	rootfsTag     = "rootfs"
 
-	// Timeout for cloud-hypervisor to expose its API socket after launch.
 	chReadyTimeout = 15 * time.Second
+	vfReadyTimeout = 10 * time.Second
 )
 
 // ociProcess is the subset of an OCI config.json process spec we need.
@@ -62,31 +63,50 @@ func readOCIEntrypoint(bundlePath string) ([]string, error) {
 	return cfg.Process.Args, nil
 }
 
-// createInitramfs packs bundlePath/rootfs into a cpio initramfs at outPath.
-// The rootfs becomes the root filesystem inside the VM; the kernel boots
-// directly from it without any external filesystem devices.
-func createInitramfs(rootfsPath, outPath string) error {
-	// "find . | cpio -o -H newc" produces a newc-format cpio archive.
-	// We run it from inside rootfsPath so paths in the archive are relative.
-	script := fmt.Sprintf("cd %q && find . | cpio -o -H newc -R 0:0 > %q", rootfsPath, outPath)
-	cmd := exec.Command("sh", "-c", script)
+// startVirtiofsd launches virtiofsd sharing sharedDir over sockPath.
+// Uses context.Background() so it outlives the gRPC request context.
+func startVirtiofsd(sockPath, sharedDir string) (*exec.Cmd, error) {
+	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir for virtiofsd sock: %w", err)
+	}
+	_ = os.Remove(sockPath)
+
+	cmd := exec.CommandContext(context.Background(), virtiofsdBin,
+		"--socket-path", sockPath,
+		"--shared-dir", sharedDir,
+		"--cache", "auto",
+		"--sandbox", "none",
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("creating initramfs cpio: %w", err)
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting virtiofsd: %w", err)
 	}
-	return nil
+
+	deadline := time.Now().Add(vfReadyTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(sockPath); err != nil {
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("virtiofsd socket %q did not appear: %w", sockPath, err)
+	}
+	return cmd, nil
 }
 
 // startCloudHypervisor launches the cloud-hypervisor process and waits for its
 // API socket to appear, then returns a connected client and the process handle.
-func startCloudHypervisor(ctx context.Context, sockPath string) (*ch.Client, *exec.Cmd, error) {
+// Uses context.Background() so it outlives the gRPC request context.
+func startCloudHypervisor(sockPath string) (*ch.Client, *exec.Cmd, error) {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("mkdir for ch sock: %w", err)
 	}
 	_ = os.Remove(sockPath)
 
-	cmd := exec.CommandContext(ctx, cloudHypervisorBin,
+	cmd := exec.CommandContext(context.Background(), cloudHypervisorBin,
 		"--api-socket", sockPath,
 		"--log-file", "/dev/stderr",
 		"-v",
@@ -108,16 +128,153 @@ func startCloudHypervisor(ctx context.Context, sockPath string) (*ch.Client, *ex
 		_ = cmd.Process.Kill()
 		return nil, nil, fmt.Errorf("cloud-hypervisor API socket %q did not appear: %w", sockPath, err)
 	}
-
-	client := ch.NewClient(sockPath)
-	return client, cmd, nil
+	return ch.NewClient(sockPath), cmd, nil
 }
 
-// RunWorkload boots a new Cloud Hypervisor microVM for the actor.
+// startedVM holds the handles to a ready virtiofsd+CH pair.
+type startedVM struct {
+	vfCmd    *exec.Cmd
+	chClient *ch.Client
+	chCmd    *exec.Cmd
+}
+
+// prewarmCHState holds a pre-started cloud-hypervisor process, ready to receive
+// VmCreate or VmRestore without the ~50ms startup overhead on the critical path.
+type prewarmCHState struct {
+	client *ch.Client
+	cmd    *exec.Cmd
+}
+
+// warmUp pre-warms a cloud-hypervisor process so RunWorkload doesn't pay CH
+// startup latency (~50ms) on the first call. Called once before gRPC starts.
+func (s *AteomService) warmUp(ctx context.Context) {
+	slog.InfoContext(ctx, "Pre-warming cloud-hypervisor")
+	client, cmd, err := startCloudHypervisor(chSockPath(s.podUID))
+	if err != nil {
+		slog.WarnContext(ctx, "CH prewarm failed, first call will be slower", slog.Any("err", err))
+		return
+	}
+	s.prewarm = &prewarmCHState{client: client, cmd: cmd}
+	slog.InfoContext(ctx, "Cloud-hypervisor pre-warmed and ready")
+}
+
+// doPrewarm starts a background CH process and stores it in s.prewarm.
+// If s.prewarm is already set when the goroutine acquires the lock, the newly
+// started CH is discarded (another goroutine beat us).
+func (s *AteomService) doPrewarm() {
+	slog.Info("Pre-warming cloud-hypervisor in background")
+	client, cmd, err := startCloudHypervisor(chSockPath(s.podUID))
+	if err != nil {
+		slog.Warn("Background CH prewarm failed", slog.Any("err", err))
+		return
+	}
+	s.lock.Lock()
+	if s.prewarm != nil {
+		_ = cmd.Process.Kill() // lost the race; discard
+	} else {
+		s.prewarm = &prewarmCHState{client: client, cmd: cmd}
+		slog.Info("Background cloud-hypervisor pre-warm ready")
+	}
+	s.lock.Unlock()
+}
+
+// acquireVM returns a ready VM context: virtiofsd serving rootfsPath, a CH
+// process with an open API socket, and a tap device. If a pre-warmed CH is
+// available it is consumed (saving ~50ms); otherwise CH and virtiofsd start
+// in parallel.
 //
-// The OCI bundle rootfs is packed into a cpio initramfs and loaded directly
-// into VM RAM. This avoids vhost-user-fs entirely, making checkpoint/restore
-// clean: the entire filesystem state lives in the VM memory snapshot.
+// On success the caller owns all returned resources and must clean them up.
+// On error, returned processes (if any) have already been killed.
+func (s *AteomService) acquireVM(ctx context.Context, rootfsPath string) (*startedVM, error) {
+	vfsock := virtiofsdSockPath(s.podUID)
+
+	pw := s.prewarm
+	s.prewarm = nil
+
+	if pw != nil {
+		// Fast path: CH already running. Start virtiofsd and tap concurrently.
+		type vfr struct {
+			cmd *exec.Cmd
+			err error
+		}
+		vfCh := make(chan vfr, 1)
+		go func() {
+			cmd, err := startVirtiofsd(vfsock, rootfsPath)
+			vfCh <- vfr{cmd, err}
+		}()
+		_, tapErr := createTap(ctx, tapActorID)
+		r := <-vfCh
+
+		if tapErr != nil || r.err != nil {
+			if r.cmd != nil {
+				_ = r.cmd.Process.Kill()
+			}
+			_ = pw.cmd.Process.Kill()
+			if tapErr == nil {
+				_ = deleteTap(ctx, tapActorID)
+			}
+			if tapErr != nil {
+				return nil, tapErr
+			}
+			return nil, r.err
+		}
+		return &startedVM{vfCmd: r.cmd, chClient: pw.client, chCmd: pw.cmd}, nil
+	}
+
+	// Slow path: start CH and virtiofsd in parallel with the tap.
+	chSock := chSockPath(s.podUID)
+	type vfResult struct {
+		cmd *exec.Cmd
+		err error
+	}
+	type chResult struct {
+		client *ch.Client
+		cmd    *exec.Cmd
+		err    error
+	}
+
+	vfCh := make(chan vfResult, 1)
+	chCh := make(chan chResult, 1)
+	go func() {
+		cmd, err := startVirtiofsd(vfsock, rootfsPath)
+		vfCh <- vfResult{cmd, err}
+	}()
+	go func() {
+		client, cmd, err := startCloudHypervisor(chSock)
+		chCh <- chResult{client, cmd, err}
+	}()
+
+	_, tapErr := createTap(ctx, tapActorID)
+
+	vf := <-vfCh
+	chR := <-chCh
+
+	if tapErr != nil || vf.err != nil || chR.err != nil {
+		if vf.cmd != nil {
+			_ = vf.cmd.Process.Kill()
+		}
+		if chR.cmd != nil {
+			_ = chR.cmd.Process.Kill()
+		}
+		if tapErr == nil {
+			_ = deleteTap(ctx, tapActorID)
+		}
+		if tapErr != nil {
+			return nil, tapErr
+		}
+		if vf.err != nil {
+			return nil, fmt.Errorf("virtiofsd: %w", vf.err)
+		}
+		return nil, fmt.Errorf("cloud-hypervisor: %w", chR.err)
+	}
+	return &startedVM{vfCmd: vf.cmd, chClient: chR.client, chCmd: chR.cmd}, nil
+}
+
+// RunWorkload boots a microVM for the actor.
+//
+// If a pre-warmed CH is available (from warmUp or a background doPrewarm after
+// the previous teardown) the ~50ms CH startup is skipped. Otherwise CH and
+// virtiofsd start in parallel, hiding most of their overlap.
 func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkloadRequest) (*ateompb.RunWorkloadResponse, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -142,72 +299,52 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 		return nil, fmt.Errorf("OCI config.json has empty process.args")
 	}
 
-	// Create runtime dirs.
 	if err := os.MkdirAll(actorRuntimeDir(s.podUID, id), 0o700); err != nil {
 		return nil, fmt.Errorf("creating actor runtime dir: %w", err)
 	}
 
-	// Pack rootfs into a cpio initramfs. Stored next to the bundle so it
-	// persists across checkpoint and is available at the same path on restore.
-	initramfsPath := bundlePath + ".initramfs.cpio"
-	if err := createInitramfs(rootfsPath, initramfsPath); err != nil {
-		return nil, err
-	}
-
-	// Create tap device and bridge to eth0.
-	tapDev, err := createTap(ctx, id)
+	vm, err := s.acquireVM(ctx, rootfsPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acquiring VM: %w", err)
 	}
 
-	// Launch cloud-hypervisor. Background context: must outlive the RPC request.
-	sockPath := chSockPath(s.podUID)
-	client, chCmd, err := startCloudHypervisor(context.Background(), sockPath)
-	if err != nil {
-		_ = deleteTap(ctx, id)
-		return nil, err
-	}
-
+	vfsock := virtiofsdSockPath(s.podUID)
 	cmdline := buildKernelCmdline(entrypoint)
-	slog.InfoContext(ctx, "Booting VM", slog.String("cmdline", cmdline))
-
 	vmCfg := ch.VmConfig{
-		Payload: &ch.PayloadConfig{
-			Kernel:    guestKernel,
-			Initramfs: initramfsPath,
-			Cmdline:   cmdline,
-		},
-		Memory:  &ch.MemoryConfig{Size: vmMemoryBytes},
+		Payload: &ch.PayloadConfig{Kernel: guestKernel, Cmdline: cmdline},
+		Memory:  &ch.MemoryConfig{Size: vmMemoryBytes, Shared: true},
 		Cpus:    &ch.CpusConfig{BootVcpus: vmVcpus, MaxVcpus: vmVcpus},
-		Net:     []ch.NetConfig{{Tap: tapDev, Mtu: tapMTU}},
+		Fs:      []ch.FsConfig{{Tag: rootfsTag, Socket: vfsock, NumQueues: 1, QueueSize: 1024}},
+		Net:     []ch.NetConfig{{Tap: tapName(tapActorID), Mtu: tapMTU}},
 		Serial:  &ch.SerialConfig{Mode: "File", File: "/dev/stdout"},
 		Console: &ch.SerialConfig{Mode: "Null"},
 	}
-
-	if err := client.VmCreate(ctx, vmCfg); err != nil {
-		_ = chCmd.Process.Kill()
-		_ = deleteTap(ctx, id)
+	if err := vm.chClient.VmCreate(ctx, vmCfg); err != nil {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
 		return nil, fmt.Errorf("CH VmCreate: %w", err)
 	}
-	if err := client.VmBoot(ctx); err != nil {
-		_ = chCmd.Process.Kill()
-		_ = deleteTap(ctx, id)
+	if err := vm.chClient.VmBoot(ctx); err != nil {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
 		return nil, fmt.Errorf("CH VmBoot: %w", err)
 	}
 
 	s.running = &runningActor{
-		chCmd:      chCmd,
-		chClient:   client,
-		tapActorID: id,
+		chCmd: vm.chCmd, vfCmd: vm.vfCmd, chClient: vm.chClient,
+		tapActorID: tapActorID, vfsockPath: vfsock,
 	}
+
+	// Pre-warm CH for the next operation (CheckpointWorkload → RestoreWorkload).
+	go s.doPrewarm()
 
 	s.actorLogger.EmitLifecycleLog("Actor started", id, tmpl, ns)
 	return &ateompb.RunWorkloadResponse{}, nil
 }
 
-// CheckpointWorkload snapshots the running VM, then tears everything down.
-//
-// Atelet contract: after this returns, atelet uploads checkpoint-state/ to object storage.
+// CheckpointWorkload snapshots the running VM then tears everything down.
 func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.CheckpointWorkloadRequest) (*ateompb.CheckpointWorkloadResponse, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -232,11 +369,8 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	if err := r.chClient.VmPause(ctx); err != nil {
 		return nil, fmt.Errorf("CH VmPause: %w", err)
 	}
-
-	// cloud-hypervisor expects a file:// URL.
 	snapshotURL := "file://" + checkpointDir
 	if err := r.chClient.VmSnapshot(ctx, ch.SnapshotConfig{DestinationURL: snapshotURL}); err != nil {
-		// Best-effort resume so the VM isn't stuck paused.
 		_ = r.chClient.VmResume(ctx)
 		return nil, fmt.Errorf("CH VmSnapshot: %w", err)
 	}
@@ -249,10 +383,6 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 }
 
 // RestoreWorkload restores a VM from a snapshot previously written by CheckpointWorkload.
-//
-// Atelet contract: snapshot already downloaded into ateompath.RestoreStateDir.
-// The initramfs (OCI rootfs packed at RunWorkload time) must still exist at the
-// same path recorded in the snapshot's state.json.
 func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.RestoreWorkloadRequest) (*ateompb.RestoreWorkloadResponse, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -268,70 +398,70 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 
 	restoreDir := ateompath.RestoreStateDir(ns, tmpl, id)
 	bundlePath := ateompath.OCIBundlePath(ns, tmpl, id, primaryContainer)
+	rootfsPath := filepath.Join(bundlePath, "rootfs")
 
 	if err := os.MkdirAll(actorRuntimeDir(s.podUID, id), 0o700); err != nil {
 		return nil, fmt.Errorf("creating actor runtime dir: %w", err)
 	}
 
-	// Ensure the initramfs file exists at the path recorded in state.json.
-	// Re-create it from the OCI bundle rootfs (same content as at RunWorkload time).
-	initramfsPath := bundlePath + ".initramfs.cpio"
-	if _, err := os.Stat(initramfsPath); os.IsNotExist(err) {
-		rootfsPath := filepath.Join(bundlePath, "rootfs")
-		if err := createInitramfs(rootfsPath, initramfsPath); err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := createTap(ctx, id); err != nil {
-		return nil, err
-	}
-
-	sockPath := chSockPath(s.podUID)
-	client, chCmd, err := startCloudHypervisor(context.Background(), sockPath)
+	vfsock := virtiofsdSockPath(s.podUID)
+	vm, err := s.acquireVM(ctx, rootfsPath)
 	if err != nil {
-		_ = deleteTap(ctx, id)
-		return nil, err
+		return nil, fmt.Errorf("acquiring VM: %w", err)
 	}
 
 	restoreURL := "file://" + restoreDir
-	if err := client.VmRestore(ctx, ch.RestoreConfig{SourceURL: restoreURL, Prefault: false}); err != nil {
-		_ = chCmd.Process.Kill()
-		_ = deleteTap(ctx, id)
+	if err := vm.chClient.VmRestore(ctx, ch.RestoreConfig{SourceURL: restoreURL}); err != nil {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
 		return nil, fmt.Errorf("CH VmRestore: %w", err)
 	}
-	if err := client.VmResume(ctx); err != nil {
-		_ = chCmd.Process.Kill()
-		_ = deleteTap(ctx, id)
+	if err := vm.chClient.VmResume(ctx); err != nil {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
 		return nil, fmt.Errorf("CH VmResume: %w", err)
 	}
 
 	s.running = &runningActor{
-		chCmd:      chCmd,
-		chClient:   client,
-		tapActorID: id,
+		chCmd: vm.chCmd, vfCmd: vm.vfCmd, chClient: vm.chClient,
+		tapActorID: tapActorID, vfsockPath: vfsock,
 	}
+
+	go s.doPrewarm()
 
 	s.actorLogger.EmitLifecycleLog("Actor restored", id, tmpl, ns)
 	return &ateompb.RestoreWorkloadResponse{}, nil
 }
 
-// teardown kills the CH process and removes the tap device.
+// teardown kills CH and virtiofsd and removes the tap device and vf socket.
+// Must be called while holding s.lock (it starts a doPrewarm goroutine that
+// will wait for the lock before writing to s.prewarm).
 func (s *AteomService) teardown(ctx context.Context, r *runningActor) {
 	_ = r.chClient.VmShutdown(ctx)
 	time.Sleep(500 * time.Millisecond)
 	if r.chCmd.ProcessState == nil {
 		_ = r.chCmd.Process.Kill()
 	}
+	if r.vfCmd != nil && r.vfCmd.ProcessState == nil {
+		_ = r.vfCmd.Process.Kill()
+	}
 	_ = deleteTap(ctx, r.tapActorID)
+	if r.vfsockPath != "" {
+		_ = os.Remove(r.vfsockPath)
+	}
+	// Start next pre-warm. The goroutine blocks on s.lock until the current
+	// RPC handler releases it, then fills s.prewarm for the next operation.
+	go s.doPrewarm()
 }
 
-// buildKernelCmdline constructs the Linux kernel cmdline for booting directly
-// into the OCI process entrypoint from an initramfs root.
+// buildKernelCmdline constructs the Linux kernel cmdline for a cold-boot VM.
 func buildKernelCmdline(entrypoint []string) string {
-	// With initramfs, the kernel uses it as the root filesystem automatically.
-	// init= points to the OCI entrypoint as PID 1.
 	parts := []string{
+		"root=" + rootfsTag,
+		"rootfstype=virtiofs",
+		"rw",
 		"console=ttyS0",
 		"init=" + entrypoint[0],
 	}

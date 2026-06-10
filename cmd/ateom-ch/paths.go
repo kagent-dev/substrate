@@ -21,23 +21,40 @@ import "path/filepath"
 const (
 	// Binaries baked into the ateom-ch container image.
 	cloudHypervisorBin = "/usr/local/bin/cloud-hypervisor"
+	virtiofsdBin       = "/usr/local/bin/virtiofsd"
 	guestKernel        = "/usr/local/share/ateom-ch/vmlinux"
 
 	// basePath is the host directory mounted into the ateom-ch container,
 	// shared with atelet (which writes OCI bundles here via ateompath).
-	//
-	// We intentionally reuse ateompath.BasePath ("/var/lib/ateom-gvisor") so
-	// atelet's existing bundle-preparation logic needs no changes for phase 2.
 	basePath = "/var/lib/ateom-gvisor"
 
-	// runtimeBasePath holds per-pod cloud-hypervisor API sockets.
-	// Kept on tmpfs (/run) so it survives only for the pod lifetime.
+	// runtimeBasePath holds per-pod cloud-hypervisor API sockets and virtiofsd
+	// sockets. Kept on tmpfs (/run) so it survives only for the pod lifetime.
 	runtimeBasePath = "/run/ateom-ch"
+
+	// tapActorID is used to derive the tap and bridge names for all VMs.
+	// A fixed ID means the tap name is always "atch-ch0", which matches the
+	// device name stored in every actor checkpoint snapshot.
+	tapActorID = "ch0"
 )
 
 // chSockPath returns the cloud-hypervisor API unix socket for this pod.
+// The pod UID is included so multiple ateom-ch pods on the same host node
+// don't collide (though each pod has its own /run mount via emptyDir).
 func chSockPath(podUID string) string {
 	return filepath.Join(runtimeBasePath, podUID, "ch.sock")
+}
+
+// virtiofsdSockPath returns the virtiofsd vhost-user socket.
+//
+// IMPORTANT: this path is embedded verbatim in every CH snapshot (in the fs
+// device config). Restoring a snapshot requires virtiofsd to be listening at
+// exactly this path. Using a fixed path (not pod-UID-specific) means a
+// snapshot taken on pod A can be restored on pod B without path mismatch —
+// each pod gets its own isolated /run/ateom-ch/ mount via emptyDir, so there
+// is no cross-pod socket collision.
+func virtiofsdSockPath(_ string) string {
+	return filepath.Join(runtimeBasePath, "virtiofsd.sock")
 }
 
 // actorRuntimeDir is the runtime directory for a running actor.
