@@ -64,8 +64,8 @@ data:
         protocol: HTTPS
         tls:
 
-          cert: "/run/servicedns.podcert.ate.dev/credential-bundle.pem"
-          key: "/run/servicedns.podcert.ate.dev/credential-bundle.pem"
+          cert: "/run/servicedns.podcert.ate.dev/cert.pem"
+          key: "/run/servicedns.podcert.ate.dev/key.pem"
 
         routes:
         - name: substrate-https
@@ -223,4 +223,5 @@ spec:
           - podCertificate:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
-              credentialBundlePath: credential-bundle.pem
+              certificateChainPath: cert.pem
+              keyPath: key.pem

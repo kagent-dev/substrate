@@ -90,8 +90,8 @@ data:
         protocol: HTTPS
         tls:
 {{ if eq .Values.auth.mode "mtls" }}
-          cert: "/run/servicedns.podcert.ate.dev/credential-bundle.pem"
-          key: "/run/servicedns.podcert.ate.dev/credential-bundle.pem"
+          cert: "/run/servicedns.podcert.ate.dev/cert.pem"
+          key: "/run/servicedns.podcert.ate.dev/key.pem"
 {{ else }}
           cert: "/run/agentgateway-tls/tls.crt"
           key: "/run/agentgateway-tls/tls.key"
@@ -232,7 +232,8 @@ spec:
           - podCertificate:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
-              credentialBundlePath: credential-bundle.pem
+              certificateChainPath: cert.pem
+              keyPath: key.pem
 {{- else }}
       - name: agentgateway-tls
         secret:
