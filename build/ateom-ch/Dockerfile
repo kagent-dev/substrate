@@ -2,8 +2,9 @@
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ateom-ch  ./cmd/ateom-ch
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /testinit  ./hack/testinit
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /ateom-ch    ./cmd/ateom-ch
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /testinit   ./hack/testinit
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /goldeninit ./hack/goldeninit
 
 # Runtime stage: ateom-ch + Cloud Hypervisor ecosystem binaries.
 # Ubuntu 24.04 ships virtiofsd in its main repo; Debian bookworm does not.
@@ -39,8 +40,8 @@ RUN curl -fsSL \
     "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/grpcurl_${GRPCURL_VERSION}_linux_x86_64.tar.gz" \
     | tar xz -C /usr/local/bin grpcurl
 
-COPY --from=build /ateom-ch  /usr/local/bin/ateom-ch
-# testinit is used inside the VM as PID 1 during kind-cluster tests.
-COPY --from=build /testinit  /usr/local/share/ateom-ch/testinit
+COPY --from=build /ateom-ch    /usr/local/bin/ateom-ch
+COPY --from=build /testinit   /usr/local/share/ateom-ch/testinit
+COPY --from=build /goldeninit /usr/local/share/ateom-ch/golden-init
 
 ENTRYPOINT ["/usr/local/bin/ateom-ch"]

@@ -23,6 +23,15 @@ const (
 	cloudHypervisorBin = "/usr/local/bin/cloud-hypervisor"
 	virtiofsdBin       = "/usr/local/bin/virtiofsd"
 	guestKernel        = "/usr/local/share/ateom-ch/vmlinux"
+	goldenInitBin      = "/usr/local/share/ateom-ch/golden-init"
+
+	// argsFileName is written to the workload rootfs after golden restore so
+	// goldeninit (PID 1) can exec the actual workload entrypoint.
+	argsFileName = ".ateom-run-args"
+
+	// readyFileName is created by goldeninit inside the VM to signal that
+	// PID 1 is live. warmUpTemplate polls this file before snapshotting.
+	readyFileName = ".ateom-ready"
 
 	// basePath is the host directory mounted into the ateom-ch container,
 	// shared with atelet (which writes OCI bundles here via ateompath).
@@ -60,4 +69,12 @@ func virtiofsdSockPath(_ string) string {
 // actorRuntimeDir is the runtime directory for a running actor.
 func actorRuntimeDir(podUID, actorID string) string {
 	return filepath.Join(runtimeBasePath, podUID, actorID)
+}
+
+// goldenSnapshotForTemplate returns the directory where the per-template golden
+// VM snapshot is stored. The snapshot is taken once (first RunWorkload for the
+// template on this pod) and reused for all subsequent RunWorkloads of the same
+// template, replacing kernel boot with a fast VmRestore.
+func goldenSnapshotForTemplate(podUID, ns, tmpl, container string) string {
+	return filepath.Join(runtimeBasePath, podUID, "golden-"+ns+"-"+tmpl+"-"+container)
 }

@@ -147,6 +147,11 @@ SOCKET="/var/lib/ateom-gvisor/ateoms/${POD_UID}/ateom.sock"
 CHECKPOINT_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/checkpoint-state"
 RESTORE_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/restore-state"
 
+ACTOR2="actor2"
+BUNDLE_DIR2="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR2}/bundles/${CONTAINER}"
+ROOTFS_DIR2="${BUNDLE_DIR2}/rootfs"
+CHECKPOINT_DIR2="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR2}/checkpoint-state"
+
 echo ""
 echo "→ Running ateom-ch lifecycle test inside pod..."
 
@@ -167,6 +172,10 @@ RESTORE_DIR="${RESTORE_DIR}"
 NS="${NS}"
 TMPL="${TMPL}"
 ACTOR="${ACTOR}"
+ACTOR2="${ACTOR2}"
+BUNDLE_DIR2="${BUNDLE_DIR2}"
+ROOTFS_DIR2="${ROOTFS_DIR2}"
+CHECKPOINT_DIR2="${CHECKPOINT_DIR2}"
 CONTAINER="${CONTAINER}"
 POD_UID="${POD_UID}"
 
@@ -195,6 +204,21 @@ JSON
 
 echo "  Bundle: \${BUNDLE_DIR}"
 echo "  Rootfs files: \$(ls \${ROOTFS_DIR})"
+
+# actor2: same template, different actor — will use golden snapshot fast path.
+mkdir -p "\${ROOTFS_DIR2}"
+cp /usr/local/share/ateom-ch/testinit "\${ROOTFS_DIR2}/init"
+chmod +x "\${ROOTFS_DIR2}/init"
+cat > "\${BUNDLE_DIR2}/config.json" <<'JSON'
+{
+  "process": {
+    "args": ["/init"],
+    "cwd": "/"
+  },
+  "root": { "path": "rootfs" }
+}
+JSON
+echo "  actor2 bundle: \${BUNDLE_DIR2}"
 
 # ── 2. Start ateom-ch ────────────────────────────────────────────────────────
 section "Starting ateom-ch"
@@ -231,7 +255,7 @@ grpc RunWorkload "{
   \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] }
 }"
 T1=\$(date +%s%3N)
-echo "  RunWorkload: \$((T1 - T0))ms"
+echo "  RunWorkload (slow/cold boot+golden snapshot): \$((T1 - T0))ms"
 
 echo "  Waiting 5s for VM to settle..."
 sleep 5
@@ -288,10 +312,37 @@ grpc CheckpointWorkload "{
 }"
 echo "  Second checkpoint succeeded — restored VM is healthy."
 
+# ── 6. RunWorkload (fast path) ────────────────────────────────────────────────
+# actor1's RunWorkload already created the template golden snapshot.
+# actor2 uses the same template → fast path via VmRestore from golden.
+section "RunWorkload actor2 (fast path — golden restore)"
+
+T0=\$(date +%s%3N)
+grpc RunWorkload "{
+  \"actor_template_namespace\": \"\${NS}\",
+  \"actor_template_name\":      \"\${TMPL}\",
+  \"actor_id\":                 \"\${ACTOR2}\",
+  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] }
+}"
+T1=\$(date +%s%3N)
+echo "  RunWorkload (fast/golden restore): \$((T1 - T0))ms"
+
+echo "  Waiting 2s for VM to settle..."
+sleep 2
+
+grpc CheckpointWorkload "{
+  \"actor_template_namespace\": \"\${NS}\",
+  \"actor_template_name\":      \"\${TMPL}\",
+  \"actor_id\":                 \"\${ACTOR2}\",
+  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] },
+  \"snapshot_uri_prefix\": \"file://\${CHECKPOINT_DIR2}\"
+}"
+echo "  actor2 checkpoint succeeded — golden-restore VM is healthy."
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────────────"
-echo "PASS: ateom-ch RunWorkload → Checkpoint → Restore → Checkpoint"
+echo "PASS: ateom-ch RunWorkload → Checkpoint → Restore → Checkpoint → RunWorkload(golden)"
 echo "────────────────────────────────────────────────"
 
 SCRIPT
@@ -307,7 +358,7 @@ kubectl --context "kind-${CLUSTER}" exec "${POD}" \
     --namespace "${NAMESPACE}" \
     -- bash -euo pipefail /tmp/ateom-ch-test.sh \
     2>/dev/null | tee "${_out}" || true
-if ! grep -q "^PASS:" "${_out}"; then
+if ! grep -q "^PASS:" "${_out}"; then  # matches both PASS: lines
   rm -f "${_out}"
   echo "" >&2
   echo "FAIL: test script did not print PASS marker" >&2
