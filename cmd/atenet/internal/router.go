@@ -51,7 +51,7 @@ func NewRouterCmd() *cobra.Command {
 	cmd.Flags().IntVar(&cfg.XdsPort, "port-xds", 18000, "TCP port listening for the xDS dynamic Envoy connections")
 	cmd.Flags().IntVar(&cfg.ExtprocPort, "port-extproc", 50051, "Listen port for the Envoy dynamic External Processing (ext_proc) server")
 	cmd.Flags().StringVar(&cfg.ExtprocAddr, "extproc-address", "127.0.0.1", "Host IP or address of the Envoy External Processing (ext_proc) server")
-	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", router.NetworkingModeEnvoy, "Networking proxy mode: envoy or agentgateway")
+	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", router.NetworkingModeAgentgateway, "Networking proxy mode: agentgateway or envoy")
 	cmd.Flags().StringVar(&cfg.EnvoyImage, "envoy-image", "envoyproxy/envoy:v1.30-latest", "Image URI used for dynamically launched router instances")
 	cmd.Flags().StringVar(&cfg.AgentgatewayImage, "agentgateway-image", "cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1", "Image URI used for Agentgateway router instances")
 	cmd.Flags().StringVar(&cfg.TemplatesFile, "actor-templates-file", "", "Path to offline YAML configuration file listing ActorTemplates")
