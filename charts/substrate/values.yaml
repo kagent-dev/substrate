@@ -103,16 +103,12 @@ ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 otel:
   endpoint: ""
 
-monitoring:
-  gkePodMonitoring:
-    enabled: false
-
 image:
   registry: ghcr.io/kagent-dev/substrate
   tag: ""
 
 images:
   valkey: valkey/valkey:8.0
-  envoy: envoyproxy/envoy:v1.30-latest
+  agentgateway: cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1
   coredns: coredns/coredns:1.11.1
   busybox: busybox:1.36

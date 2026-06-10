@@ -69,4 +69,3 @@ See `values.yaml` for the full set; the important keys:
 | `redis.useIAMAuth` | `false` | Google IAM auth |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces/metrics |
-| `monitoring.gkePodMonitoring.enabled` | `false` | Enable only on clusters with the GKE/GMP `PodMonitoring` CRD |
