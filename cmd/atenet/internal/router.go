@@ -50,7 +50,7 @@ func NewRouterCmd() *cobra.Command {
 	cmd.Flags().IntVar(&cfg.XdsPort, "port-xds", 18000, "TCP port listening for the xDS dynamic Envoy connections")
 	cmd.Flags().IntVar(&cfg.ExtprocPort, "port-extproc", 50051, "Listen port for the Envoy dynamic External Processing (ext_proc) server")
 	cmd.Flags().StringVar(&cfg.ExtprocAddr, "extproc-address", "127.0.0.1", "Host IP or address of the Envoy External Processing (ext_proc) server")
-	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", router.NetworkingModeEnvoy, "Networking proxy mode: envoy or agentgateway")
+	cmd.Flags().StringVar(&cfg.NetworkingMode, "networking-mode", router.NetworkingModeAgentgateway, "Networking proxy mode: agentgateway or envoy")
 	cmd.Flags().StringVar(&cfg.EnvoyImage, "envoy-image", "envoyproxy/envoy:v1.30-latest", "Image URI used for dynamically launched router instances")
 	cmd.Flags().StringVar(&cfg.AgentgatewayImage, "agentgateway-image", "cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1", "Image URI used for Agentgateway router instances")
 	cmd.Flags().StringVar(&cfg.TemplatesFile, "actor-templates-file", "", "Path to offline YAML configuration file listing ActorTemplates")
@@ -60,6 +60,10 @@ func NewRouterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.TLSCertPath, "tls-cert-path", "", "Path to the proxy TLS certificate file")
 	cmd.Flags().StringVar(&cfg.TLSKeyPath, "tls-key-path", "", "Path to the proxy TLS private key file")
 	cmd.Flags().StringVar(&cfg.OtlpCollectorAddress, "otlp-collector-address", "", "host:port of the OTLP gRPC collector that Envoy reports tracing spans to (empty disables Envoy tracing)")
+	cmd.Flags().StringVar(&cfg.AteapiAuthMode, "ateapi-auth", "mtls", "Client auth to ateapi: mtls|jwt. 'mtls' (default) dials with insecure TLS and relies on pod-projected mTLS credentials for identity. 'jwt' verifies the server cert and sends a Bearer SA token.")
+	cmd.Flags().StringVar(&cfg.AteapiCAFile, "ateapi-ca-file", "", "PEM file with CAs trusted to verify the ateapi server cert. Required for jwt.")
+	cmd.Flags().StringVar(&cfg.AteapiServerName, "ateapi-server-name", "", "SNI / hostname expected on the ateapi server cert. Optional.")
+	cmd.Flags().StringVar(&cfg.AteapiTokenFile, "ateapi-token-file", "", "Projected SA token file used as Bearer credential. Required for jwt.")
 
 	return cmd
 }

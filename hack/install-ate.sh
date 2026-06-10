@@ -63,7 +63,7 @@ function usage() {
   echo "Overall infrastructure (all infrastructure components):"
   echo ""
   echo "  --deploy-ate-system                    Deploy core system (CRDs, atelet, apiserver)"
-  echo "  --router=envoy|agentgateway            Select atenet-router implementation (default: agentgateway)"
+  echo "  --router=agentgateway                  Select atenet-router implementation (default: agentgateway)"
   echo "  --delete-ate-system                    Delete core system"
   echo "  --delete-all                           Delete core system and all registered demos"
   echo ""
@@ -121,11 +121,11 @@ run_ko() {
 
 set_atenet_router() {
   case "$1" in
-    envoy|agentgateway)
+    agentgateway)
       ATE_INSTALL_ATENET_ROUTER="$1"
       ;;
     *)
-      echo "unsupported atenet router mode: $1" >&2
+      echo "unsupported atenet router mode: $1 (only agentgateway is supported)" >&2
       exit 1
       ;;
   esac
@@ -133,14 +133,11 @@ set_atenet_router() {
 
 atenet_router_manifest() {
   case "${ATE_INSTALL_ATENET_ROUTER}" in
-    envoy)
+    agentgateway)
       echo "manifests/ate-install/atenet-router.yaml"
       ;;
-    agentgateway)
-      echo "manifests/ate-install/atenet-router-agentgateway.yaml"
-      ;;
     *)
-      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER}" >&2
+      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER} (only agentgateway is supported)" >&2
       exit 1
       ;;
   esac
@@ -148,14 +145,11 @@ atenet_router_manifest() {
 
 ate_install_kustomize_base_dir() {
   case "${ATE_INSTALL_ATENET_ROUTER}" in
-    envoy)
+    agentgateway)
       echo "manifests/ate-install/base"
       ;;
-    agentgateway)
-      echo "manifests/ate-install/base-agentgateway"
-      ;;
     *)
-      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER}" >&2
+      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER} (only agentgateway is supported)" >&2
       exit 1
       ;;
   esac
@@ -163,14 +157,11 @@ ate_install_kustomize_base_dir() {
 
 ate_install_kustomize_dir() {
   case "${ATE_INSTALL_ATENET_ROUTER}" in
-    envoy)
+    agentgateway)
       echo "manifests/ate-install/kind"
       ;;
-    agentgateway)
-      echo "manifests/ate-install/kind-agentgateway"
-      ;;
     *)
-      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER}" >&2
+      echo "unsupported atenet router mode: ${ATE_INSTALL_ATENET_ROUTER} (only agentgateway is supported)" >&2
       exit 1
       ;;
   esac
@@ -272,6 +263,7 @@ ensure_crds() {
 deploy_crds() {
   log_step "deploy_crds"
   run_ko apply -f manifests/ate-install/generated
+  run_kubectl apply -f manifests/ate-install/role.yaml
 }
 
 deploy_ate_system() {
@@ -289,7 +281,7 @@ deploy_ate_system() {
   run_kubectl apply -f manifests/ate-install/sandboxconfig-gvisor.yaml
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   ensure_apiserver_prerequisites
@@ -346,7 +338,7 @@ deploy_ate_apiserver() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   ensure_apiserver_prerequisites
@@ -360,7 +352,7 @@ deploy_atelet() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   local manifest=""
@@ -380,7 +372,7 @@ deploy_atenet() {
   ensure_crds
 
   # Ensure namespace exists
-  run_kubectl apply -f manifests/ate-install/ate-system-namespace.yaml \
+  run_kubectl apply -f manifests/ate-install/namespace.yaml \
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   run_ko apply -f "$(atenet_router_manifest)"

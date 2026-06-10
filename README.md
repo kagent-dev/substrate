@@ -103,10 +103,10 @@ To quickly set up the complete environment:
 2. Run the following steps:
 ```shell
 # create cluster and local registry
-hack/create-kind-cluster.sh
+KIND_ENABLE_PODCERT=false hack/create-kind-cluster.sh
 
-# install ate, valkey, rustfs
-hack/install-ate-kind.sh --deploy-ate-system
+# install ate, valkey, rustfs using Helm in JWT mode
+hack/install-ate-kind-jwt.sh
 
 # install counter demo
 hack/install-ate-kind.sh --deploy-demo-counter
@@ -124,6 +124,21 @@ kubectl port-forward -n ate-system svc/atenet-router 8000:80
 3. In a **separate terminal**, send an HTTP request to increment the counter:
 ```shell
 curl -X POST -H "Host: my-counter-1.actors.resources.substrate.ate.dev" -i http://localhost:8000/
+```
+
+#### mTLS mode
+
+JWT mode is the default install path and does not require pod certificate
+feature gates. To test the older mTLS path, create kind with the
+`ClusterTrustBundle` / `PodCertificateRequest` feature gates enabled and use the
+mTLS install helper.
+
+```shell
+# create cluster WITH podcert feature gates
+hack/create-kind-cluster.sh
+
+# install ate using the mTLS manifests path
+hack/install-ate-kind.sh --deploy-ate-system
 ```
 
 ### GKE Quickstart (Development)
