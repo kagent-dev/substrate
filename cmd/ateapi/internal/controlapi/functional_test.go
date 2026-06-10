@@ -325,7 +325,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 		t.Fatalf("failed to start worker cache: %v", err)
 	}
 
-	dialer := NewAteletDialer(workerInformer.GetIndexer(), ateletInformer.GetIndexer(), "", "")
+	dialer := NewAteletDialer(workerInformer.GetIndexer(), ateletInformer.GetIndexer(), "", "", false)
 	// Dial the fake atelet over insecure transport instead of per-atelet mTLS,
 	// so DialForWorker's real lookup/dial/cache path is exercised under test.
 	dialer.dialCredentials = func(_ string) (credentials.TransportCredentials, error) {

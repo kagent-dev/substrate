@@ -18,6 +18,12 @@ set -o errexit -o nounset -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kind}"
+# Enable the off-by-default certificate feature gates required by the mTLS
+# install path (cmd/podcertcontroller). On by default — the Quickstart's
+# `hack/install-ate-kind.sh --deploy-ate-system` uses mTLS. Opt out
+# (KIND_ENABLE_PODCERT=false) only when installing JWT-mode manifests, which
+# do not require these gates.
+KIND_ENABLE_PODCERT="${KIND_ENABLE_PODCERT:-true}"
 reg_name="kind-registry"
 reg_port="5001"
 
@@ -57,7 +63,7 @@ else
   echo "/dev/kvm not available: micro-VM support disabled (gVisor still works)."
 fi
 
-echo "Creating kind configuration for cluster '${KIND_CLUSTER_NAME}'..."
+echo "Creating kind configuration for cluster '${KIND_CLUSTER_NAME}' (KIND_ENABLE_PODCERT=${KIND_ENABLE_PODCERT})..."
 cat <<EOF > "${ROOT}/bin/kind-config.yaml"
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -73,6 +79,8 @@ if [ "${HAS_KVM}" = "1" ]; then
     containerPath: /dev/kvm
 EOF
 fi
+
+if [ "${KIND_ENABLE_PODCERT}" = "true" ]; then
 cat <<EOF >> "${ROOT}/bin/kind-config.yaml"
 # cmd/podcertcontroller depends on ClusterTrustBundle & PodCertificateRequest.
 # They are not enabled by default as of Kubernetes v1.36
@@ -84,6 +92,7 @@ featureGates:
 runtimeConfig:
   "certificates.k8s.io/v1beta1": "true"
 EOF
+fi
 
 echo "Deleting existing kind cluster '${KIND_CLUSTER_NAME}' if it exists..."
 "${ROOT}"/hack/kind.sh delete cluster --name "${KIND_CLUSTER_NAME}" || true

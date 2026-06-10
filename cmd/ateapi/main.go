@@ -38,6 +38,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/credbundle"
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/agent-substrate/substrate/internal/volume"
@@ -71,6 +72,7 @@ var (
 	redisUseIAMAuth     = pflag.String("redis-use-iam-auth", "true", "Whether to use Google IAM authentication for Redis/Valkey.")
 	redisTLSServerName  = pflag.String("redis-tls-server-name", "", "The ServerName to use for Redis TLS hostname verification.")
 	redisClientCert     = pflag.String("redis-client-cert", "", "The file containing client TLS certificate/key credential bundle for Redis/Valkey.")
+	redisNoTLS          = pflag.Bool("redis-no-tls", false, "If true, connect to Redis/Valkey in plaintext.")
 
 	clientJWTIssuer      = pflag.String("client-jwt-issuer", "", "The expected issuer URL for client JWTs.")
 	clientJWTAudience    = pflag.String("client-jwt-audience", "", "The expected audience for client JWTs.")
@@ -80,6 +82,7 @@ var (
 	actorIDCAPoolFile      = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
 	podIdentityCACerts     = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
 	ateletClientCredBundle = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
+	ateletInsecure         = pflag.Bool("atelet-insecure", false, "Dial atelet without transport security. Intended only for local clusters without Pod Certificates.")
 
 	drainDelay   = pflag.Duration("drain-delay", 13*time.Second, "How long to keep accepting new work after SIGTERM, before starting the gRPC drain.")
 	drainTimeout = pflag.Duration("drain-timeout", 15*time.Second, "Deadline for the graceful gRPC drain on shutdown. In-flight RPCs still running past it are forcefully cancelled.")
@@ -186,7 +189,7 @@ func main() {
 	}
 
 	volPlugins := make(map[string]volume.VolumePluginControlPlane)
-	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts)
+	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts, *ateletInsecure)
 	sm := controlapi.NewService(redisPersistence, workerCache, actorTemplateLister, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, storageClassLister, ateletDialer, clientset, instruments, *egressGatewayAddress, volPlugins)
 
 	jwtIssuerDiscoveryClient := buildK8sServiceAccountIssuerDiscoveryClient(ctx, *clientJWTCAFile, *clientJWTIssuer)
@@ -315,12 +318,14 @@ func logFlagValues(ctx context.Context) {
 		slog.String("redis-use-iam-auth", *redisUseIAMAuth),
 		slog.String("redis-tls-server-name", *redisTLSServerName),
 		slog.String("redis-client-cert", *redisClientCert),
+		slog.Bool("redis-no-tls", *redisNoTLS),
 		slog.String("client-jwt-issuer", *clientJWTIssuer),
 		slog.String("client-jwt-audience", *clientJWTAudience),
 		slog.String("actor-id-jwt-pool", *actorIDJWTPoolFile),
 		slog.String("actor-id-ca-pool", *actorIDCAPoolFile),
 		slog.String("pod-identity-ca-certs", *podIdentityCACerts),
 		slog.String("atelet-client-cred-bundle", *ateletClientCredBundle),
+		slog.Bool("atelet-insecure", *ateletInsecure),
 		slog.Duration("drain-delay", *drainDelay),
 		slog.Duration("drain-timeout", *drainTimeout),
 	)
@@ -329,14 +334,17 @@ func logFlagValues(ctx context.Context) {
 // connectRedis builds the Redis/Valkey TLS config, plumbs IAM auth if
 // requested, opens the cluster client, and pings with retries.
 func connectRedis(ctx context.Context) (*redis.ClusterClient, error) {
-	tlsConfig, err := buildRedisTLSConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	clusterOpts := &redis.ClusterOptions{
-		Addrs:     []string{*redisClusterAddress},
-		TLSConfig: tlsConfig,
+		Addrs: []string{*redisClusterAddress},
+	}
+	if *redisNoTLS {
+		slog.InfoContext(ctx, "Connecting to Redis/Valkey without TLS")
+	} else {
+		tlsConfig, err := buildRedisTLSConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		clusterOpts.TLSConfig = tlsConfig
 	}
 
 	if *redisUseIAMAuth != "false" {
