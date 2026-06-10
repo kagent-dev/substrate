@@ -64,22 +64,25 @@ func init() {
 
 // RouterConfig holds deployment setup and endpoint options for the router node instance.
 type RouterConfig struct {
-	Standalone     bool
-	Namespace      string
-	Kubeconfig     string
-	AteapiAddr     string
-	HttpPort       int
-	XdsPort        int
-	ExtprocPort    int
-	ExtprocAddr    string
-	EnvoyImage     string
-	TemplatesFile  string
-	StatusPort     int
-	HealthInterval time.Duration
-	HttpsPort      int
-	EnvoyCertPath  string
-	LogLevel       string
-	MetricsAddr    string
+	Standalone        bool
+	Namespace         string
+	Kubeconfig        string
+	AteapiAddr        string
+	HttpPort          int
+	XdsPort           int
+	ExtprocPort       int
+	ExtprocAddr       string
+	NetworkingMode    string
+	EnvoyImage        string
+	AgentgatewayImage string
+	TemplatesFile     string
+	StatusPort        int
+	HealthInterval    time.Duration
+	HttpsPort         int
+	TLSCertPath       string
+	TLSKeyPath        string
+	LogLevel          string
+	MetricsAddr       string
 	// OtlpCollectorAddress is the host:port of the OTLP gRPC collector that
 	// Envoy reports tracing spans to. Empty disables Envoy-side tracing.
 	OtlpCollectorAddress string
@@ -104,8 +107,13 @@ type RouterServer struct {
 }
 
 func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
+	if cfg.NetworkingMode == "" {
+		cfg.NetworkingMode = NetworkingModeEnvoy
+	}
+
 	var k8sClient client.Client
 	var clientset kubernetes.Interface
+	var err error
 
 	if cfg.TemplatesFile == "" {
 		k8sCfg, err := config.GetConfig()
@@ -221,6 +229,11 @@ func (s *RouterServer) Run(ctx context.Context) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 
+	provider, err := newProxyProvider(s.cfg)
+	if err != nil {
+		return err
+	}
+
 	xdsSrv := NewXdsServer(s.cfg.XdsPort)
 	xdsSrv.SetConfig(s.cfg.HttpPort, s.cfg.ExtprocPort, s.cfg.ExtprocAddr)
 	if err := xdsSrv.SetOtlpCollector(s.cfg.OtlpCollectorAddress); err != nil {
@@ -228,16 +241,15 @@ func (s *RouterServer) Run(ctx context.Context) error {
 	}
 
 	var certContent, keyContent string
-	if s.cfg.EnvoyCertPath == "" {
-		slog.InfoContext(ctx, "No Envoy certificate path provided, generating self-signed certificate for testing")
-		var err error
+	if provider.RequiresXDS() && tlsCertPath(s.cfg) == "" {
+		slog.InfoContext(ctx, "No proxy TLS certificate path provided, generating self-signed certificate for testing")
 		certContent, keyContent, err = generateSelfSignedCert()
 		if err != nil {
 			return fmt.Errorf("failed to generate self-signed cert: %w", err)
 		}
 	}
 
-	xdsSrv.SetTlsConfig(s.cfg.HttpsPort, s.cfg.EnvoyCertPath, certContent, keyContent)
+	xdsSrv.SetTlsConfig(s.cfg.HttpsPort, tlsCertPath(s.cfg), certContent, keyContent)
 	if s.extprocSrv == nil {
 		routeDuration, err := newRouteDurationHistogram()
 		if err != nil {
@@ -245,9 +257,9 @@ func (s *RouterServer) Run(ctx context.Context) error {
 		}
 		s.extprocSrv = NewExtProcServer(s.cfg.ExtprocPort, s.apiClient, routeDuration)
 	}
-	ctrl := NewController(s.k8sClient, s.clientset, s.cfg, xdsSrv, s.extprocSrv)
+	ctrl := NewController(s.k8sClient, s.clientset, s.cfg, xdsSrv, s.extprocSrv, provider)
 
-	s.health = newRouterHealth(s.cfg.HealthInterval, s.clientset, s.apiClient, s.cfg)
+	s.health = newRouterHealth(s.cfg.HealthInterval, s.clientset, s.apiClient, s.cfg, provider)
 
 	// Start Controller / Watcher
 	g.Go(func() error {
@@ -262,17 +274,19 @@ func (s *RouterServer) Run(ctx context.Context) error {
 		return nil
 	})
 
-	// Start xDS Server
-	g.Go(func() error {
-		slog.InfoContext(ctx, "Starting Envoy xDS Server", slog.Int("port", s.cfg.XdsPort))
-		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.cfg.XdsPort))
-		if err != nil {
-			return fmt.Errorf("failed to listen on port %d: %w", s.cfg.XdsPort, err)
-		}
-		defer lis.Close()
+	if provider.RequiresXDS() {
+		// Start xDS Server
+		g.Go(func() error {
+			slog.InfoContext(ctx, "Starting xDS Server", slog.Int("port", s.cfg.XdsPort), slog.String("provider", provider.Name()))
+			lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.cfg.XdsPort))
+			if err != nil {
+				return fmt.Errorf("failed to listen on port %d: %w", s.cfg.XdsPort, err)
+			}
+			defer lis.Close()
 
-		return xdsSrv.Serve(ctx, lis)
-	})
+			return xdsSrv.Serve(ctx, lis)
+		})
+	}
 
 	// Start ExtProc Server
 	g.Go(func() error {

@@ -17,7 +17,6 @@ package router
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -111,14 +110,7 @@ func (s *ExtProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 
 		default:
-			// No modification for other processing states, but log because this should
-			// not be called.
-			slog.Error("Unexpected request type", slog.String("reqType", fmt.Sprintf("%T", reqType)))
-			resp.Response = &extprocv3.ProcessingResponse_RequestHeaders{
-				RequestHeaders: &extprocv3.HeadersResponse{
-					Response: &extprocv3.CommonResponse{},
-				},
-			}
+			resp = continueExtProcResponse(req)
 		}
 
 		if err := stream.Send(resp); err != nil {
@@ -185,6 +177,50 @@ func (s *ExtProcServer) handleRequestHeaders(
 			HeaderMutation: mutation,
 		},
 	}, metadata, targetAddr, tmplNs, tmplName, nil
+}
+
+func continueExtProcResponse(req *extprocv3.ProcessingRequest) *extprocv3.ProcessingResponse {
+	common := &extprocv3.CommonResponse{
+		Status: extprocv3.CommonResponse_CONTINUE,
+	}
+	switch req.Request.(type) {
+	case *extprocv3.ProcessingRequest_RequestBody:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_RequestBody{
+				RequestBody: &extprocv3.BodyResponse{Response: common},
+			},
+		}
+	case *extprocv3.ProcessingRequest_ResponseHeaders:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_ResponseHeaders{
+				ResponseHeaders: &extprocv3.HeadersResponse{Response: common},
+			},
+		}
+	case *extprocv3.ProcessingRequest_ResponseBody:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_ResponseBody{
+				ResponseBody: &extprocv3.BodyResponse{Response: common},
+			},
+		}
+	case *extprocv3.ProcessingRequest_RequestTrailers:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_RequestTrailers{
+				RequestTrailers: &extprocv3.TrailersResponse{},
+			},
+		}
+	case *extprocv3.ProcessingRequest_ResponseTrailers:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_ResponseTrailers{
+				ResponseTrailers: &extprocv3.TrailersResponse{},
+			},
+		}
+	default:
+		return &extprocv3.ProcessingResponse{
+			Response: &extprocv3.ProcessingResponse_RequestHeaders{
+				RequestHeaders: &extprocv3.HeadersResponse{Response: common},
+			},
+		}
+	}
 }
 
 func (s *ExtProcServer) recordRouteDuration(ctx context.Context, d time.Duration, tmplNs, tmplName, outcome string) {
