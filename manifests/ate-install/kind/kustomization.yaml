@@ -31,6 +31,7 @@ resources:
   - ../valkey.yaml
   - ../pod-certificate-controller.yaml
   - ate-otel-config.yaml
+  - ../role.yaml
   - rustfs.yaml
   - ./otel-collector.yaml
   - ./prometheus.yaml
@@ -46,7 +47,7 @@ patches:
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: ate-api-server
+        name: ate-api-server-deployment
         namespace: ate-system
       spec:
         template:

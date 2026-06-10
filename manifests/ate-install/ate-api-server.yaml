@@ -1,23 +1,41 @@
-# Copyright 2026 Google LLC
+#  Copyright 2026 Google LLC
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#      http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
 
+# DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.
+# Run `make helm-template` to regenerate.
 
-# Define Permissions (Read-Only for Pods)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ate-api-server
+  namespace: ate-system
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ate-api-server
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ate-api-server
+  namespace: ate-system
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ate-api-server
+  name: ate-api-server-role
 rules:
 - apiGroups: [""]
   resources: ["pods"]
@@ -32,37 +50,42 @@ rules:
   resources: ["storageclasses"]
   verbs: ["get", "watch", "list"]
 ---
-# Create Service Account for Workload Identity
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ate-api-server
-  namespace: ate-system
----
-# 4. Bind Identity to Permissions
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ate-api-server
+  name: ate-api-server-binding
 subjects:
 - kind: ServiceAccount
   name: ate-api-server
   namespace: ate-system
 roleRef:
   kind: ClusterRole
-  name: ate-api-server
+  name: ate-api-server-role
   apiGroup: rbac.authorization.k8s.io
 ---
-# 5. Deploy the API Server
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: ate-system
+spec:
+  clusterIP: None
+  selector:
+    app: ate-api-server
+  ports:
+  - name: grpc
+    protocol: TCP
+    port: 443
+    targetPort: 443
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ate-api-server
+  name: ate-api-server-deployment
   namespace: ate-system
 spec:
   replicas: 2
   strategy:
-    # Update replicas one at a time, create a new one first, then delete the old one.
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
@@ -77,11 +100,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
     spec:
-      # TODO: Add topologySpreadConstraints to spread replicas across nodes and zones.
       serviceAccountName: ate-api-server
-      # Budget for the full shutdown sequence: --drain-delay (sized to cover
-      # the readinessProbe below reaching NotReady, plus propagation) +
-      # --drain-timeout.
       terminationGracePeriodSeconds: 40
       containers:
       - name: ate-api-server
@@ -165,9 +184,6 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 2
           failureThreshold: 3
-        # /healthz stays 200 while a terminating pod drains; /readyz
-        # turns 503, so liveness and readiness diverge correctly during
-        # shutdown.
         livenessProbe:
           httpGet:
             path: /healthz
@@ -175,14 +191,35 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
       volumes:
-      - name: "servicedns"
+      - name: servicedns
         projected:
           sources:
           - podCertificate:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
               credentialBundlePath: credential-bundle.pem
-      - name: "podidentity"
+      - name: session-id-jwt-pool
+        projected:
+          sources:
+          - secret:
+              name: session-id-jwt-pool
+              items:
+              - { key: pool, path: pool.json }
+      - name: valkey-ca-certs
+        projected:
+          sources:
+          - secret:
+              name: valkey-ca-certs
+              items:
+              - { key: ca.crt, path: ca.crt }
+      - name: session-id-ca-pool
+        projected:
+          sources:
+          - secret:
+              name: session-id-ca-pool
+              items:
+              - { key: pool, path: pool.json }
+      - name: podidentity
         projected:
           sources:
           - podCertificate:
