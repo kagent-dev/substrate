@@ -25,6 +25,7 @@ import (
 
 	"github.com/agent-substrate/substrate/internal/atelet"
 	"github.com/agent-substrate/substrate/internal/credbundle"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -32,6 +33,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/lru"
@@ -66,18 +68,24 @@ type AteletDialer struct {
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
 // are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath string) *AteletDialer {
+func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath string, allowInsecure bool) *AteletDialer {
+	dialCredentials := func(expectedPodUID string) (credentials.TransportCredentials, error) {
+		tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
+		if err != nil {
+			return nil, err
+		}
+		return credentials.NewTLS(tlsConfig), nil
+	}
+	if allowInsecure {
+		dialCredentials = func(string) (credentials.TransportCredentials, error) {
+			return insecure.NewCredentials(), nil
+		}
+	}
 	return &AteletDialer{
-		workerIndexer: workerIndexer,
-		ateletIndexer: ateletIndexer,
-		ateletConns:   lru.New(1024),
-		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
-			if err != nil {
-				return nil, err
-			}
-			return credentials.NewTLS(tlsConfig), nil
-		},
+		workerIndexer:   workerIndexer,
+		ateletIndexer:   ateletIndexer,
+		ateletConns:     lru.New(1024),
+		dialCredentials: dialCredentials,
 	}
 }
 
@@ -166,7 +174,7 @@ func buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID string) (*tls
 	if err != nil {
 		return nil, fmt.Errorf("while loading CA bundle from %s: %w", serverCAPath, err)
 	}
-	expectedID, err := spiffeid.FromSegments(trustDomain, "ns", ateletNamespace, "sa", ateletSA)
+	expectedID, err := spiffeid.FromSegments(trustDomain, "ns", installdefaults.NamespaceFromPodEnv(), "sa", ateletSA)
 	if err != nil {
 		return nil, fmt.Errorf("while building expected atelet SPIFFE ID: %w", err)
 	}

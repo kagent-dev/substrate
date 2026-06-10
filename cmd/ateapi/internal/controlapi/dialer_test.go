@@ -41,6 +41,22 @@ import (
 
 const testAteletSPIFFEID = "spiffe://cluster.local/ns/ate-system/sa/atelet"
 
+func TestAteletDialerInsecureRequiresOptIn(t *testing.T) {
+	secure := NewAteletDialer(nil, nil, "", "", false)
+	if _, err := secure.dialCredentials("pod-uid"); err == nil {
+		t.Fatal("secure dialer accepted empty credential paths")
+	}
+
+	insecureDialer := NewAteletDialer(nil, nil, "", "", true)
+	creds, err := insecureDialer.dialCredentials("pod-uid")
+	if err != nil {
+		t.Fatalf("insecure dial credentials: %v", err)
+	}
+	if got := creds.Info().SecurityProtocol; got != "insecure" {
+		t.Fatalf("security protocol = %q, want insecure", got)
+	}
+}
+
 // makeTestCA mints a self-signed CA and returns it along with an X.509 bundle
 // containing it as the sole authority for the cluster.local trust domain.
 func makeTestCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, *x509bundle.Bundle) {
@@ -363,7 +379,7 @@ func TestDialForAteletOnNode(t *testing.T) {
 	}
 
 	t.Run("no atelet on node", func(t *testing.T) {
-		d := NewAteletDialer(nil, newTestAteletIndexer(t), "", "")
+		d := NewAteletDialer(nil, newTestAteletIndexer(t), "", "", false)
 		if _, err := d.DialForAteletOnNode("node1"); !errors.Is(err, ErrNoAteletOnNode) {
 			t.Fatalf("DialForAteletOnNode = %v, want ErrNoAteletOnNode", err)
 		}
@@ -373,7 +389,7 @@ func TestDialForAteletOnNode(t *testing.T) {
 		d := NewAteletDialer(nil, newTestAteletIndexer(t,
 			ateletPod("atelet-1", "uid-1", "node1", "10.0.0.1"),
 			ateletPod("atelet-2", "uid-2", "node1", "10.0.0.2"),
-		), "", "")
+		), "", "", false)
 		_, err := d.DialForAteletOnNode("node1")
 		if err == nil || errors.Is(err, ErrNoAteletOnNode) {
 			t.Fatalf("DialForAteletOnNode = %v, want a non-ErrNoAteletOnNode error", err)
@@ -383,7 +399,7 @@ func TestDialForAteletOnNode(t *testing.T) {
 	t.Run("dials and caches the node's atelet", func(t *testing.T) {
 		d := NewAteletDialer(nil, newTestAteletIndexer(t,
 			ateletPod("atelet-1", "uid-1", "node1", "10.0.0.1"),
-		), "", "")
+		), "", "", false)
 		var credsUID string
 		d.dialCredentials = func(expectedPodUID string) (credentials.TransportCredentials, error) {
 			credsUID = expectedPodUID
