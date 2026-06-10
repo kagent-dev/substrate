@@ -1,16 +1,19 @@
-# Copyright 2026 Google LLC
+#  Copyright 2026 Google LLC
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#      http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+# DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.
+# Run `make helm-template` to regenerate.
 
 apiVersion: v1
 kind: ServiceAccount
@@ -19,6 +22,69 @@ metadata:
   namespace: ate-system
   labels:
     app: atenet-router
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atenet-router-agentgateway-config
+  namespace: ate-system
+data:
+  config.yaml: |
+    # yaml-language-server: $schema=https://agentgateway.dev/schema/config
+    config:
+      adminAddr: "127.0.0.1:15000"
+      readinessAddr: "0.0.0.0:15021"
+      statsAddr: "0.0.0.0:15020"
+    binds:
+    - port: 8080
+      listeners:
+      - name: http
+        protocol: HTTP
+        routes:
+        - name: substrate-http
+          matches:
+          - path:
+              pathPrefix: /
+          policies:
+            extProc:
+              host: "127.0.0.1:50051"
+              failureMode: failClosed
+              processingOptions:
+                requestBodyMode: none
+                responseBodyMode: none
+                requestHeaderMode: send
+                responseHeaderMode: skip
+                requestTrailerMode: skip
+                responseTrailerMode: skip
+          backends:
+          - dynamic: {}
+    - port: 8443
+      listeners:
+      - name: https
+        protocol: HTTPS
+        tls:
+
+          cert: "/run/servicedns.podcert.ate.dev/cert.pem"
+          key: "/run/servicedns.podcert.ate.dev/key.pem"
+
+        routes:
+        - name: substrate-https
+          matches:
+          - path:
+              pathPrefix: /
+          policies:
+            extProc:
+              host: "127.0.0.1:50051"
+              failureMode: failClosed
+              processingOptions:
+                requestBodyMode: none
+                responseBodyMode: none
+                requestHeaderMode: send
+                responseHeaderMode: skip
+                requestTrailerMode: skip
+                responseTrailerMode: skip
+          backends:
+          - dynamic: {}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -48,56 +114,23 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
-kind: ConfigMap
+kind: Service
 metadata:
-  name: atenet-router-envoy-config
+  name: atenet-router
   namespace: ate-system
-data:
-  envoy.yaml: |
-    admin:
-      address:
-        socket_address:
-          address: 0.0.0.0
-          port_value: 9901
-
-    node:
-      id: substrate-envoy-node
-      cluster: substrate-router-cluster
-
-    dynamic_resources:
-      lds_config:
-        resource_api_version: V3
-        ads: {}
-      cds_config:
-        resource_api_version: V3
-        ads: {}
-      ads_config:
-        api_type: GRPC
-        transport_api_version: V3
-        grpc_services:
-        - envoy_grpc:
-            cluster_name: xds_cluster
-
-    static_resources:
-      clusters:
-      - name: xds_cluster
-        connect_timeout: 0.25s
-        type: STRICT_DNS
-        lb_policy: ROUND_ROBIN
-        typed_extension_protocol_options:
-          envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-            "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-            explicit_http_config:
-              http2_protocol_options: {}
-        load_assignment:
-          cluster_name: xds_cluster
-          endpoints:
-          - lb_endpoints:
-            - endpoint:
-                address:
-                  socket_address:
-                    address: 127.0.0.1
-                    port_value: 18000
+spec:
+  type: ClusterIP
+  selector:
+    app: atenet-router
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -125,18 +158,15 @@ spec:
         image: ko://github.com/agent-substrate/substrate/cmd/atenet
         args:
         - "router"
-        - "--networking-mode=envoy"
         - "--standalone"
+        - "--networking-mode=agentgateway"
         - "--namespace=ate-system"
         - "--port-http=8080"
-        - "--port-xds=18000"
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"
         - "--ateapi-address=api.ate-system.svc:443"
         - "--status-port=4040"
         - "--port-https=8443"
-        - "--tls-cert-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
-        - "--tls-key-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         env:
         - name: POD_NAME
           valueFrom:
@@ -152,64 +182,46 @@ spec:
               fieldPath: metadata.uid
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),service.instance.id=$(POD_UID)
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: http://opentelemetry-collector.gke-managed-otel.svc.cluster.local:4317
         ports:
-        - name: xds
-          containerPort: 18000
         - name: extproc
           containerPort: 50051
         - name: status
           containerPort: 4040
         - name: metrics
           containerPort: 9090
-      - name: envoy
-        image: envoyproxy/envoy:v1.30-latest
-        command:
-        - "/usr/local/bin/envoy"
-        - "-c"
-        - "/etc/envoy/envoy.yaml"
-        - "--component-log-level"
-        - "upstream:debug,router:debug,ext_proc:debug"
+      - name: agentgateway
+        image: cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1
+        args:
+        - "-f"
+        - "/etc/agentgateway/config.yaml"
         ports:
         - name: http
           containerPort: 8080
         - name: https
           containerPort: 8443
-        - name: admin
-          containerPort: 9901
+        - name: readiness
+          containerPort: 15021
+        - name: gw-metrics
+          containerPort: 15020
         volumeMounts:
-        - name: envoy-config
-          mountPath: /etc/envoy
+        - name: agentgateway-config
+          mountPath: /etc/agentgateway
         - name: "servicedns"
           mountPath: "/run/servicedns.podcert.ate.dev"
+        readinessProbe:
+          httpGet:
+            path: /healthz/ready
+            port: readiness
+          periodSeconds: 10
       volumes:
-      - name: envoy-config
+      - name: agentgateway-config
         configMap:
-          name: atenet-router-envoy-config
+          name: atenet-router-agentgateway-config
       - name: "servicedns"
         projected:
           sources:
           - podCertificate:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
-              credentialBundlePath: credential-bundle.pem
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: atenet-router
-  namespace: ate-system
-spec:
-  type: ClusterIP
-  selector:
-    app: atenet-router
-  ports:
-  - name: http
-    port: 80
-    targetPort: 8080
-    protocol: TCP
-  - name: https
-    port: 443
-    targetPort: 8443
-    protocol: TCP
+              certificateChainPath: cert.pem
+              keyPath: key.pem

@@ -1,0 +1,73 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if and (eq .Values.auth.mode "jwt") .Values.auth.jwt.bootstrap.enabled }}
+{{- $apiName := include "substrate.fullname" (list "api" .) }}
+{{- $routerName := include "substrate.fullname" (list "atenet-router" .) }}
+{{- $apiHost := printf "%s.%s.svc" $apiName .Release.Namespace }}
+{{- $ca := genCA (printf "%s-ca" $apiName) 3650 }}
+{{- $serverCert := genSignedCert $apiHost nil (list $apiHost (printf "%s.%s.svc.cluster.local" $apiName .Release.Namespace) (printf "%s.%s.svc" $routerName .Release.Namespace)) 365 $ca }}
+{{- $sessionJWTKey := genPrivateKey "ecdsa" }}
+{{- $sessionCA := genCA "session-id-ca" 3650 }}
+{{- if .Values.auth.jwt.bootstrap.serverCert.enabled }}
+{{- $existingTLS := lookup "v1" "Secret" .Release.Namespace .Values.auth.jwt.serverCertSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.auth.jwt.serverCertSecret }}
+  namespace: {{ .Release.Namespace }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ if $existingTLS }}{{ index $existingTLS.data "tls.crt" }}{{ else }}{{ $serverCert.Cert | b64enc }}{{ end }}
+  tls.key: {{ if $existingTLS }}{{ index $existingTLS.data "tls.key" }}{{ else }}{{ $serverCert.Key | b64enc }}{{ end }}
+---
+{{- $existingCA := lookup "v1" "ConfigMap" .Release.Namespace .Values.auth.jwt.caBundleConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.auth.jwt.caBundleConfigMap }}
+  namespace: {{ .Release.Namespace }}
+data:
+  ca.crt: |
+{{- if $existingCA }}
+{{ index $existingCA.data "ca.crt" | nindent 4 }}
+{{- else }}
+{{ $ca.Cert | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- if .Values.auth.jwt.bootstrap.sessionPools.enabled }}
+---
+{{- $existingJWTSecret := lookup "v1" "Secret" .Release.Namespace "session-id-jwt-pool" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: session-id-jwt-pool
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data:
+  pool: {{ if $existingJWTSecret }}{{ index $existingJWTSecret.data "pool" }}{{ else }}{{ dict "Authorities" (list (dict "ID" "1" "Algorithm" "ES256" "SigningKeyPEM" $sessionJWTKey)) | toJson | b64enc }}{{ end }}
+---
+{{- $existingCASecret := lookup "v1" "Secret" .Release.Namespace "session-id-ca-pool" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: session-id-ca-pool
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data:
+  pool: {{ if $existingCASecret }}{{ index $existingCASecret.data "pool" }}{{ else }}{{ dict "CAs" (list (dict "ID" "1" "SigningKeyPEM" $sessionCA.Key "RootCertificatePEM" $sessionCA.Cert)) | toJson | b64enc }}{{ end }}
+{{- end }}
+{{- end }}
