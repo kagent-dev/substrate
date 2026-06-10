@@ -1,33 +1,59 @@
-#  Copyright 2026 Google LLC
-#
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+{{/*
+Copyright 2026 Google LLC
 
-# DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.
-# Run `make helm-template` to regenerate.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: atenet-router
-  namespace: ate-system
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app: atenet-router
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+rules:
+- apiGroups:
+  - "ate.dev"
+  resources:
+  - actortemplates
+  verbs:
+  - get
+  - watch
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: atenet-router-agentgateway-config
-  namespace: ate-system
+  name: {{ include "substrate.fullname" (list "atenet-router-agentgateway-config" .) }}
+  namespace: {{ .Release.Namespace }}
 data:
   config.yaml: |
     # yaml-language-server: $schema=https://agentgateway.dev/schema/config
@@ -63,10 +89,13 @@ data:
       - name: https
         protocol: HTTPS
         tls:
-
+{{ if eq .Values.auth.mode "mtls" }}
           cert: "/run/servicedns.podcert.ate.dev/cert.pem"
           key: "/run/servicedns.podcert.ate.dev/key.pem"
-
+{{ else }}
+          cert: "/run/agentgateway-tls/tls.crt"
+          key: "/run/agentgateway-tls/tls.key"
+{{ end }}
         routes:
         - name: substrate-https
           matches:
@@ -86,57 +115,11 @@ data:
           backends:
           - dynamic: {}
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: atenet-router
-rules:
-- apiGroups:
-  - "ate.dev"
-  resources:
-  - actortemplates
-  verbs:
-  - get
-  - watch
-  - list
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: atenet-router
-subjects:
-- kind: ServiceAccount
-  name: atenet-router
-  namespace: ate-system
-roleRef:
-  kind: ClusterRole
-  name: atenet-router
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: atenet-router
-  namespace: ate-system
-spec:
-  type: ClusterIP
-  selector:
-    app: atenet-router
-  ports:
-  - name: http
-    port: 80
-    targetPort: 8080
-    protocol: TCP
-  - name: https
-    port: 443
-    targetPort: 8443
-    protocol: TCP
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: atenet-router
-  namespace: ate-system
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app: atenet-router
 spec:
@@ -152,19 +135,25 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
     spec:
-      serviceAccountName: atenet-router
+      serviceAccountName: {{ include "substrate.fullname" (list "atenet-router" .) }}
       containers:
       - name: atenet-router
-        image: ko://github.com/agent-substrate/substrate/cmd/atenet
+        image: {{ include "substrate.componentImage" (list "atenet" .) }}
         args:
         - "router"
         - "--standalone"
         - "--networking-mode=agentgateway"
-        - "--namespace=ate-system"
+        - "--namespace={{ .Release.Namespace }}"
         - "--port-http=8080"
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"
-        - "--ateapi-address=api.ate-system.svc:443"
+        - "--ateapi-address={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
+{{- if eq .Values.auth.mode "jwt" }}
+        - "--ateapi-auth=jwt"
+        - "--ateapi-ca-file=/run/ateapi-ca/ca.crt"
+        - "--ateapi-server-name={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc"
+        - "--ateapi-token-file=/var/run/secrets/tokens/ateapi/token"
+{{- end }}
         - "--status-port=4040"
         - "--port-https=8443"
         env:
@@ -182,6 +171,10 @@ spec:
               fieldPath: metadata.uid
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),service.instance.id=$(POD_UID)
+{{- if .Values.otel.endpoint }}
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
+{{- end }}
         ports:
         - name: extproc
           containerPort: 50051
@@ -189,8 +182,17 @@ spec:
           containerPort: 4040
         - name: metrics
           containerPort: 9090
+{{- if eq .Values.auth.mode "jwt" }}
+        volumeMounts:
+        - name: ateapi-ca
+          mountPath: /run/ateapi-ca
+          readOnly: true
+        - name: ateapi-token
+          mountPath: /var/run/secrets/tokens/ateapi
+          readOnly: true
+{{- end }}
       - name: agentgateway
-        image: cr.agentgateway.dev/agentgateway:v1.3.0-alpha.1
+        image: {{ .Values.images.agentgateway }}
         args:
         - "-f"
         - "/etc/agentgateway/config.yaml"
@@ -206,8 +208,14 @@ spec:
         volumeMounts:
         - name: agentgateway-config
           mountPath: /etc/agentgateway
+{{- if eq .Values.auth.mode "mtls" }}
         - name: "servicedns"
           mountPath: "/run/servicedns.podcert.ate.dev"
+{{- else }}
+        - name: agentgateway-tls
+          mountPath: /run/agentgateway-tls
+          readOnly: true
+{{- end }}
         readinessProbe:
           httpGet:
             path: /healthz/ready
@@ -216,7 +224,8 @@ spec:
       volumes:
       - name: agentgateway-config
         configMap:
-          name: atenet-router-agentgateway-config
+          name: {{ include "substrate.fullname" (list "atenet-router-agentgateway-config" .) }}
+{{- if eq .Values.auth.mode "mtls" }}
       - name: "servicedns"
         projected:
           sources:
@@ -225,3 +234,37 @@ spec:
               keyType: ECDSAP256
               certificateChainPath: cert.pem
               keyPath: key.pem
+{{- else }}
+      - name: agentgateway-tls
+        secret:
+          secretName: {{ .Values.auth.jwt.serverCertSecret }}
+      - name: ateapi-ca
+        configMap:
+          name: {{ .Values.auth.jwt.caBundleConfigMap }}
+      - name: ateapi-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              audience: {{ .Values.auth.jwt.audience }}
+              expirationSeconds: 3600
+              path: token
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "substrate.fullname" (list "atenet-router" .) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: atenet-router
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8443
+    protocol: TCP

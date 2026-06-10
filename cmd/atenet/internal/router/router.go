@@ -108,12 +108,11 @@ type RouterServer struct {
 
 func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
 	if cfg.NetworkingMode == "" {
-		cfg.NetworkingMode = NetworkingModeEnvoy
+		cfg.NetworkingMode = NetworkingModeAgentgateway
 	}
 
 	var k8sClient client.Client
 	var clientset kubernetes.Interface
-	var err error
 
 	if cfg.TemplatesFile == "" {
 		k8sCfg, err := config.GetConfig()
