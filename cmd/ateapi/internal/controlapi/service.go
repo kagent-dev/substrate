@@ -27,18 +27,20 @@ type Service struct {
 	persistence         store.Interface
 	dialer              *AteletDialer
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	workerPoolLister    listersv1alpha1.WorkerPoolLister
 	actorWorkflow       *ActorWorkflow
 }
 
 var _ ateapipb.ControlServer = (*Service)(nil)
 
 // NewService creates a service.
-func NewService(persistence store.Interface, actorTemplateLister listersv1alpha1.ActorTemplateLister, dialer *AteletDialer) *Service {
+func NewService(persistence store.Interface, actorTemplateLister listersv1alpha1.ActorTemplateLister, workerPoolLister listersv1alpha1.WorkerPoolLister, dialer *AteletDialer) *Service {
 	s := &Service{
 		persistence:         persistence,
 		actorTemplateLister: actorTemplateLister,
+		workerPoolLister:    workerPoolLister,
 		dialer:              dialer,
-		actorWorkflow:       NewActorWorkflow(persistence, dialer, actorTemplateLister),
+		actorWorkflow:       NewActorWorkflow(persistence, dialer, actorTemplateLister, workerPoolLister),
 	}
 
 	return s

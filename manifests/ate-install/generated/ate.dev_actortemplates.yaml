@@ -54,6 +54,47 @@ spec:
           spec:
             description: spec defines the desired state of ActorTemplate
             properties:
+              cloudHypervisor:
+                description: |-
+                  Parameters for fetching the cloud-hypervisor binary to use.
+                  Required when the referenced WorkerPool uses the CloudHypervisor backend.
+                properties:
+                  amd64:
+                    description: Configuration for the amd64 binary.
+                    properties:
+                      sha256Hash:
+                        description: The SHA256 hash of the binary to download.
+                        type: string
+                      url:
+                        description: A gs:// or s3:// URL pointing to the cloud-hypervisor
+                          binary.
+                        type: string
+                    required:
+                    - sha256Hash
+                    - url
+                    type: object
+                  arm64:
+                    description: Configuration for the arm64 binary.
+                    properties:
+                      sha256Hash:
+                        description: The SHA256 hash of the binary to download.
+                        type: string
+                      url:
+                        description: A gs:// or s3:// URL pointing to the cloud-hypervisor
+                          binary.
+                        type: string
+                    required:
+                    - sha256Hash
+                    - url
+                    type: object
+                  authentication:
+                    description: How should atelet authenticate to download the binary?
+                    properties:
+                      gcp:
+                        description: Use GCP application-default credentials.
+                        type: object
+                    type: object
+                type: object
               containers:
                 description: Containers is the workload definition.
                 items:
@@ -107,7 +148,9 @@ spec:
                     snapshots)
                   rule: self.contains('@')
               runsc:
-                description: Parameters for fetching the runsc binary to use.
+                description: |-
+                  Parameters for fetching the runsc binary to use.
+                  Required when the referenced WorkerPool uses the GVisor backend.
                 properties:
                   amd64:
                     description: Configuration for the amd64 binary.
@@ -208,7 +251,6 @@ spec:
                 x-kubernetes-map-type: atomic
             required:
             - pauseImage
-            - runsc
             - snapshotsConfig
             - workerPoolRef
             type: object

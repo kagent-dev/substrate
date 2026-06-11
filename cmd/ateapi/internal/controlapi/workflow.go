@@ -116,14 +116,16 @@ type ActorWorkflow struct {
 	store               store.Interface
 	dialer              *AteletDialer
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	workerPoolLister    listersv1alpha1.WorkerPoolLister
 }
 
 // NewActorWorkflow creates a new ActorWorkflow.
-func NewActorWorkflow(store store.Interface, dialer *AteletDialer, actorTemplateLister listersv1alpha1.ActorTemplateLister) *ActorWorkflow {
+func NewActorWorkflow(store store.Interface, dialer *AteletDialer, actorTemplateLister listersv1alpha1.ActorTemplateLister, workerPoolLister listersv1alpha1.WorkerPoolLister) *ActorWorkflow {
 	return &ActorWorkflow{
 		store:               store,
 		dialer:              dialer,
 		actorTemplateLister: actorTemplateLister,
+		workerPoolLister:    workerPoolLister,
 	}
 }
 
@@ -144,7 +146,7 @@ func (w *ActorWorkflow) ResumeActor(ctx context.Context, id string, boot bool) (
 	defer releaseLock()
 
 	steps := []WorkflowStep[*ResumeInput, *ResumeState]{
-		&LoadActorForResumeStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
+		&LoadActorForResumeStep{store: w.store, actorTemplateLister: w.actorTemplateLister, workerPoolLister: w.workerPoolLister},
 		&AssignWorkerStep{store: w.store},
 		&CallAteletRestoreStep{dialer: w.dialer},
 		&FinalizeRunningStep{store: w.store},

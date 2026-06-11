@@ -143,6 +143,9 @@ CONTAINER="c0"
 
 BUNDLE_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/bundles/${CONTAINER}"
 ROOTFS_DIR="${BUNDLE_DIR}/rootfs"
+TEMPLATE_BUNDLE_DIR="/var/lib/ateom-gvisor/templates/${NS}:${TMPL}/bundles/${CONTAINER}"
+TEMPLATE_ROOTFS_DIR="${TEMPLATE_BUNDLE_DIR}/rootfs"
+GOLDEN_PATH="/var/lib/ateom-gvisor/templates/${NS}:${TMPL}/cloud-hypervisor/golden/${CONTAINER}"
 SOCKET="/var/lib/ateom-gvisor/ateoms/${POD_UID}/ateom.sock"
 CHECKPOINT_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/checkpoint-state"
 RESTORE_DIR="/var/lib/ateom-gvisor/actors/${NS}:${TMPL}:${ACTOR}/restore-state"
@@ -166,6 +169,9 @@ set -euo pipefail
 
 BUNDLE_DIR="${BUNDLE_DIR}"
 ROOTFS_DIR="${ROOTFS_DIR}"
+TEMPLATE_BUNDLE_DIR="${TEMPLATE_BUNDLE_DIR}"
+TEMPLATE_ROOTFS_DIR="${TEMPLATE_ROOTFS_DIR}"
+GOLDEN_PATH="${GOLDEN_PATH}"
 SOCKET="${SOCKET}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR}"
 RESTORE_DIR="${RESTORE_DIR}"
@@ -183,6 +189,20 @@ section() { echo ""; echo "── \$1 ──────────────
 
 # ── 1. OCI bundle ────────────────────────────────────────────────────────────
 section "Preparing OCI bundle"
+
+mkdir -p "\${TEMPLATE_ROOTFS_DIR}"
+cp /usr/local/share/ateom-ch/testinit "\${TEMPLATE_ROOTFS_DIR}/init"
+chmod +x "\${TEMPLATE_ROOTFS_DIR}/init"
+cat > "\${TEMPLATE_BUNDLE_DIR}/config.json" <<'JSON'
+{
+  "process": {
+    "args": ["/init"],
+    "cwd": "/"
+  },
+  "root": { "path": "rootfs" }
+}
+JSON
+echo "  Template bundle: \${TEMPLATE_BUNDLE_DIR}"
 
 mkdir -p "\${ROOTFS_DIR}"
 
@@ -224,7 +244,7 @@ echo "  actor2 bundle: \${BUNDLE_DIR2}"
 section "Starting ateom-ch"
 
 mkdir -p "\$(dirname "\${SOCKET}")"
-ateom-ch --pod-uid "\${POD_UID}" &
+ateom-ch --pod-uid "\${POD_UID}" >/tmp/ateom-ch.log 2>&1 &
 ATEOM_PID=\$!
 echo "  ateom-ch PID: \${ATEOM_PID}"
 
@@ -244,23 +264,37 @@ grpc() {
     grpcurl -plaintext -unix -d "\${body}" "\${SOCKET}" "ateom.Ateom/\${method}"
 }
 
-# ── 3. RunWorkload ────────────────────────────────────────────────────────────
-section "RunWorkload"
+# ── 3. CreateTemplateGoldenSnapshot ───────────────────────────────────────────
+section "CreateTemplateGoldenSnapshot"
+
+T0=\$(date +%s%3N)
+grpc CreateTemplateGoldenSnapshot "{
+  \"actor_template_namespace\": \"\${NS}\",
+  \"actor_template_name\":      \"\${TMPL}\",
+  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] }
+}"
+T1=\$(date +%s%3N)
+echo "  CreateTemplateGoldenSnapshot: \$((T1 - T0))ms"
+[[ -d "\${GOLDEN_PATH}" ]] || { echo "ERROR: golden snapshot not created at \${GOLDEN_PATH}"; exit 1; }
+
+# ── 4. RunWorkload ────────────────────────────────────────────────────────────
+section "RunWorkload actor1 (template golden restore)"
 
 T0=\$(date +%s%3N)
 grpc RunWorkload "{
   \"actor_template_namespace\": \"\${NS}\",
   \"actor_template_name\":      \"\${TMPL}\",
   \"actor_id\":                 \"\${ACTOR}\",
-  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] }
+  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] },
+  \"template_golden_snapshot_path\": \"\${GOLDEN_PATH}\"
 }"
 T1=\$(date +%s%3N)
-echo "  RunWorkload (slow/cold boot+golden snapshot): \$((T1 - T0))ms"
+echo "  RunWorkload (template golden restore): \$((T1 - T0))ms"
 
 echo "  Waiting 5s for VM to settle..."
 sleep 5
 
-# ── 4. CheckpointWorkload ─────────────────────────────────────────────────────
+# ── 5. CheckpointWorkload ─────────────────────────────────────────────────────
 section "CheckpointWorkload"
 
 T0=\$(date +%s%3N)
@@ -280,7 +314,7 @@ ls -lh "\${CHECKPOINT_DIR}/" 2>/dev/null || echo "  (empty — unexpected)"
 SNAP_BYTES=\$(du -sb "\${CHECKPOINT_DIR}" 2>/dev/null | cut -f1 || echo 0)
 echo "  Total: \$(( SNAP_BYTES / 1024 / 1024 ))MB"
 
-# ── 5. RestoreWorkload ────────────────────────────────────────────────────────
+# ── 6. RestoreWorkload ────────────────────────────────────────────────────────
 section "RestoreWorkload"
 
 # Simulate atelet: copy checkpoint → restore dir.
@@ -312,9 +346,8 @@ grpc CheckpointWorkload "{
 }"
 echo "  Second checkpoint succeeded — restored VM is healthy."
 
-# ── 6. RunWorkload (fast path) ────────────────────────────────────────────────
-# actor1's RunWorkload already created the template golden snapshot.
-# actor2 uses the same template → fast path via VmRestore from golden.
+# ── 7. RunWorkload (fast path) ────────────────────────────────────────────────
+# actor2 uses the same prepared template golden → fast path via VmRestore.
 section "RunWorkload actor2 (fast path — golden restore)"
 
 T0=\$(date +%s%3N)
@@ -322,7 +355,8 @@ grpc RunWorkload "{
   \"actor_template_namespace\": \"\${NS}\",
   \"actor_template_name\":      \"\${TMPL}\",
   \"actor_id\":                 \"\${ACTOR2}\",
-  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] }
+  \"spec\": { \"containers\": [{ \"name\": \"\${CONTAINER}\" }] },
+  \"template_golden_snapshot_path\": \"\${GOLDEN_PATH}\"
 }"
 T1=\$(date +%s%3N)
 echo "  RunWorkload (fast/golden restore): \$((T1 - T0))ms"
@@ -339,10 +373,17 @@ grpc CheckpointWorkload "{
 }"
 echo "  actor2 checkpoint succeeded — golden-restore VM is healthy."
 
+if grep -q "RunWorkload: cold boot" /tmp/ateom-ch.log; then
+  echo "ERROR: RunWorkload used lazy cold boot despite prepared template golden"
+  cat /tmp/ateom-ch.log
+  exit 1
+fi
+echo "  Verified: no lazy RunWorkload cold boot occurred."
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────────────"
-echo "PASS: ateom-ch RunWorkload → Checkpoint → Restore → Checkpoint → RunWorkload(golden)"
+echo "PASS: ateom-ch CreateTemplateGoldenSnapshot → RunWorkload(golden) → Checkpoint → Restore → Checkpoint → RunWorkload(golden)"
 echo "────────────────────────────────────────────────"
 
 SCRIPT

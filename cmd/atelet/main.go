@@ -281,6 +281,23 @@ func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*atele
 		return nil, err
 	}
 
+	templateGoldenSnapshotPath := ""
+	if req.GetTemplateGoldenSnapshotUri() != "" {
+		primaryContainer, err := primaryContainerName(req.GetSpec())
+		if err != nil {
+			return nil, err
+		}
+		templateGoldenSnapshotPath = ateompath.TemplateGoldenSnapshotDir(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), primaryContainer)
+		if _, err := os.Stat(templateGoldenSnapshotPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("while checking template golden snapshot cache: %w", err)
+			}
+			if err := ategcs.FetchLocalDirectoryFromGCSWithTarZstd(ctx, s.gcsClient, req.GetTemplateGoldenSnapshotUri(), templateGoldenSnapshotPath); err != nil {
+				return nil, fmt.Errorf("while downloading template golden snapshot: %w", err)
+			}
+		}
+	}
+
 	if err := resetActorDirs(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId()); err != nil {
 		return nil, fmt.Errorf("while resetting actor dirs: %w", err)
 	}
@@ -300,16 +317,46 @@ func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*atele
 	// Tell ateom to do runsc create + runsc start for pause container and
 	// all application containers.
 	if _, err := client.RunWorkload(ctx, &ateompb.RunWorkloadRequest{
-		ActorTemplateNamespace: req.GetActorTemplateNamespace(),
-		ActorTemplateName:      req.GetActorTemplateName(),
-		ActorId:                req.GetActorId(),
-		RunscPath:              runscPath,
-		Spec:                   buildAteomWorkloadSpec(req.GetSpec()),
+		ActorTemplateNamespace:     req.GetActorTemplateNamespace(),
+		ActorTemplateName:          req.GetActorTemplateName(),
+		ActorId:                    req.GetActorId(),
+		RunscPath:                  runscPath,
+		Spec:                       buildAteomWorkloadSpec(req.GetSpec()),
+		TemplateGoldenSnapshotPath: templateGoldenSnapshotPath,
 	}); err != nil {
 		return nil, fmt.Errorf("while calling ateom.RunWorkload: %w", err)
 	}
 
 	return &ateletpb.RunResponse{}, nil
+}
+
+func (s *AteomHerder) PrepareTemplate(ctx context.Context, req *ateletpb.PrepareTemplateRequest) (*ateletpb.PrepareTemplateResponse, error) {
+	if req.GetGoldenSnapshotUri() == "" {
+		return nil, fmt.Errorf("golden_snapshot_uri is required")
+	}
+	if err := resetTemplateDirs(req.GetActorTemplateNamespace(), req.GetActorTemplateName()); err != nil {
+		return nil, fmt.Errorf("while resetting template dirs: %w", err)
+	}
+	if err := s.prepareTemplateOCIBundles(ctx, req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetSpec(), req.GetTargetAteomUid()); err != nil {
+		return nil, err
+	}
+
+	client, err := s.dialAteom(ctx, req.GetTargetAteomUid())
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.CreateTemplateGoldenSnapshot(ctx, &ateompb.CreateTemplateGoldenSnapshotRequest{
+		ActorTemplateNamespace: req.GetActorTemplateNamespace(),
+		ActorTemplateName:      req.GetActorTemplateName(),
+		Spec:                   buildAteomWorkloadSpec(req.GetSpec()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("while calling ateom.CreateTemplateGoldenSnapshot: %w", err)
+	}
+	if err := ategcs.SendLocalDirectoryToGCSWithTarZstd(ctx, s.gcsClient, req.GetGoldenSnapshotUri(), resp.GetSnapshotPath()); err != nil {
+		return nil, fmt.Errorf("while uploading template golden snapshot: %w", err)
+	}
+	return &ateletpb.PrepareTemplateResponse{GoldenSnapshotUri: req.GetGoldenSnapshotUri()}, nil
 }
 
 var snapshotSizeBytes metric.Int64Histogram
@@ -477,6 +524,20 @@ func (s *AteomHerder) Restore(ctx context.Context, req *ateletpb.RestoreRequest)
 // runsc binary at the version pinned by the request. Returns the local
 // runsc path.
 func (s *AteomHerder) fetchRunscAndPrep(ctx context.Context, runscCfg *ateletpb.RunscConfig) (string, error) {
+	if runscCfg == nil {
+		return "", nil
+	}
+	var platCfg *ateletpb.RunscPlatformConfig
+	switch runtime.GOARCH {
+	case "amd64":
+		platCfg = runscCfg.GetAmd64()
+	case "arm64":
+		platCfg = runscCfg.GetArm64()
+	}
+	if platCfg.GetSha256Hash() == "" && platCfg.GetUrl() == "" {
+		return "", nil
+	}
+
 	if err := os.MkdirAll(ateompath.StaticFilesDir, 0o700); err != nil {
 		return "", fmt.Errorf("while creating static files dir: %w", err)
 	}
@@ -550,6 +611,53 @@ func (s *AteomHerder) prepareOCIBundles(
 	}
 
 	return g.Wait()
+}
+
+func (s *AteomHerder) prepareTemplateOCIBundles(
+	ctx context.Context,
+	actorTemplateNamespace, actorTemplateName string,
+	spec *ateletpb.WorkloadSpec,
+	targetAteomUid string,
+) error {
+	netnsPath := ateompath.AteomNetNSPath(targetAteomUid)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	for _, ctr := range spec.GetContainers() {
+		ctr := ctr
+		var envs []string
+		for _, env := range ctr.GetEnv() {
+			envs = append(envs, fmt.Sprintf("%s=%s", env.GetName(), env.GetValue()))
+		}
+		g.Go(func() error {
+			if err := prepareOCIAtBundlePath(
+				gCtx,
+				s.pullCache,
+				ateompath.TemplateOCIBundlePath(actorTemplateNamespace, actorTemplateName, ctr.GetName()),
+				ctr.GetImage(),
+				ctr.GetCommand(),
+				envs,
+				map[string]string{
+					"io.kubernetes.cri.container-type": "container",
+					"io.kubernetes.cri.sandbox-id":     "template",
+					"io.kubernetes.cri.container-name": ctr.GetName(),
+				},
+				netnsPath,
+			); err != nil {
+				return fmt.Errorf("while creating template %q OCI bundle: %w", ctr.GetName(), err)
+			}
+			return nil
+		})
+	}
+
+	return g.Wait()
+}
+
+func primaryContainerName(spec *ateletpb.WorkloadSpec) (string, error) {
+	containers := spec.GetContainers()
+	if len(containers) == 0 {
+		return "", fmt.Errorf("workload spec has no containers")
+	}
+	return containers[0].GetName(), nil
 }
 
 // dialAteom opens (or reuses) the gRPC connection to the target ateom
@@ -654,5 +762,16 @@ func resetActorDirs(actorTemplateNamespace, actorTemplateName, actorID string) e
 		return fmt.Errorf("while creating restore-state dir: %w", err)
 	}
 
+	return nil
+}
+
+func resetTemplateDirs(actorTemplateNamespace, actorTemplateName string) error {
+	templateDir := ateompath.TemplatePath(actorTemplateNamespace, actorTemplateName)
+	if err := os.RemoveAll(templateDir); err != nil {
+		return fmt.Errorf("while deleting template dir: %w", err)
+	}
+	if err := os.MkdirAll(ateompath.TemplateOCIBundleDir(actorTemplateNamespace, actorTemplateName), 0o700); err != nil {
+		return fmt.Errorf("while creating template bundle dir: %w", err)
+	}
 	return nil
 }

@@ -69,6 +69,15 @@ spec:
                 description: AteomImage is the ateom container image to deploy as
                   workers.
                 type: string
+              backend:
+                default: GVisor
+                description: |-
+                  Backend selects the workload execution backend.
+                  Defaults to GVisor if unset.
+                enum:
+                - GVisor
+                - CloudHypervisor
+                type: string
               replicas:
                 description: Replicas is the number of worker pods to run.
                 format: int32

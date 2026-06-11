@@ -58,3 +58,17 @@ func TestAteomPathUniqueness(t *testing.T) {
 		t.Errorf("expected different paths for different pod UIDs, got %q", path1)
 	}
 }
+
+func TestTemplatePaths(t *testing.T) {
+	ns, tmpl, container := "default", "counter", "app"
+
+	if got, want := TemplatePath(ns, tmpl), BasePath+"/templates/default:counter"; got != want {
+		t.Errorf("TemplatePath() = %q, want %q", got, want)
+	}
+	if got, want := TemplateOCIBundlePath(ns, tmpl, container), BasePath+"/templates/default:counter/bundles/app"; got != want {
+		t.Errorf("TemplateOCIBundlePath() = %q, want %q", got, want)
+	}
+	if got, want := TemplateGoldenSnapshotDir(ns, tmpl, container), BasePath+"/templates/default:counter/cloud-hypervisor/golden/app"; got != want {
+		t.Errorf("TemplateGoldenSnapshotDir() = %q, want %q", got, want)
+	}
+}

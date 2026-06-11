@@ -35,13 +35,16 @@ import (
 )
 
 func prepareOCIDirectory(ctx context.Context, pullCache *memorypullcache.MemoryPullCache, actorTemplateNamespace, actorTemplateName, actorID, containerName, ref string, args []string, env []string, annotations map[string]string, netns string) error {
+	return prepareOCIAtBundlePath(ctx, pullCache, ateompath.OCIBundlePath(actorTemplateNamespace, actorTemplateName, actorID, containerName), ref, args, env, annotations, netns)
+}
+
+func prepareOCIAtBundlePath(ctx context.Context, pullCache *memorypullcache.MemoryPullCache, bundlePath, ref string, args []string, env []string, annotations map[string]string, netns string) error {
 	tracer := otel.Tracer("prepareOCIDirectory")
 
 	ctx, span := tracer.Start(ctx, "prepareOCIDirectory")
 	span.SetAttributes(attribute.String("image", ref))
 	defer span.End()
 
-	bundlePath := ateompath.OCIBundlePath(actorTemplateNamespace, actorTemplateName, actorID, containerName)
 	rootPath := path.Join(bundlePath, "rootfs")
 
 	if err := os.RemoveAll(rootPath); err != nil {

@@ -33,9 +33,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AteomHerder_Run_FullMethodName        = "/atelet.AteomHerder/Run"
-	AteomHerder_Checkpoint_FullMethodName = "/atelet.AteomHerder/Checkpoint"
-	AteomHerder_Restore_FullMethodName    = "/atelet.AteomHerder/Restore"
+	AteomHerder_Run_FullMethodName             = "/atelet.AteomHerder/Run"
+	AteomHerder_PrepareTemplate_FullMethodName = "/atelet.AteomHerder/PrepareTemplate"
+	AteomHerder_Checkpoint_FullMethodName      = "/atelet.AteomHerder/Checkpoint"
+	AteomHerder_Restore_FullMethodName         = "/atelet.AteomHerder/Restore"
 )
 
 // AteomHerderClient is the client API for AteomHerder service.
@@ -45,6 +46,9 @@ type AteomHerderClient interface {
 	// Run tells atelet to create a new containerized workload from scratch on an
 	// ateom.
 	Run(ctx context.Context, in *RunRequest, opts ...grpc.CallOption) (*RunResponse, error)
+	// PrepareTemplate creates and stores backend-specific template state used to
+	// make first actor creation fast.
+	PrepareTemplate(ctx context.Context, in *PrepareTemplateRequest, opts ...grpc.CallOption) (*PrepareTemplateResponse, error)
 	// Checkpoint tells atelet to save the current state of the workload on an
 	// ateom to object storage, and then completely the ateom to a blank state
 	// (back to "available" state.)
@@ -65,6 +69,16 @@ func (c *ateomHerderClient) Run(ctx context.Context, in *RunRequest, opts ...grp
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RunResponse)
 	err := c.cc.Invoke(ctx, AteomHerder_Run_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ateomHerderClient) PrepareTemplate(ctx context.Context, in *PrepareTemplateRequest, opts ...grpc.CallOption) (*PrepareTemplateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareTemplateResponse)
+	err := c.cc.Invoke(ctx, AteomHerder_PrepareTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +112,9 @@ type AteomHerderServer interface {
 	// Run tells atelet to create a new containerized workload from scratch on an
 	// ateom.
 	Run(context.Context, *RunRequest) (*RunResponse, error)
+	// PrepareTemplate creates and stores backend-specific template state used to
+	// make first actor creation fast.
+	PrepareTemplate(context.Context, *PrepareTemplateRequest) (*PrepareTemplateResponse, error)
 	// Checkpoint tells atelet to save the current state of the workload on an
 	// ateom to object storage, and then completely the ateom to a blank state
 	// (back to "available" state.)
@@ -116,6 +133,9 @@ type UnimplementedAteomHerderServer struct{}
 
 func (UnimplementedAteomHerderServer) Run(context.Context, *RunRequest) (*RunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Run not implemented")
+}
+func (UnimplementedAteomHerderServer) PrepareTemplate(context.Context, *PrepareTemplateRequest) (*PrepareTemplateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrepareTemplate not implemented")
 }
 func (UnimplementedAteomHerderServer) Checkpoint(context.Context, *CheckpointRequest) (*CheckpointResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Checkpoint not implemented")
@@ -158,6 +178,24 @@ func _AteomHerder_Run_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AteomHerderServer).Run(ctx, req.(*RunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AteomHerder_PrepareTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AteomHerderServer).PrepareTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AteomHerder_PrepareTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AteomHerderServer).PrepareTemplate(ctx, req.(*PrepareTemplateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -208,6 +246,10 @@ var AteomHerder_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Run",
 			Handler:    _AteomHerder_Run_Handler,
+		},
+		{
+			MethodName: "PrepareTemplate",
+			Handler:    _AteomHerder_PrepareTemplate_Handler,
 		},
 		{
 			MethodName: "Checkpoint",

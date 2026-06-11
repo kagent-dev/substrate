@@ -35,14 +35,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Control_GetActor_FullMethodName     = "/ateapi.Control/GetActor"
-	Control_CreateActor_FullMethodName  = "/ateapi.Control/CreateActor"
-	Control_SuspendActor_FullMethodName = "/ateapi.Control/SuspendActor"
-	Control_ResumeActor_FullMethodName  = "/ateapi.Control/ResumeActor"
-	Control_DeleteActor_FullMethodName  = "/ateapi.Control/DeleteActor"
-	Control_ListWorkers_FullMethodName  = "/ateapi.Control/ListWorkers"
-	Control_ListActors_FullMethodName   = "/ateapi.Control/ListActors"
-	Control_DebugClear_FullMethodName   = "/ateapi.Control/DebugClear"
+	Control_GetActor_FullMethodName             = "/ateapi.Control/GetActor"
+	Control_CreateActor_FullMethodName          = "/ateapi.Control/CreateActor"
+	Control_PrepareActorTemplate_FullMethodName = "/ateapi.Control/PrepareActorTemplate"
+	Control_SuspendActor_FullMethodName         = "/ateapi.Control/SuspendActor"
+	Control_ResumeActor_FullMethodName          = "/ateapi.Control/ResumeActor"
+	Control_DeleteActor_FullMethodName          = "/ateapi.Control/DeleteActor"
+	Control_ListWorkers_FullMethodName          = "/ateapi.Control/ListWorkers"
+	Control_ListActors_FullMethodName           = "/ateapi.Control/ListActors"
+	Control_DebugClear_FullMethodName           = "/ateapi.Control/DebugClear"
 )
 
 // ControlClient is the client API for Control service.
@@ -55,6 +56,8 @@ type ControlClient interface {
 	GetActor(ctx context.Context, in *GetActorRequest, opts ...grpc.CallOption) (*GetActorResponse, error)
 	// Create a new Actor deriving from a given ActorTemplate.
 	CreateActor(ctx context.Context, in *CreateActorRequest, opts ...grpc.CallOption) (*CreateActorResponse, error)
+	// Prepare an ActorTemplate for fast first actor creation.
+	PrepareActorTemplate(ctx context.Context, in *PrepareActorTemplateRequest, opts ...grpc.CallOption) (*PrepareActorTemplateResponse, error)
 	// Suspend a given actor to a new snapshot.
 	SuspendActor(ctx context.Context, in *SuspendActorRequest, opts ...grpc.CallOption) (*SuspendActorResponse, error)
 	// Resume an actor from its latest snapshot.
@@ -91,6 +94,16 @@ func (c *controlClient) CreateActor(ctx context.Context, in *CreateActorRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateActorResponse)
 	err := c.cc.Invoke(ctx, Control_CreateActor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) PrepareActorTemplate(ctx context.Context, in *PrepareActorTemplateRequest, opts ...grpc.CallOption) (*PrepareActorTemplateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareActorTemplateResponse)
+	err := c.cc.Invoke(ctx, Control_PrepareActorTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +180,8 @@ type ControlServer interface {
 	GetActor(context.Context, *GetActorRequest) (*GetActorResponse, error)
 	// Create a new Actor deriving from a given ActorTemplate.
 	CreateActor(context.Context, *CreateActorRequest) (*CreateActorResponse, error)
+	// Prepare an ActorTemplate for fast first actor creation.
+	PrepareActorTemplate(context.Context, *PrepareActorTemplateRequest) (*PrepareActorTemplateResponse, error)
 	// Suspend a given actor to a new snapshot.
 	SuspendActor(context.Context, *SuspendActorRequest) (*SuspendActorResponse, error)
 	// Resume an actor from its latest snapshot.
@@ -194,6 +209,9 @@ func (UnimplementedControlServer) GetActor(context.Context, *GetActorRequest) (*
 }
 func (UnimplementedControlServer) CreateActor(context.Context, *CreateActorRequest) (*CreateActorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateActor not implemented")
+}
+func (UnimplementedControlServer) PrepareActorTemplate(context.Context, *PrepareActorTemplateRequest) (*PrepareActorTemplateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrepareActorTemplate not implemented")
 }
 func (UnimplementedControlServer) SuspendActor(context.Context, *SuspendActorRequest) (*SuspendActorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SuspendActor not implemented")
@@ -266,6 +284,24 @@ func _Control_CreateActor_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ControlServer).CreateActor(ctx, req.(*CreateActorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_PrepareActorTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareActorTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).PrepareActorTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_PrepareActorTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).PrepareActorTemplate(ctx, req.(*PrepareActorTemplateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -392,6 +428,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateActor",
 			Handler:    _Control_CreateActor_Handler,
+		},
+		{
+			MethodName: "PrepareActorTemplate",
+			Handler:    _Control_PrepareActorTemplate_Handler,
 		},
 		{
 			MethodName: "SuspendActor",

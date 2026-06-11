@@ -68,6 +68,37 @@ func ActorPath(actorTemplateNamespace, actorTemplateName, actorID string) string
 	)
 }
 
+func TemplatePath(actorTemplateNamespace, actorTemplateName string) string {
+	return filepath.Join(
+		BasePath,
+		"templates",
+		actorTemplateNamespace+":"+actorTemplateName,
+	)
+}
+
+func TemplateOCIBundleDir(actorTemplateNamespace, actorTemplateName string) string {
+	return filepath.Join(
+		TemplatePath(actorTemplateNamespace, actorTemplateName),
+		"bundles",
+	)
+}
+
+func TemplateOCIBundlePath(actorTemplateNamespace, actorTemplateName, containerName string) string {
+	return filepath.Join(
+		TemplateOCIBundleDir(actorTemplateNamespace, actorTemplateName),
+		containerName,
+	)
+}
+
+func TemplateGoldenSnapshotDir(actorTemplateNamespace, actorTemplateName, containerName string) string {
+	return filepath.Join(
+		TemplatePath(actorTemplateNamespace, actorTemplateName),
+		"cloud-hypervisor",
+		"golden",
+		containerName,
+	)
+}
+
 func RunSCStateDir(actorTemplateNamespace, actorTemplateName, actorID string) string {
 	return filepath.Join(
 		ActorPath(actorTemplateNamespace, actorTemplateName, actorID),

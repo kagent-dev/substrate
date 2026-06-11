@@ -33,9 +33,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Ateom_RunWorkload_FullMethodName        = "/ateom.Ateom/RunWorkload"
-	Ateom_CheckpointWorkload_FullMethodName = "/ateom.Ateom/CheckpointWorkload"
-	Ateom_RestoreWorkload_FullMethodName    = "/ateom.Ateom/RestoreWorkload"
+	Ateom_RunWorkload_FullMethodName                  = "/ateom.Ateom/RunWorkload"
+	Ateom_CreateTemplateGoldenSnapshot_FullMethodName = "/ateom.Ateom/CreateTemplateGoldenSnapshot"
+	Ateom_CheckpointWorkload_FullMethodName           = "/ateom.Ateom/CheckpointWorkload"
+	Ateom_RestoreWorkload_FullMethodName              = "/ateom.Ateom/RestoreWorkload"
 )
 
 // AteomClient is the client API for Ateom service.
@@ -59,6 +60,9 @@ type AteomClient interface {
 	// RunWorkload tells ateom to begin running a new workload (one or more
 	// containers, potentially with shared filesystems).
 	RunWorkload(ctx context.Context, in *RunWorkloadRequest, opts ...grpc.CallOption) (*RunWorkloadResponse, error)
+	// CreateTemplateGoldenSnapshot creates backend-specific local template state
+	// used to make future RunWorkload calls fast.
+	CreateTemplateGoldenSnapshot(ctx context.Context, in *CreateTemplateGoldenSnapshotRequest, opts ...grpc.CallOption) (*CreateTemplateGoldenSnapshotResponse, error)
 	// CheckpointWorkload tells ateom to save the current state of the running
 	// workload to object storage, and then completely reset itself to a blank
 	// state (back to "available" state.)
@@ -81,6 +85,16 @@ func (c *ateomClient) RunWorkload(ctx context.Context, in *RunWorkloadRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RunWorkloadResponse)
 	err := c.cc.Invoke(ctx, Ateom_RunWorkload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ateomClient) CreateTemplateGoldenSnapshot(ctx context.Context, in *CreateTemplateGoldenSnapshotRequest, opts ...grpc.CallOption) (*CreateTemplateGoldenSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTemplateGoldenSnapshotResponse)
+	err := c.cc.Invoke(ctx, Ateom_CreateTemplateGoldenSnapshot_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +142,9 @@ type AteomServer interface {
 	// RunWorkload tells ateom to begin running a new workload (one or more
 	// containers, potentially with shared filesystems).
 	RunWorkload(context.Context, *RunWorkloadRequest) (*RunWorkloadResponse, error)
+	// CreateTemplateGoldenSnapshot creates backend-specific local template state
+	// used to make future RunWorkload calls fast.
+	CreateTemplateGoldenSnapshot(context.Context, *CreateTemplateGoldenSnapshotRequest) (*CreateTemplateGoldenSnapshotResponse, error)
 	// CheckpointWorkload tells ateom to save the current state of the running
 	// workload to object storage, and then completely reset itself to a blank
 	// state (back to "available" state.)
@@ -148,6 +165,9 @@ type UnimplementedAteomServer struct{}
 
 func (UnimplementedAteomServer) RunWorkload(context.Context, *RunWorkloadRequest) (*RunWorkloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunWorkload not implemented")
+}
+func (UnimplementedAteomServer) CreateTemplateGoldenSnapshot(context.Context, *CreateTemplateGoldenSnapshotRequest) (*CreateTemplateGoldenSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTemplateGoldenSnapshot not implemented")
 }
 func (UnimplementedAteomServer) CheckpointWorkload(context.Context, *CheckpointWorkloadRequest) (*CheckpointWorkloadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckpointWorkload not implemented")
@@ -190,6 +210,24 @@ func _Ateom_RunWorkload_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AteomServer).RunWorkload(ctx, req.(*RunWorkloadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Ateom_CreateTemplateGoldenSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTemplateGoldenSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AteomServer).CreateTemplateGoldenSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Ateom_CreateTemplateGoldenSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AteomServer).CreateTemplateGoldenSnapshot(ctx, req.(*CreateTemplateGoldenSnapshotRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -240,6 +278,10 @@ var Ateom_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunWorkload",
 			Handler:    _Ateom_RunWorkload_Handler,
+		},
+		{
+			MethodName: "CreateTemplateGoldenSnapshot",
+			Handler:    _Ateom_CreateTemplateGoldenSnapshot_Handler,
 		},
 		{
 			MethodName: "CheckpointWorkload",

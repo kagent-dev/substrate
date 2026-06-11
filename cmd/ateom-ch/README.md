@@ -1,6 +1,6 @@
 # ateom-ch — Cloud Hypervisor microVM backend
 
-`ateom-ch` is a gRPC server that runs actor workloads inside [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVMs. It implements the same `ateom.Ateom` gRPC interface as `ateom-gvisor`, so atelet can drive it without changes.
+`ateom-ch` is a gRPC server that runs actor workloads inside [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVMs. It implements the same core `ateom.Ateom` lifecycle interface as `ateom-gvisor`, plus a Cloud Hypervisor-specific template-preparation RPC for proactive golden snapshot creation.
 
 ## How it works
 
@@ -21,28 +21,34 @@ ateom-ch ──► virtiofsd ──► OCI bundle rootfs (shared into VM as virt
 
 Before gRPC starts serving, ateom-ch pre-warms a cloud-hypervisor process: CH starts and its API socket appears, but no VM is created yet. This means the first RunWorkload doesn't pay the ~50ms CH startup cost. After each actor teardown, a background goroutine immediately pre-warms a replacement CH.
 
-**RunWorkload — fast path (template golden snapshot exists)**
+**CreateTemplateGoldenSnapshot**
 
-After the first RunWorkload for a template, subsequent calls restore from the per-template golden snapshot (~97ms):
+During Cloud Hypervisor `ActorTemplate` readiness, atelet prepares a template-scoped OCI bundle and calls `CreateTemplateGoldenSnapshot`. ateom-ch cold-boots with `goldeninit` as PID 1, waits for `.ateom-ready`, snapshots the idle VM into the template cache, and tears the VM down. Atelet then uploads that snapshot directory as one `.tar.zstd` object and records the URI in `ActorTemplate.status.goldenSnapshot`.
+
+**RunWorkload — fast path (template golden snapshot supplied)**
+
+When atelet starts a new actor from a prepared template, it downloads/caches the template golden snapshot locally and passes `template_golden_snapshot_path` to `RunWorkload` (~97ms):
 
 1. Reads `config.json` to find the entrypoint.
 2. Copies `golden-init` into the actor's rootfs; writes `.ateom-ready`; removes stale `.ateom-run-args`. This ensures the rootfs file tree matches the one virtiofsd had when the golden snapshot was taken (required for DEVICE_STATE compatibility).
 3. Consumes the pre-warmed CH; starts virtiofsd + tap in parallel.
-4. Calls `vm.restore` from the template golden snapshot directory.
+4. Calls `vm.restore` from `template_golden_snapshot_path`.
 5. Calls `vm.resume` — goldeninit resumes as PID 1.
 6. Writes `.ateom-run-args` (the workload entrypoint). goldeninit polls this file and `exec`s the workload within ~10ms.
 
-**RunWorkload — slow path (first RunWorkload for this template)**
+If `template_golden_snapshot_path` is supplied but missing or invalid, `RunWorkload` fails instead of falling back to a cold boot.
 
-The first call for a given template cold-boots with `goldeninit` as PID 1, then captures a golden snapshot for all future calls (~413ms):
+**RunWorkload — legacy fallback slow path**
+
+For direct ateom-ch tests or old callers that do not pass `template_golden_snapshot_path`, the first call for a given template still cold-boots with `goldeninit` as PID 1, captures a pod-local golden snapshot, and then restores/runs from it. This is a compatibility fallback; the production Cloud Hypervisor path should use `CreateTemplateGoldenSnapshot` during `ActorTemplate` readiness.
 
 1. Reads `config.json` to find the entrypoint.
 2. Copies `golden-init` into the actor's rootfs; removes `.ateom-ready` so we can detect when goldeninit writes it.
 3. Consumes the pre-warmed CH; starts virtiofsd + tap in parallel.
 4. Calls `vm.create` with `init=/golden-init`; calls `vm.boot`.
 5. Polls the host-side rootfs for `.ateom-ready` (written by goldeninit through virtiofs when it becomes PID 1).
-6. Calls `vm.pause` + `vm.snapshot` to the template golden directory + `vm.resume`.
-7. Writes `.ateom-run-args`; goldeninit exec's the workload.
+6. Calls `vm.pause` + `vm.snapshot` to the fallback golden directory.
+7. Tears down the golden VM, restores from that snapshot, then writes `.ateom-run-args`; goldeninit exec's the workload.
 
 **CheckpointWorkload**
 1. Calls `vm.pause` — freezes all vCPUs.
@@ -85,10 +91,12 @@ Each actor gets a **tap** device (`atch-ch0`) and a **bridge** (`atchbr-ch0`). A
 | `/var/lib/ateom-gvisor/actors/<ns>:<tmpl>:<id>/bundles/<container>/` | OCI bundle (rootfs + config.json), written by atelet |
 | `/var/lib/ateom-gvisor/actors/<ns>:<tmpl>:<id>/checkpoint-state/` | Snapshot output dir |
 | `/var/lib/ateom-gvisor/actors/<ns>:<tmpl>:<id>/restore-state/` | Snapshot input dir (atelet downloads here) |
+| `/var/lib/ateom-gvisor/templates/<ns>:<tmpl>/bundles/<container>/` | Template OCI bundle used for proactive CH golden creation |
+| `/var/lib/ateom-gvisor/templates/<ns>:<tmpl>/cloud-hypervisor/golden/<container>/` | Local cache for downloaded/prepared CH template golden snapshot |
 | `/var/lib/ateom-gvisor/ateoms/<pod-uid>/ateom.sock` | gRPC unix socket |
 | `/run/ateom-ch/<pod-uid>/ch.sock` | Cloud Hypervisor API socket |
 | `/run/ateom-ch/virtiofsd.sock` | virtiofsd vhost-user socket (fixed path — no pod-uid, because CH snapshots embed this path verbatim) |
-| `/run/ateom-ch/<pod-uid>/golden-<ns>-<tmpl>-<container>/` | Per-template golden snapshot directory |
+| `/run/ateom-ch/<pod-uid>/golden-<ns>-<tmpl>-<container>/` | Legacy fallback pod-local golden snapshot directory |
 
 ### Expected latency
 
@@ -96,18 +104,19 @@ With the pre-warmed CH optimization and 64 MiB VM:
 
 | Operation | Notes | Measured |
 |-----------|-------|----------|
+| CreateTemplateGoldenSnapshot | Template readiness: cold boot + golden snapshot | ~413ms |
 | RunWorkload (fast path) | Golden restore: VmRestore + VmResume | ~97ms |
-| RunWorkload (slow path) | First call per template: cold boot + golden snapshot | ~413ms |
+| RunWorkload (legacy slow path) | Compatibility fallback when no explicit template golden is supplied | ~413ms |
 | RestoreWorkload | Actor checkpoint restore: VmRestore + VmResume | ~123ms |
 | CheckpointWorkload | VmPause + VmSnapshot (64 MiB memory) | ~600ms |
 
-virtiofsd and tap creation run in parallel with CH startup (or with VmRestore after CH is pre-warmed), hiding most of their latency. The slow-path overhead amortises after the first actor of each template starts.
+virtiofsd and tap creation run in parallel with CH startup (or with VmRestore after CH is pre-warmed), hiding most of their latency. With proactive template preparation, the cold-boot cost is paid during `ActorTemplate` readiness rather than on first actor creation.
 
 ---
 
 ## Running the end-to-end test
 
-The integration test spins up a disposable kind cluster, builds the Docker image, and exercises the full `RunWorkload(slow) → Checkpoint → Restore → Checkpoint → RunWorkload(fast/golden)` lifecycle inside a privileged pod.
+The integration test spins up a disposable kind cluster, builds the Docker image, and exercises the full `CreateTemplateGoldenSnapshot → RunWorkload(golden) → Checkpoint → Restore → Checkpoint → RunWorkload(golden)` lifecycle inside a privileged pod.
 
 ### Prerequisites
 
@@ -157,7 +166,7 @@ Pass `--keep` to leave the cluster running after the test (useful for manual ins
        /run/ateom-ch          ← CH + virtiofsd sockets
 
 5. Inside the pod:
-   a. Write two OCI bundles (actor1 + actor2, same template):
+   a. Write a template OCI bundle and two actor OCI bundles (actor1 + actor2, same template):
       rootfs/ contains only 'testinit' binary as /init
       config.json sets process.args = ["/init"]
 
@@ -165,42 +174,50 @@ Pass `--keep` to leave the cluster running after the test (useful for manual ins
       warmUp: pre-warms a CH process before gRPC starts serving
       Wait for gRPC unix socket to appear
 
-   c. grpcurl RunWorkload(actor1) — slow path
+   c. grpcurl CreateTemplateGoldenSnapshot
+      → uses the template bundle rootfs
       → copies golden-init into rootfs; removes .ateom-ready
       → uses pre-warmed CH; virtiofsd + tap start concurrently
       → VM boots with init=/golden-init; goldeninit writes .ateom-ready
       → vm.pause + vm.snapshot → golden snapshot saved
-      → vm.resume; .ateom-run-args written; goldeninit exec's testinit
+      → VM is torn down
 
-   d. sleep 5s
+   d. grpcurl RunWorkload(actor1) — explicit template golden restore
+      → passes template_golden_snapshot_path
+      → vm.restore from template golden + vm.resume
+      → .ateom-run-args written; goldeninit exec's testinit
 
-   e. grpcurl CheckpointWorkload(actor1)
+   e. sleep 5s
+
+   f. grpcurl CheckpointWorkload(actor1)
       → vm.pause → vm.snapshot → teardown
       → snapshot files appear in checkpoint-state/
       → background doPrewarm starts CH for next operation
 
-   f. cp checkpoint-state/ → restore-state/
+   g. cp checkpoint-state/ → restore-state/
       (simulates atelet downloading the snapshot)
 
-   g. grpcurl RestoreWorkload(actor1)
+   h. grpcurl RestoreWorkload(actor1)
       → pre-warmed CH consumed; virtiofsd + tap start in parallel
       → vm.restore loads snapshot + transfers virtiofsd DEVICE_STATE
       → vm.resume — VM continues from paused point
 
-   h. sleep 3s
+   i. sleep 3s
 
-   i. grpcurl CheckpointWorkload(actor1) — second checkpoint
+   j. grpcurl CheckpointWorkload(actor1) — second checkpoint
       → proves the restored VM is fully healthy
 
-   j. grpcurl RunWorkload(actor2) — fast path (golden snapshot exists)
+   k. grpcurl RunWorkload(actor2) — explicit template golden restore
       → copies golden-init; writes .ateom-ready; removes .ateom-run-args
       → vm.restore from template golden + vm.resume
       → .ateom-run-args written; goldeninit exec's testinit
 
-   k. sleep 2s
+   l. sleep 2s
 
-   l. grpcurl CheckpointWorkload(actor2)
+   m. grpcurl CheckpointWorkload(actor2)
       → proves golden-restore VM is healthy
+
+   n. grep ateom-ch logs to verify no lazy "RunWorkload: cold boot" occurred
 
 6. Print PASS / FAIL
 ```
@@ -208,8 +225,11 @@ Pass `--keep` to leave the cluster running after the test (useful for manual ins
 ### Expected output (end)
 
 ```
-── RunWorkload ──────────────────────────────────────
-  RunWorkload (slow/cold boot+golden snapshot): ~413ms
+── CreateTemplateGoldenSnapshot ──────────────────────────────────────
+  CreateTemplateGoldenSnapshot: ~413ms
+
+── RunWorkload actor1 (template golden restore) ──────────────────────────────────────
+  RunWorkload (template golden restore): ~97ms
 
 ── CheckpointWorkload ──────────────────────────────────────
   CheckpointWorkload: ~600ms
@@ -221,9 +241,10 @@ Pass `--keep` to leave the cluster running after the test (useful for manual ins
 ── RunWorkload actor2 (fast path — golden restore) ──────────────────────────────────────
   RunWorkload (fast/golden restore): ~97ms
   actor2 checkpoint succeeded — golden-restore VM is healthy.
+  Verified: no lazy RunWorkload cold boot occurred.
 
 ────────────────────────────────────────────────
-PASS: ateom-ch RunWorkload → Checkpoint → Restore → Checkpoint → RunWorkload(golden)
+PASS: ateom-ch CreateTemplateGoldenSnapshot → RunWorkload(golden) → Checkpoint → Restore → Checkpoint → RunWorkload(golden)
 ────────────────────────────────────────────────
 ```
 

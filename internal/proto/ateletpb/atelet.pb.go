@@ -43,8 +43,11 @@ type RunRequest struct {
 	ActorId                string                 `protobuf:"bytes,5,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	Runsc                  *RunscConfig           `protobuf:"bytes,8,opt,name=runsc,proto3" json:"runsc,omitempty"`
 	Spec                   *WorkloadSpec          `protobuf:"bytes,7,opt,name=spec,proto3" json:"spec,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Backend-specific template golden snapshot. CloudHypervisor uses this to
+	// run new actors from a pre-created VM snapshot instead of cold booting.
+	TemplateGoldenSnapshotUri string `protobuf:"bytes,9,opt,name=template_golden_snapshot_uri,json=templateGoldenSnapshotUri,proto3" json:"template_golden_snapshot_uri,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RunRequest) Reset() {
@@ -117,6 +120,13 @@ func (x *RunRequest) GetSpec() *WorkloadSpec {
 		return x.Spec
 	}
 	return nil
+}
+
+func (x *RunRequest) GetTemplateGoldenSnapshotUri() string {
+	if x != nil {
+		return x.TemplateGoldenSnapshotUri
+	}
+	return ""
 }
 
 type GCPAuthenticationConfig struct {
@@ -532,6 +542,126 @@ func (*RunResponse) Descriptor() ([]byte, []int) {
 	return file_atelet_proto_rawDescGZIP(), []int{8}
 }
 
+type PrepareTemplateRequest struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	TargetAteomUid         string                 `protobuf:"bytes,1,opt,name=target_ateom_uid,json=targetAteomUid,proto3" json:"target_ateom_uid,omitempty"`
+	ActorTemplateNamespace string                 `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
+	ActorTemplateName      string                 `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	Spec                   *WorkloadSpec          `protobuf:"bytes,4,opt,name=spec,proto3" json:"spec,omitempty"`
+	GoldenSnapshotUri      string                 `protobuf:"bytes,5,opt,name=golden_snapshot_uri,json=goldenSnapshotUri,proto3" json:"golden_snapshot_uri,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *PrepareTemplateRequest) Reset() {
+	*x = PrepareTemplateRequest{}
+	mi := &file_atelet_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareTemplateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareTemplateRequest) ProtoMessage() {}
+
+func (x *PrepareTemplateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atelet_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareTemplateRequest.ProtoReflect.Descriptor instead.
+func (*PrepareTemplateRequest) Descriptor() ([]byte, []int) {
+	return file_atelet_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PrepareTemplateRequest) GetTargetAteomUid() string {
+	if x != nil {
+		return x.TargetAteomUid
+	}
+	return ""
+}
+
+func (x *PrepareTemplateRequest) GetActorTemplateNamespace() string {
+	if x != nil {
+		return x.ActorTemplateNamespace
+	}
+	return ""
+}
+
+func (x *PrepareTemplateRequest) GetActorTemplateName() string {
+	if x != nil {
+		return x.ActorTemplateName
+	}
+	return ""
+}
+
+func (x *PrepareTemplateRequest) GetSpec() *WorkloadSpec {
+	if x != nil {
+		return x.Spec
+	}
+	return nil
+}
+
+func (x *PrepareTemplateRequest) GetGoldenSnapshotUri() string {
+	if x != nil {
+		return x.GoldenSnapshotUri
+	}
+	return ""
+}
+
+type PrepareTemplateResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	GoldenSnapshotUri string                 `protobuf:"bytes,1,opt,name=golden_snapshot_uri,json=goldenSnapshotUri,proto3" json:"golden_snapshot_uri,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *PrepareTemplateResponse) Reset() {
+	*x = PrepareTemplateResponse{}
+	mi := &file_atelet_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareTemplateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareTemplateResponse) ProtoMessage() {}
+
+func (x *PrepareTemplateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atelet_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareTemplateResponse.ProtoReflect.Descriptor instead.
+func (*PrepareTemplateResponse) Descriptor() ([]byte, []int) {
+	return file_atelet_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *PrepareTemplateResponse) GetGoldenSnapshotUri() string {
+	if x != nil {
+		return x.GoldenSnapshotUri
+	}
+	return ""
+}
+
 type CheckpointRequest struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	TargetAteomUid         string                 `protobuf:"bytes,1,opt,name=target_ateom_uid,json=targetAteomUid,proto3" json:"target_ateom_uid,omitempty"`
@@ -557,7 +687,7 @@ type CheckpointRequest struct {
 
 func (x *CheckpointRequest) Reset() {
 	*x = CheckpointRequest{}
-	mi := &file_atelet_proto_msgTypes[9]
+	mi := &file_atelet_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +699,7 @@ func (x *CheckpointRequest) String() string {
 func (*CheckpointRequest) ProtoMessage() {}
 
 func (x *CheckpointRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[9]
+	mi := &file_atelet_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +712,7 @@ func (x *CheckpointRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointRequest.ProtoReflect.Descriptor instead.
 func (*CheckpointRequest) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{9}
+	return file_atelet_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CheckpointRequest) GetTargetAteomUid() string {
@@ -642,7 +772,7 @@ type CheckpointResponse struct {
 
 func (x *CheckpointResponse) Reset() {
 	*x = CheckpointResponse{}
-	mi := &file_atelet_proto_msgTypes[10]
+	mi := &file_atelet_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -654,7 +784,7 @@ func (x *CheckpointResponse) String() string {
 func (*CheckpointResponse) ProtoMessage() {}
 
 func (x *CheckpointResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[10]
+	mi := &file_atelet_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +797,7 @@ func (x *CheckpointResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointResponse.ProtoReflect.Descriptor instead.
 func (*CheckpointResponse) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{10}
+	return file_atelet_proto_rawDescGZIP(), []int{12}
 }
 
 type RestoreRequest struct {
@@ -686,7 +816,7 @@ type RestoreRequest struct {
 
 func (x *RestoreRequest) Reset() {
 	*x = RestoreRequest{}
-	mi := &file_atelet_proto_msgTypes[11]
+	mi := &file_atelet_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -698,7 +828,7 @@ func (x *RestoreRequest) String() string {
 func (*RestoreRequest) ProtoMessage() {}
 
 func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[11]
+	mi := &file_atelet_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -711,7 +841,7 @@ func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
 func (*RestoreRequest) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{11}
+	return file_atelet_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RestoreRequest) GetTargetAteomUid() string {
@@ -771,7 +901,7 @@ type RestoreResponse struct {
 
 func (x *RestoreResponse) Reset() {
 	*x = RestoreResponse{}
-	mi := &file_atelet_proto_msgTypes[12]
+	mi := &file_atelet_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -783,7 +913,7 @@ func (x *RestoreResponse) String() string {
 func (*RestoreResponse) ProtoMessage() {}
 
 func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[12]
+	mi := &file_atelet_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -796,14 +926,14 @@ func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreResponse.ProtoReflect.Descriptor instead.
 func (*RestoreResponse) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{12}
+	return file_atelet_proto_rawDescGZIP(), []int{14}
 }
 
 var File_atelet_proto protoreflect.FileDescriptor
 
 const file_atelet_proto_rawDesc = "" +
 	"\n" +
-	"\fatelet.proto\x12\x06atelet\"\x90\x02\n" +
+	"\fatelet.proto\x12\x06atelet\"\xd1\x02\n" +
 	"\n" +
 	"RunRequest\x12(\n" +
 	"\x10target_ateom_uid\x18\x01 \x01(\tR\x0etargetAteomUid\x128\n" +
@@ -811,7 +941,8 @@ const file_atelet_proto_rawDesc = "" +
 	"\x13actor_template_name\x18\x04 \x01(\tR\x11actorTemplateName\x12\x19\n" +
 	"\bactor_id\x18\x05 \x01(\tR\aactorId\x12)\n" +
 	"\x05runsc\x18\b \x01(\v2\x13.atelet.RunscConfigR\x05runsc\x12(\n" +
-	"\x04spec\x18\a \x01(\v2\x14.atelet.WorkloadSpecR\x04spec\"+\n" +
+	"\x04spec\x18\a \x01(\v2\x14.atelet.WorkloadSpecR\x04spec\x12?\n" +
+	"\x1ctemplate_golden_snapshot_uri\x18\t \x01(\tR\x19templateGoldenSnapshotUri\"+\n" +
 	"\x17GCPAuthenticationConfig\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\bR\x03use\"I\n" +
 	"\x14AuthenticationConfig\x121\n" +
@@ -838,7 +969,15 @@ const file_atelet_proto_rawDesc = "" +
 	"\bEnvEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\"\r\n" +
-	"\vRunResponse\"\xc7\x02\n" +
+	"\vRunResponse\"\x86\x02\n" +
+	"\x16PrepareTemplateRequest\x12(\n" +
+	"\x10target_ateom_uid\x18\x01 \x01(\tR\x0etargetAteomUid\x128\n" +
+	"\x18actor_template_namespace\x18\x02 \x01(\tR\x16actorTemplateNamespace\x12.\n" +
+	"\x13actor_template_name\x18\x03 \x01(\tR\x11actorTemplateName\x12(\n" +
+	"\x04spec\x18\x04 \x01(\v2\x14.atelet.WorkloadSpecR\x04spec\x12.\n" +
+	"\x13golden_snapshot_uri\x18\x05 \x01(\tR\x11goldenSnapshotUri\"I\n" +
+	"\x17PrepareTemplateResponse\x12.\n" +
+	"\x13golden_snapshot_uri\x18\x01 \x01(\tR\x11goldenSnapshotUri\"\xc7\x02\n" +
 	"\x11CheckpointRequest\x12(\n" +
 	"\x10target_ateom_uid\x18\x01 \x01(\tR\x0etargetAteomUid\x128\n" +
 	"\x18actor_template_namespace\x18\x03 \x01(\tR\x16actorTemplateNamespace\x12.\n" +
@@ -856,9 +995,10 @@ const file_atelet_proto_rawDesc = "" +
 	"\x05runsc\x18\x06 \x01(\v2\x13.atelet.RunscConfigR\x05runsc\x12(\n" +
 	"\x04spec\x18\a \x01(\v2\x14.atelet.WorkloadSpecR\x04spec\x12.\n" +
 	"\x13snapshot_uri_prefix\x18\b \x01(\tR\x11snapshotUriPrefix\"\x11\n" +
-	"\x0fRestoreResponse2\xc4\x01\n" +
+	"\x0fRestoreResponse2\x9a\x02\n" +
 	"\vAteomHerder\x120\n" +
-	"\x03Run\x12\x12.atelet.RunRequest\x1a\x13.atelet.RunResponse\"\x00\x12E\n" +
+	"\x03Run\x12\x12.atelet.RunRequest\x1a\x13.atelet.RunResponse\"\x00\x12T\n" +
+	"\x0fPrepareTemplate\x12\x1e.atelet.PrepareTemplateRequest\x1a\x1f.atelet.PrepareTemplateResponse\"\x00\x12E\n" +
 	"\n" +
 	"Checkpoint\x12\x19.atelet.CheckpointRequest\x1a\x1a.atelet.CheckpointResponse\"\x00\x12<\n" +
 	"\aRestore\x12\x16.atelet.RestoreRequest\x1a\x17.atelet.RestoreResponse\"\x00B>Z<github.com/agent-substrate/substrate/internal/proto/ateletpbb\x06proto3"
@@ -875,7 +1015,7 @@ func file_atelet_proto_rawDescGZIP() []byte {
 	return file_atelet_proto_rawDescData
 }
 
-var file_atelet_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_atelet_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_atelet_proto_goTypes = []any{
 	(*RunRequest)(nil),              // 0: atelet.RunRequest
 	(*GCPAuthenticationConfig)(nil), // 1: atelet.GCPAuthenticationConfig
@@ -886,10 +1026,12 @@ var file_atelet_proto_goTypes = []any{
 	(*Container)(nil),               // 6: atelet.Container
 	(*EnvEntry)(nil),                // 7: atelet.EnvEntry
 	(*RunResponse)(nil),             // 8: atelet.RunResponse
-	(*CheckpointRequest)(nil),       // 9: atelet.CheckpointRequest
-	(*CheckpointResponse)(nil),      // 10: atelet.CheckpointResponse
-	(*RestoreRequest)(nil),          // 11: atelet.RestoreRequest
-	(*RestoreResponse)(nil),         // 12: atelet.RestoreResponse
+	(*PrepareTemplateRequest)(nil),  // 9: atelet.PrepareTemplateRequest
+	(*PrepareTemplateResponse)(nil), // 10: atelet.PrepareTemplateResponse
+	(*CheckpointRequest)(nil),       // 11: atelet.CheckpointRequest
+	(*CheckpointResponse)(nil),      // 12: atelet.CheckpointResponse
+	(*RestoreRequest)(nil),          // 13: atelet.RestoreRequest
+	(*RestoreResponse)(nil),         // 14: atelet.RestoreResponse
 }
 var file_atelet_proto_depIdxs = []int32{
 	4,  // 0: atelet.RunRequest.runsc:type_name -> atelet.RunscConfig
@@ -900,21 +1042,24 @@ var file_atelet_proto_depIdxs = []int32{
 	2,  // 5: atelet.RunscConfig.authentication:type_name -> atelet.AuthenticationConfig
 	6,  // 6: atelet.WorkloadSpec.containers:type_name -> atelet.Container
 	7,  // 7: atelet.Container.env:type_name -> atelet.EnvEntry
-	4,  // 8: atelet.CheckpointRequest.runsc:type_name -> atelet.RunscConfig
-	5,  // 9: atelet.CheckpointRequest.spec:type_name -> atelet.WorkloadSpec
-	4,  // 10: atelet.RestoreRequest.runsc:type_name -> atelet.RunscConfig
-	5,  // 11: atelet.RestoreRequest.spec:type_name -> atelet.WorkloadSpec
-	0,  // 12: atelet.AteomHerder.Run:input_type -> atelet.RunRequest
-	9,  // 13: atelet.AteomHerder.Checkpoint:input_type -> atelet.CheckpointRequest
-	11, // 14: atelet.AteomHerder.Restore:input_type -> atelet.RestoreRequest
-	8,  // 15: atelet.AteomHerder.Run:output_type -> atelet.RunResponse
-	10, // 16: atelet.AteomHerder.Checkpoint:output_type -> atelet.CheckpointResponse
-	12, // 17: atelet.AteomHerder.Restore:output_type -> atelet.RestoreResponse
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	5,  // 8: atelet.PrepareTemplateRequest.spec:type_name -> atelet.WorkloadSpec
+	4,  // 9: atelet.CheckpointRequest.runsc:type_name -> atelet.RunscConfig
+	5,  // 10: atelet.CheckpointRequest.spec:type_name -> atelet.WorkloadSpec
+	4,  // 11: atelet.RestoreRequest.runsc:type_name -> atelet.RunscConfig
+	5,  // 12: atelet.RestoreRequest.spec:type_name -> atelet.WorkloadSpec
+	0,  // 13: atelet.AteomHerder.Run:input_type -> atelet.RunRequest
+	9,  // 14: atelet.AteomHerder.PrepareTemplate:input_type -> atelet.PrepareTemplateRequest
+	11, // 15: atelet.AteomHerder.Checkpoint:input_type -> atelet.CheckpointRequest
+	13, // 16: atelet.AteomHerder.Restore:input_type -> atelet.RestoreRequest
+	8,  // 17: atelet.AteomHerder.Run:output_type -> atelet.RunResponse
+	10, // 18: atelet.AteomHerder.PrepareTemplate:output_type -> atelet.PrepareTemplateResponse
+	12, // 19: atelet.AteomHerder.Checkpoint:output_type -> atelet.CheckpointResponse
+	14, // 20: atelet.AteomHerder.Restore:output_type -> atelet.RestoreResponse
+	17, // [17:21] is the sub-list for method output_type
+	13, // [13:17] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_atelet_proto_init() }
@@ -928,7 +1073,7 @@ func file_atelet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atelet_proto_rawDesc), len(file_atelet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

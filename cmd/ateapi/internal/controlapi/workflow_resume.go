@@ -29,6 +29,7 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -42,11 +43,13 @@ type ResumeInput struct {
 type ResumeState struct {
 	Actor         *ateapipb.Actor
 	ActorTemplate *atev1alpha1.ActorTemplate
+	WorkerPool    *atev1alpha1.WorkerPool
 }
 
 type LoadActorForResumeStep struct {
 	store               store.Interface
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	workerPoolLister    listersv1alpha1.WorkerPoolLister
 }
 
 func (s *LoadActorForResumeStep) Name() string { return "LoadActorForResume" }
@@ -69,6 +72,19 @@ func (s *LoadActorForResumeStep) Execute(ctx context.Context, input *ResumeInput
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
 	state.ActorTemplate = actorTemplate
+
+	workerPoolNS := actorTemplate.Spec.WorkerPoolRef.Namespace
+	if workerPoolNS == "" {
+		workerPoolNS = actorTemplate.Namespace
+	}
+	workerPool, err := s.workerPoolLister.WorkerPools(workerPoolNS).Get(actorTemplate.Spec.WorkerPoolRef.Name)
+	if err != nil {
+		if !k8serrors.IsNotFound(err) {
+			return fmt.Errorf("while getting WorkerPool: %w", err)
+		}
+		workerPool = &atev1alpha1.WorkerPool{}
+	}
+	state.WorkerPool = workerPool
 
 	return nil
 }
@@ -172,43 +188,8 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 	}
 	client := ateletpb.NewAteomHerderClient(ateletConn)
 
-	workloadSpec := &ateletpb.WorkloadSpec{
-		PauseImage: state.ActorTemplate.Spec.PauseImage,
-	}
-	for _, ctr := range state.ActorTemplate.Spec.Containers {
-		ateletCtr := &ateletpb.Container{
-			Name:    ctr.Name,
-			Image:   ctr.Image,
-			Command: ctr.Command,
-		}
-		for _, env := range ctr.Env {
-			ateletEnv := &ateletpb.EnvEntry{
-				Name:  env.Name,
-				Value: env.Value,
-			}
-			ateletCtr.Env = append(ateletCtr.Env, ateletEnv)
-		}
-		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)
-	}
-
-	runscCfg := &ateletpb.RunscConfig{}
-	if state.ActorTemplate.Spec.Runsc.AMD64 != nil {
-		runscCfg.Amd64 = &ateletpb.RunscPlatformConfig{
-			Sha256Hash: state.ActorTemplate.Spec.Runsc.AMD64.SHA256Hash,
-			Url:        state.ActorTemplate.Spec.Runsc.AMD64.URL,
-		}
-	}
-	if state.ActorTemplate.Spec.Runsc.ARM64 != nil {
-		runscCfg.Arm64 = &ateletpb.RunscPlatformConfig{
-			Sha256Hash: state.ActorTemplate.Spec.Runsc.ARM64.SHA256Hash,
-			Url:        state.ActorTemplate.Spec.Runsc.ARM64.URL,
-		}
-	}
-	if state.ActorTemplate.Spec.Runsc.Authentication.GCP != nil {
-		authnCfg := &ateletpb.AuthenticationConfig{}
-		authnCfg.Gcp = &ateletpb.GCPAuthenticationConfig{Use: true}
-		runscCfg.Authentication = authnCfg
-	}
+	workloadSpec := buildAteletWorkloadSpec(state.ActorTemplate)
+	runscCfg := buildAteletRunscConfig(state.ActorTemplate)
 
 	if state.Actor.LastSnapshot != "" {
 		slog.InfoContext(ctx, "Actor has snapshot; Restoring from snapshot")
@@ -225,6 +206,23 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 		_, err = client.Restore(ctx, req)
 		if err != nil {
 			return fmt.Errorf("while restoring workload: %w", err)
+		}
+		return nil
+	} else if state.ActorTemplate.Status.GoldenSnapshot != "" && !input.Boot && state.WorkerPool.Spec.Backend == atev1alpha1.AteomBackendCloudHypervisor {
+		slog.InfoContext(ctx, "Actor has no snapshot; CloudHypervisor ActorTemplate has golden snapshot; Running from template golden snapshot")
+
+		req := &ateletpb.RunRequest{
+			TargetAteomUid:            state.Actor.GetAteomPodUid(),
+			ActorTemplateNamespace:    state.Actor.GetActorTemplateNamespace(),
+			ActorTemplateName:         state.Actor.GetActorTemplateName(),
+			ActorId:                   state.Actor.GetActorId(),
+			Runsc:                     runscCfg,
+			Spec:                      workloadSpec,
+			TemplateGoldenSnapshotUri: state.ActorTemplate.Status.GoldenSnapshot,
+		}
+		_, err = client.Run(ctx, req)
+		if err != nil {
+			return fmt.Errorf("while creating workload from template golden snapshot: %w", err)
 		}
 		return nil
 	} else if state.ActorTemplate.Status.GoldenSnapshot != "" && !input.Boot {

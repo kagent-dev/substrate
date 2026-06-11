@@ -29,6 +29,9 @@ service Control {
   // Create a new Actor deriving from a given ActorTemplate.
   rpc CreateActor(CreateActorRequest) returns (CreateActorResponse) {}
 
+  // Prepare an ActorTemplate for fast first actor creation.
+  rpc PrepareActorTemplate(PrepareActorTemplateRequest) returns (PrepareActorTemplateResponse) {}
+
   // Suspend a given actor to a new snapshot.
   rpc SuspendActor(SuspendActorRequest) returns (SuspendActorResponse) {}
 
@@ -95,6 +98,15 @@ message CreateActorRequest {
 
 message CreateActorResponse {
   Actor actor = 1;
+}
+
+message PrepareActorTemplateRequest {
+  string actor_template_namespace = 1;
+  string actor_template_name      = 2;
+}
+
+message PrepareActorTemplateResponse {
+  string golden_snapshot = 1;
 }
 
 message SuspendActorRequest {

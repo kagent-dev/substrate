@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -69,6 +70,36 @@ func (r *ActorTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	switch at.Status.Phase {
 	case atev1alpha1.PhaseInitial:
+		wpNS := at.Spec.WorkerPoolRef.Namespace
+		if wpNS == "" {
+			wpNS = at.Namespace
+		}
+		wp := &atev1alpha1.WorkerPool{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: wpNS, Name: at.Spec.WorkerPoolRef.Name}, wp); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get WorkerPool: %w", err)
+		}
+		if wp.Spec.Backend == atev1alpha1.AteomBackendCloudHypervisor {
+			resp, err := r.AteClient.PrepareActorTemplate(ctx, &ateapipb.PrepareActorTemplateRequest{
+				ActorTemplateNamespace: at.Namespace,
+				ActorTemplateName:      at.Name,
+			})
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("while preparing CloudHypervisor actor template: %w", err)
+			}
+			at.Status.GoldenSnapshot = resp.GetGoldenSnapshot()
+			at.Status.Phase = atev1alpha1.PhaseReady
+			meta.SetStatusCondition(&at.Status.Conditions, metav1.Condition{
+				Type:    "Ready",
+				Status:  metav1.ConditionTrue,
+				Reason:  "Ready",
+				Message: "Actor template is ready for use",
+			})
+			if err := r.Status().Update(ctx, at); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+
 		actorID := uuid.NewString()
 
 		createReq := &ateapipb.CreateActorRequest{

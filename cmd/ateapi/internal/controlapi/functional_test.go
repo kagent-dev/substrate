@@ -153,6 +153,10 @@ type FakeAteletServer struct {
 	RestoreCalled bool
 	FailRestore   error
 	RestoreDelay  time.Duration
+
+	PrepareTemplateCalled bool
+	PrepareTemplateReq    *ateletpb.PrepareTemplateRequest
+	RunReq                *ateletpb.RunRequest
 }
 
 func (f *FakeAteletServer) Reset() {
@@ -166,6 +170,9 @@ func (f *FakeAteletServer) Reset() {
 	f.RestoreCalled = false
 	f.FailRestore = nil
 	f.RestoreDelay = 0
+	f.PrepareTemplateCalled = false
+	f.PrepareTemplateReq = nil
+	f.RunReq = nil
 }
 
 func (f *FakeAteletServer) Run(ctx context.Context, req *ateletpb.RunRequest) (*ateletpb.RunResponse, error) {
@@ -173,8 +180,19 @@ func (f *FakeAteletServer) Run(ctx context.Context, req *ateletpb.RunRequest) (*
 	defer f.Lock.Unlock()
 
 	f.RunCalled = true
+	f.RunReq = req
 
 	return &ateletpb.RunResponse{}, nil
+}
+
+func (f *FakeAteletServer) PrepareTemplate(ctx context.Context, req *ateletpb.PrepareTemplateRequest) (*ateletpb.PrepareTemplateResponse, error) {
+	f.Lock.Lock()
+	defer f.Lock.Unlock()
+
+	f.PrepareTemplateCalled = true
+	f.PrepareTemplateReq = req
+
+	return &ateletpb.PrepareTemplateResponse{GoldenSnapshotUri: req.GetGoldenSnapshotUri()}, nil
 }
 
 func (f *FakeAteletServer) Checkpoint(ctx context.Context, req *ateletpb.CheckpointRequest) (*ateletpb.CheckpointResponse, error) {
@@ -210,6 +228,7 @@ type testContext struct {
 	fakeAtelet          *FakeAteletServer
 	cleanup             func()
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	workerPoolLister    listersv1alpha1.WorkerPoolLister
 }
 
 // setupTest sets up a fully isolated test environment.
@@ -245,6 +264,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 
 	substrateInformerFactory := externalversions.NewSharedInformerFactory(substrateClient, 0)
 	actorTemplateLister := substrateInformerFactory.Api().V1alpha1().ActorTemplates().Lister()
+	workerPoolLister := substrateInformerFactory.Api().V1alpha1().WorkerPools().Lister()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -261,7 +281,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 
 	// 4. Initialize Service
 	dialer := NewAteletDialer(workerInformer.GetIndexer(), ateletInformer.GetIndexer())
-	service := NewService(persistence, actorTemplateLister, dialer)
+	service := NewService(persistence, actorTemplateLister, workerPoolLister, dialer)
 
 	// 5. Start REAL gRPC Server for ATE API
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(ateinterceptors.ServerUnaryInterceptor))
@@ -322,6 +342,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 		fakeAtelet:          fakeAtelet,
 		cleanup:             cleanup,
 		actorTemplateLister: actorTemplateLister,
+		workerPoolLister:    workerPoolLister,
 	}
 }
 
@@ -381,6 +402,81 @@ func createTemplate(t *testing.T, tc *testContext, ns string) {
 	})
 	if err != nil {
 		t.Fatalf("failed to wait for template status update in informer: %v", err)
+	}
+}
+
+func createWorkerPool(t *testing.T, tc *testContext, ns string, backend atev1alpha1.AteomBackend) {
+	t.Helper()
+	wp := &atev1alpha1.WorkerPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool1",
+			Namespace: ns,
+		},
+		Spec: atev1alpha1.WorkerPoolSpec{
+			Replicas:   1,
+			AteomImage: "ateom:test",
+			Backend:    backend,
+		},
+	}
+	if _, err := tc.substrateClient.ApiV1alpha1().WorkerPools(ns).Create(context.Background(), wp, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create worker pool: %v", err)
+	}
+	err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		_, err := tc.workerPoolLister.WorkerPools(ns).Get("pool1")
+		return err == nil, nil
+	})
+	if err != nil {
+		t.Fatalf("failed to wait for worker pool in informer: %v", err)
+	}
+}
+
+func createCloudHypervisorTemplate(t *testing.T, tc *testContext, ns string, goldenSnapshot string) {
+	t.Helper()
+	actorTemplate := &atev1alpha1.ActorTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tmpl1",
+			Namespace: ns,
+		},
+		Spec: atev1alpha1.ActorTemplateSpec{
+			PauseImage: "pause@sha256:abc",
+			Containers: []atev1alpha1.Container{
+				{
+					Name:    "main",
+					Image:   "main@sha256:abc",
+					Command: []string{"/main"},
+				},
+			},
+			SnapshotsConfig: atev1alpha1.SnapshotsConfig{Location: "gs://my-bucket/snapshots"},
+			WorkerPoolRef: corev1.ObjectReference{
+				Namespace: ns,
+				Name:      "pool1",
+			},
+		},
+	}
+	createdTemplate, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).Create(context.Background(), actorTemplate, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create CH actor template: %v", err)
+	}
+	if goldenSnapshot != "" {
+		createdTemplate.Status = atev1alpha1.ActorTemplateStatus{
+			GoldenSnapshot: goldenSnapshot,
+		}
+		if _, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).UpdateStatus(context.Background(), createdTemplate, metav1.UpdateOptions{}); err != nil {
+			t.Fatalf("failed to update CH actor template status: %v", err)
+		}
+	}
+	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		tmpl, err := tc.actorTemplateLister.ActorTemplates(ns).Get("tmpl1")
+		if err != nil {
+			return false, nil
+		}
+		if goldenSnapshot != "" && tmpl.Status.GoldenSnapshot == "" {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("failed to wait for CH template in informer: %v", err)
 	}
 }
 
@@ -751,6 +847,74 @@ func TestListWorkers(t *testing.T) {
 
 	if diff := cmp.Diff(want, filteredWorkers, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.Worker{}, "worker_pod_uid")); diff != "" {
 		t.Errorf("ListWorkers response mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestPrepareActorTemplate_CloudHypervisor(t *testing.T) {
+	ns := namespaceForTest("ns-prepare-ch")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	createWorkerPool(t, tc, ns, atev1alpha1.AteomBackendCloudHypervisor)
+	createWorkerPod(t, tc, ns, "worker-1", "node1")
+	createCloudHypervisorTemplate(t, tc, ns, "")
+
+	resp, err := tc.client.PrepareActorTemplate(context.Background(), &ateapipb.PrepareActorTemplateRequest{
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+	})
+	if err != nil {
+		t.Fatalf("PrepareActorTemplate failed: %v", err)
+	}
+	wantURI := "gs://my-bucket/snapshots/templates/" + ns + "/tmpl1/cloud-hypervisor/golden/main.tar.zstd"
+	if resp.GetGoldenSnapshot() != wantURI {
+		t.Errorf("golden snapshot URI = %q, want %q", resp.GetGoldenSnapshot(), wantURI)
+	}
+
+	tc.fakeAtelet.Lock.Lock()
+	defer tc.fakeAtelet.Lock.Unlock()
+	if !tc.fakeAtelet.PrepareTemplateCalled {
+		t.Fatalf("expected PrepareTemplate to be called")
+	}
+	if tc.fakeAtelet.PrepareTemplateReq.GetGoldenSnapshotUri() != wantURI {
+		t.Errorf("PrepareTemplate golden URI = %q, want %q", tc.fakeAtelet.PrepareTemplateReq.GetGoldenSnapshotUri(), wantURI)
+	}
+	if tc.fakeAtelet.PrepareTemplateReq.GetTargetAteomUid() == "" {
+		t.Errorf("PrepareTemplate target ateom UID is empty")
+	}
+}
+
+func TestResumeActor_CloudHypervisorTemplateGoldenUsesRun(t *testing.T) {
+	ns := namespaceForTest("ns-resume-ch")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	goldenURI := "gs://my-bucket/snapshots/templates/" + ns + "/tmpl1/cloud-hypervisor/golden/main.tar.zstd"
+	createWorkerPool(t, tc, ns, atev1alpha1.AteomBackendCloudHypervisor)
+	createWorkerPod(t, tc, ns, "worker-1", "node1")
+	createCloudHypervisorTemplate(t, tc, ns, goldenURI)
+
+	if _, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
+		ActorId:                "id1",
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+	}); err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+	if _, err := tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{ActorId: "id1"}); err != nil {
+		t.Fatalf("ResumeActor failed: %v", err)
+	}
+
+	tc.fakeAtelet.Lock.Lock()
+	defer tc.fakeAtelet.Lock.Unlock()
+	if !tc.fakeAtelet.RunCalled {
+		t.Fatalf("expected Run to be called")
+	}
+	if tc.fakeAtelet.RestoreCalled {
+		t.Fatalf("expected Restore not to be called")
+	}
+	if tc.fakeAtelet.RunReq.GetTemplateGoldenSnapshotUri() != goldenURI {
+		t.Errorf("Run template golden URI = %q, want %q", tc.fakeAtelet.RunReq.GetTemplateGoldenSnapshotUri(), goldenURI)
 	}
 }
 

@@ -37,8 +37,8 @@ const (
 	vmVcpus       = 2
 	rootfsTag     = "rootfs"
 
-	chReadyTimeout    = 15 * time.Second
-	vfReadyTimeout    = 10 * time.Second
+	chReadyTimeout     = 15 * time.Second
+	vfReadyTimeout     = 10 * time.Second
 	goldenReadyTimeout = 15 * time.Second
 )
 
@@ -308,6 +308,126 @@ func waitForGoldenReady(rootfsPath string) error {
 	return fmt.Errorf("goldeninit did not signal ready within %s", goldenReadyTimeout)
 }
 
+func (s *AteomService) createGoldenSnapshot(ctx context.Context, ns, tmpl, primaryContainer, bundlePath, snapshotDir string) error {
+	rootfsPath := filepath.Join(bundlePath, "rootfs")
+	if err := prepareRootfsForGolden(rootfsPath); err != nil {
+		return fmt.Errorf("preparing rootfs: %w", err)
+	}
+	// Remove the pre-created .ateom-ready so we can detect when goldeninit
+	// actually boots and rewrites it.
+	_ = os.Remove(filepath.Join(rootfsPath, readyFileName))
+
+	if err := os.RemoveAll(snapshotDir); err != nil {
+		return fmt.Errorf("clearing template golden: %w", err)
+	}
+	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir template golden: %w", err)
+	}
+
+	vfsock := virtiofsdSockPath(s.podUID)
+	vm, err := s.acquireVM(ctx, rootfsPath)
+	if err != nil {
+		return fmt.Errorf("acquiring VM: %w", err)
+	}
+	killVM := func() {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
+	}
+
+	vmCfg := ch.VmConfig{
+		Payload: &ch.PayloadConfig{
+			Kernel:  guestKernel,
+			Cmdline: "root=rootfs rootfstype=virtiofs rw console=ttyS0 init=/golden-init",
+		},
+		Memory:  &ch.MemoryConfig{Size: vmMemoryBytes, Shared: true},
+		Cpus:    &ch.CpusConfig{BootVcpus: vmVcpus, MaxVcpus: vmVcpus},
+		Fs:      []ch.FsConfig{{Tag: rootfsTag, Socket: vfsock, NumQueues: 1, QueueSize: 1024}},
+		Net:     []ch.NetConfig{{Tap: tapName(tapActorID), Mtu: tapMTU}},
+		Serial:  &ch.SerialConfig{Mode: "File", File: "/dev/stdout"},
+		Console: &ch.SerialConfig{Mode: "Null"},
+	}
+	if err := vm.chClient.VmCreate(ctx, vmCfg); err != nil {
+		killVM()
+		return fmt.Errorf("CH VmCreate: %w", err)
+	}
+	if err := vm.chClient.VmBoot(ctx); err != nil {
+		killVM()
+		return fmt.Errorf("CH VmBoot: %w", err)
+	}
+	if err := waitForGoldenReady(rootfsPath); err != nil {
+		killVM()
+		return fmt.Errorf("waiting for goldeninit: %w", err)
+	}
+	if err := vm.chClient.VmPause(ctx); err != nil {
+		killVM()
+		return fmt.Errorf("CH VmPause (golden): %w", err)
+	}
+	snapURL := "file://" + snapshotDir
+	if err := vm.chClient.VmSnapshot(ctx, ch.SnapshotConfig{DestinationURL: snapURL}); err != nil {
+		killVM()
+		return fmt.Errorf("CH VmSnapshot (golden): %w", err)
+	}
+	killVM()
+	slog.InfoContext(ctx, "Template golden snapshot saved",
+		slog.String("template", ns+":"+tmpl),
+		slog.String("container", primaryContainer),
+		slog.String("dir", snapshotDir))
+	return nil
+}
+
+func (s *AteomService) restoreGoldenAndRun(ctx context.Context, rootfsPath, templateGolden string, entrypoint []string) (*runningActor, error) {
+	vfsock := virtiofsdSockPath(s.podUID)
+	vm, err := s.acquireVM(ctx, rootfsPath)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring VM: %w", err)
+	}
+	killVM := func() {
+		_ = vm.chCmd.Process.Kill()
+		_ = vm.vfCmd.Process.Kill()
+		_ = deleteTap(ctx, tapActorID)
+	}
+	restoreURL := "file://" + templateGolden
+	if err := vm.chClient.VmRestore(ctx, ch.RestoreConfig{SourceURL: restoreURL}); err != nil {
+		killVM()
+		return nil, fmt.Errorf("CH VmRestore (golden): %w", err)
+	}
+	if err := vm.chClient.VmResume(ctx); err != nil {
+		killVM()
+		return nil, fmt.Errorf("CH VmResume (golden): %w", err)
+	}
+	argsPath := filepath.Join(rootfsPath, argsFileName)
+	if err := os.WriteFile(argsPath, []byte(strings.Join(entrypoint, "\n")), 0o644); err != nil {
+		killVM()
+		return nil, fmt.Errorf("writing run args: %w", err)
+	}
+	return &runningActor{
+		chCmd: vm.chCmd, vfCmd: vm.vfCmd, chClient: vm.chClient,
+		tapActorID: tapActorID, vfsockPath: vfsock,
+	}, nil
+}
+
+func (s *AteomService) CreateTemplateGoldenSnapshot(ctx context.Context, req *ateompb.CreateTemplateGoldenSnapshotRequest) (*ateompb.CreateTemplateGoldenSnapshotResponse, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	ns, tmpl := req.GetActorTemplateNamespace(), req.GetActorTemplateName()
+	containers := req.GetSpec().GetContainers()
+	if len(containers) == 0 {
+		return nil, fmt.Errorf("workload spec has no containers")
+	}
+	primaryContainer := containers[0].GetName()
+	bundlePath := ateompath.TemplateOCIBundlePath(ns, tmpl, primaryContainer)
+	snapshotDir := ateompath.TemplateGoldenSnapshotDir(ns, tmpl, primaryContainer)
+
+	slog.InfoContext(ctx, "CreateTemplateGoldenSnapshot: cold boot", slog.String("template", ns+":"+tmpl))
+	if err := s.createGoldenSnapshot(ctx, ns, tmpl, primaryContainer, bundlePath, snapshotDir); err != nil {
+		return nil, err
+	}
+	go s.doPrewarm()
+	return &ateompb.CreateTemplateGoldenSnapshotResponse{SnapshotPath: snapshotDir}, nil
+}
+
 // RunWorkload boots a microVM for the actor.
 //
 // Fast path (template golden snapshot available): VmRestore from the golden
@@ -352,125 +472,37 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 		return nil, fmt.Errorf("preparing rootfs: %w", err)
 	}
 
-	vfsock := virtiofsdSockPath(s.podUID)
 	templateGolden := goldenSnapshotForTemplate(s.podUID, ns, tmpl, primaryContainer)
+	explicitGolden := req.GetTemplateGoldenSnapshotPath() != ""
+	if explicitGolden {
+		templateGolden = req.GetTemplateGoldenSnapshotPath()
+	}
 
 	if _, statErr := os.Stat(templateGolden); statErr == nil {
 		// ── Fast path: restore from template golden snapshot ─────────────
 		slog.InfoContext(ctx, "RunWorkload: golden restore", slog.String("golden", templateGolden))
-
-		vm, err := s.acquireVM(ctx, rootfsPath)
+		running, err := s.restoreGoldenAndRun(ctx, rootfsPath, templateGolden, entrypoint)
 		if err != nil {
-			return nil, fmt.Errorf("acquiring VM: %w", err)
+			return nil, err
 		}
-		restoreURL := "file://" + templateGolden
-		if err := vm.chClient.VmRestore(ctx, ch.RestoreConfig{SourceURL: restoreURL}); err != nil {
-			_ = vm.chCmd.Process.Kill()
-			_ = vm.vfCmd.Process.Kill()
-			_ = deleteTap(ctx, tapActorID)
-			return nil, fmt.Errorf("CH VmRestore (golden): %w", err)
-		}
-		if err := vm.chClient.VmResume(ctx); err != nil {
-			_ = vm.chCmd.Process.Kill()
-			_ = vm.vfCmd.Process.Kill()
-			_ = deleteTap(ctx, tapActorID)
-			return nil, fmt.Errorf("CH VmResume (golden): %w", err)
-		}
-		// Write args after resume; virtiofsd is live so goldeninit sees it
-		// within its 10ms poll interval.
-		argsPath := filepath.Join(rootfsPath, argsFileName)
-		if err := os.WriteFile(argsPath, []byte(strings.Join(entrypoint, "\n")), 0o644); err != nil {
-			_ = vm.chCmd.Process.Kill()
-			_ = vm.vfCmd.Process.Kill()
-			_ = deleteTap(ctx, tapActorID)
-			return nil, fmt.Errorf("writing run args: %w", err)
-		}
-
-		s.running = &runningActor{
-			chCmd: vm.chCmd, vfCmd: vm.vfCmd, chClient: vm.chClient,
-			tapActorID: tapActorID, vfsockPath: vfsock,
-		}
+		s.running = running
 		go s.doPrewarm()
 		s.actorLogger.EmitLifecycleLog("Actor started", id, tmpl, ns)
 		return &ateompb.RunWorkloadResponse{}, nil
+	} else if explicitGolden {
+		return nil, fmt.Errorf("explicit template golden snapshot %q not found: %w", templateGolden, statErr)
 	}
 
 	// ── Slow path: cold boot, capture golden snapshot, then run ──────────
 	slog.InfoContext(ctx, "RunWorkload: cold boot (first for template, will snapshot)", slog.String("template", ns+":"+tmpl))
-
-	// Remove the pre-created .ateom-ready so we can detect when goldeninit
-	// actually boots and rewrites it.
-	_ = os.Remove(filepath.Join(rootfsPath, readyFileName))
-
-	vm, err := s.acquireVM(ctx, rootfsPath)
+	if err := s.createGoldenSnapshot(ctx, ns, tmpl, primaryContainer, bundlePath, templateGolden); err != nil {
+		return nil, err
+	}
+	running, err := s.restoreGoldenAndRun(ctx, rootfsPath, templateGolden, entrypoint)
 	if err != nil {
-		return nil, fmt.Errorf("acquiring VM: %w", err)
+		return nil, err
 	}
-	killVM := func() {
-		_ = vm.chCmd.Process.Kill()
-		_ = vm.vfCmd.Process.Kill()
-		_ = deleteTap(ctx, tapActorID)
-	}
-
-	vmCfg := ch.VmConfig{
-		Payload: &ch.PayloadConfig{
-			Kernel:  guestKernel,
-			Cmdline: "root=rootfs rootfstype=virtiofs rw console=ttyS0 init=/golden-init",
-		},
-		Memory:  &ch.MemoryConfig{Size: vmMemoryBytes, Shared: true},
-		Cpus:    &ch.CpusConfig{BootVcpus: vmVcpus, MaxVcpus: vmVcpus},
-		Fs:      []ch.FsConfig{{Tag: rootfsTag, Socket: vfsock, NumQueues: 1, QueueSize: 1024}},
-		Net:     []ch.NetConfig{{Tap: tapName(tapActorID), Mtu: tapMTU}},
-		Serial:  &ch.SerialConfig{Mode: "File", File: "/dev/stdout"},
-		Console: &ch.SerialConfig{Mode: "Null"},
-	}
-	if err := vm.chClient.VmCreate(ctx, vmCfg); err != nil {
-		killVM()
-		return nil, fmt.Errorf("CH VmCreate: %w", err)
-	}
-	if err := vm.chClient.VmBoot(ctx); err != nil {
-		killVM()
-		return nil, fmt.Errorf("CH VmBoot: %w", err)
-	}
-
-	// Wait for goldeninit to signal it's running.
-	if err := waitForGoldenReady(rootfsPath); err != nil {
-		killVM()
-		return nil, fmt.Errorf("waiting for goldeninit: %w", err)
-	}
-
-	// Snapshot the idle VM as the template golden.
-	if err := os.MkdirAll(templateGolden, 0o700); err != nil {
-		killVM()
-		return nil, fmt.Errorf("mkdir template golden: %w", err)
-	}
-	if err := vm.chClient.VmPause(ctx); err != nil {
-		killVM()
-		return nil, fmt.Errorf("CH VmPause (golden): %w", err)
-	}
-	snapURL := "file://" + templateGolden
-	if err := vm.chClient.VmSnapshot(ctx, ch.SnapshotConfig{DestinationURL: snapURL}); err != nil {
-		_ = vm.chClient.VmResume(ctx)
-		killVM()
-		return nil, fmt.Errorf("CH VmSnapshot (golden): %w", err)
-	}
-	if err := vm.chClient.VmResume(ctx); err != nil {
-		killVM()
-		return nil, fmt.Errorf("CH VmResume (golden): %w", err)
-	}
-	slog.InfoContext(ctx, "Template golden snapshot saved", slog.String("dir", templateGolden))
-
-	// Write args now that the VM is live; goldeninit exec's within ~10ms.
-	argsPath := filepath.Join(rootfsPath, argsFileName)
-	if err := os.WriteFile(argsPath, []byte(strings.Join(entrypoint, "\n")), 0o644); err != nil {
-		killVM()
-		return nil, fmt.Errorf("writing run args: %w", err)
-	}
-
-	s.running = &runningActor{
-		chCmd: vm.chCmd, vfCmd: vm.vfCmd, chClient: vm.chClient,
-		tapActorID: tapActorID, vfsockPath: vfsock,
-	}
+	s.running = running
 	go s.doPrewarm()
 	s.actorLogger.EmitLifecycleLog("Actor started", id, tmpl, ns)
 	return &ateompb.RunWorkloadResponse{}, nil
