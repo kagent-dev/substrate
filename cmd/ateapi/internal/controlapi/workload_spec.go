@@ -34,7 +34,8 @@ const envSecretCacheTTL = 30 * time.Second
 
 func workloadSpecFromActorTemplate(ctx context.Context, kubeClient kubernetes.Interface, secretCache *envSecretCache, actorTemplate *atev1alpha1.ActorTemplate) (*ateletpb.WorkloadSpec, error) {
 	workloadSpec := &ateletpb.WorkloadSpec{
-		PauseImage: actorTemplate.Spec.PauseImage,
+		PauseImage:   actorTemplate.Spec.PauseImage,
+		EgressPolicy: buildAteletEgressPolicy(actorTemplate.Spec.EgressPolicy),
 	}
 	resolver := envResolver{
 		kubeClient: kubeClient,
@@ -61,6 +62,123 @@ func workloadSpecFromActorTemplate(ctx context.Context, kubeClient kubernetes.In
 	}
 
 	return workloadSpec, nil
+}
+
+func checkpointWorkloadSpecFromActorTemplate(actorTemplate *atev1alpha1.ActorTemplate) *ateletpb.WorkloadSpec {
+	workloadSpec := &ateletpb.WorkloadSpec{
+		PauseImage:   actorTemplate.Spec.PauseImage,
+		EgressPolicy: buildAteletEgressPolicy(actorTemplate.Spec.EgressPolicy),
+	}
+	for _, ctr := range actorTemplate.Spec.Containers {
+		ateletCtr := &ateletpb.Container{
+			Name:    ctr.Name,
+			Image:   ctr.Image,
+			Command: ctr.Command,
+		}
+		for _, env := range ctr.Env {
+			var val string
+			if env.Value != nil {
+				val = *env.Value
+			}
+			ateletCtr.Env = append(ateletCtr.Env, &ateletpb.EnvEntry{
+				Name:  env.Name,
+				Value: val,
+			})
+		}
+		workloadSpec.Containers = append(workloadSpec.Containers, ateletCtr)
+	}
+	return workloadSpec
+}
+
+func buildAteletEgressPolicy(policy *atev1alpha1.EgressPolicy) *ateletpb.EgressPolicy {
+	if policy == nil {
+		return nil
+	}
+	return &ateletpb.EgressPolicy{
+		DefaultAction: string(policy.DefaultAction),
+		Allow:         buildAteletEgressPolicyRules(policy.Allow),
+		Deny:          buildAteletEgressPolicyRules(policy.Deny),
+		Audit:         buildAteletEgressAuditPolicy(policy.Audit),
+	}
+}
+
+func buildAteletEgressAuditPolicy(policy *atev1alpha1.EgressAuditPolicy) *ateletpb.EgressAuditPolicy {
+	if policy == nil {
+		return nil
+	}
+	return &ateletpb.EgressAuditPolicy{
+		Logs:          policy.Logs,
+		Traces:        policy.Traces,
+		RedactHeaders: append([]string(nil), policy.RedactHeaders...),
+	}
+}
+
+func buildAteletEgressPolicyRules(rules []atev1alpha1.EgressPolicyRule) []*ateletpb.EgressPolicyRule {
+	out := make([]*ateletpb.EgressPolicyRule, 0, len(rules))
+	for _, rule := range rules {
+		outRule := &ateletpb.EgressPolicyRule{}
+		for _, dest := range rule.To {
+			outDest := &ateletpb.EgressPolicyDestination{Host: dest.Host}
+			if dest.IPBlock != nil {
+				outDest.Cidr = dest.IPBlock.CIDR
+			}
+			outRule.To = append(outRule.To, outDest)
+		}
+		for _, port := range rule.Ports {
+			outRule.Ports = append(outRule.Ports, &ateletpb.EgressPort{
+				Port:     uint32(port.Port),
+				Protocol: string(port.Protocol),
+			})
+		}
+		outRule.Tls = buildAteletEgressTLSPolicy(rule.TLS)
+		outRule.Credentials = buildAteletEgressCredentialPolicy(rule.Credentials)
+		out = append(out, outRule)
+	}
+	return out
+}
+
+func buildAteletEgressTLSPolicy(policy *atev1alpha1.EgressTLSPolicy) *ateletpb.EgressTLSPolicy {
+	if policy == nil {
+		return nil
+	}
+	out := &ateletpb.EgressTLSPolicy{
+		Mode:     string(policy.Mode),
+		Required: policy.Required,
+	}
+	if policy.Intercept != nil {
+		out.Intercept = &ateletpb.EgressTLSInterceptPolicy{
+			ValidateUpstream: policy.Intercept.ValidateUpstream,
+		}
+		if policy.Intercept.IssuerSecretRef != nil {
+			out.Intercept.IssuerSecretRef = &ateletpb.SecretReference{
+				Name:      policy.Intercept.IssuerSecretRef.Name,
+				Namespace: policy.Intercept.IssuerSecretRef.Namespace,
+			}
+		}
+	}
+	return out
+}
+
+func buildAteletEgressCredentialPolicy(policy *atev1alpha1.EgressCredentialPolicy) *ateletpb.EgressCredentialPolicy {
+	if policy == nil {
+		return nil
+	}
+	out := &ateletpb.EgressCredentialPolicy{}
+	for _, injection := range policy.Inject {
+		outInjection := &ateletpb.EgressCredentialInjection{
+			Header: injection.Header,
+		}
+		if injection.ValueFrom.SecretKeyRef != nil {
+			outInjection.ValueFrom = &ateletpb.EgressCredentialValueFrom{
+				SecretKeyRef: &ateletpb.SecretKeySelector{
+					Name: injection.ValueFrom.SecretKeyRef.Name,
+					Key:  injection.ValueFrom.SecretKeyRef.Key,
+				},
+			}
+		}
+		out.Inject = append(out.Inject, outInjection)
+	}
+	return out
 }
 
 type envResolver struct {

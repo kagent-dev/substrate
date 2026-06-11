@@ -39,6 +39,18 @@ fi
 ATE_DEMOS=()
 
 ATE_INSTALL_ATENET_ROUTER="${ATE_INSTALL_ATENET_ROUTER:-agentgateway}"
+ATE_INSTALL_BUNDLE_AGENTGATEWAY_EGRESS="${ATE_INSTALL_BUNDLE_AGENTGATEWAY_EGRESS:-false}"
+ATE_INSTALL_AGENTGATEWAY_EGRESS_IMAGE="${ATE_INSTALL_AGENTGATEWAY_EGRESS_IMAGE:-cr.agentgateway.dev/agentgateway:latest-dev}"
+ATEOM_GVISOR_IMPORTPATH="github.com/agent-substrate/substrate/cmd/ateom-gvisor"
+ATE_INSTALL_KO_CONFIG_PATH=""
+ATE_INSTALL_KO_CONFIG_DIR=""
+
+cleanup_install_ko_config() {
+  if [[ -n "${ATE_INSTALL_KO_CONFIG_DIR}" ]]; then
+    rm -rf "${ATE_INSTALL_KO_CONFIG_DIR}"
+  fi
+}
+trap cleanup_install_ko_config EXIT
 
 # Include demos.
 source "${ROOT}"/hack/install-demo-counter.sh
@@ -64,6 +76,8 @@ function usage() {
   echo ""
   echo "  --deploy-ate-system                    Deploy core system (CRDs, atelet, apiserver)"
   echo "  --router=agentgateway                  Select atenet-router implementation (default: agentgateway)"
+  echo "  --bundle-agentgateway-egress=enable    Build ateom-gvisor with agentgateway as the base image"
+  echo "  --agentgateway-egress-image=IMAGE      AgentGateway image for --bundle-agentgateway-egress"
   echo "  --delete-ate-system                    Delete core system"
   echo "  --delete-all                           Delete core system and all registered demos"
   echo ""
@@ -129,6 +143,66 @@ set_atenet_router() {
       exit 1
       ;;
   esac
+}
+
+set_bundle_agentgateway_egress() {
+  case "$1" in
+    enable)
+      ATE_INSTALL_BUNDLE_AGENTGATEWAY_EGRESS="true"
+      ;;
+    *)
+      echo "unsupported agentgateway egress bundle mode: $1 (only enable is supported)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+configure_ko_for_agentgateway_egress() {
+  if [[ "${ATE_INSTALL_BUNDLE_AGENTGATEWAY_EGRESS}" != "true" ]]; then
+    return
+  fi
+
+  local ko_config_path="${KO_CONFIG_PATH:-${ROOT}/.ko.yaml}"
+  local temp_config=""
+  ATE_INSTALL_KO_CONFIG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ko-agentgateway-egress.XXXXXX")
+  temp_config="${ATE_INSTALL_KO_CONFIG_DIR}/.ko.yaml"
+  ATE_INSTALL_KO_CONFIG_PATH="${temp_config}"
+
+  awk \
+    -v key="${ATEOM_GVISOR_IMPORTPATH}" \
+    -v value="${ATE_INSTALL_AGENTGATEWAY_EGRESS_IMAGE}" '
+    BEGIN {
+      inserted = 0
+      in_overrides = 0
+    }
+    in_overrides && $0 !~ /^  / && $0 !~ /^$/ {
+      print "  " key ": " value
+      inserted = 1
+      in_overrides = 0
+    }
+    {
+      if (in_overrides && $1 == key ":") {
+        print "  " key ": " value
+        inserted = 1
+        next
+      }
+      print
+      if ($0 == "baseImageOverrides:") {
+        in_overrides = 1
+      }
+    }
+    END {
+      if (in_overrides && !inserted) {
+        print "  " key ": " value
+      } else if (!in_overrides && !inserted) {
+        print ""
+        print "baseImageOverrides:"
+        print "  " key ": " value
+      }
+    }
+    ' "${ko_config_path}" >"${temp_config}"
+
+  export KO_CONFIG_PATH="${temp_config}"
 }
 
 atenet_router_manifest() {
@@ -403,7 +477,9 @@ if [ "$#" -eq 0 ]; then
 fi
 
 # If -h or --help appears anywhere in the command line, print the usage and exit.
-for arg in "$@"; do
+preparse_args=("$@")
+while [[ "${#preparse_args[@]}" -gt 0 ]]; do
+  arg="${preparse_args[0]}"
   case "$arg" in
     -h|--help)
       usage
@@ -412,8 +488,25 @@ for arg in "$@"; do
     --router=*)
       set_atenet_router "${arg#--router=}"
       ;;
+    --bundle-agentgateway-egress)
+      if [[ "${#preparse_args[@]}" -lt 2 ]]; then
+        echo "Error: --bundle-agentgateway-egress requires a value (enable)" >&2
+        exit 1
+      fi
+      set_bundle_agentgateway_egress "${preparse_args[1]}"
+      preparse_args=("${preparse_args[@]:1}")
+      ;;
+    --bundle-agentgateway-egress=*)
+      set_bundle_agentgateway_egress "${arg#--bundle-agentgateway-egress=}"
+      ;;
+    --agentgateway-egress-image=*)
+      ATE_INSTALL_AGENTGATEWAY_EGRESS_IMAGE="${arg#--agentgateway-egress-image=}"
+      ;;
   esac
+  preparse_args=("${preparse_args[@]:1}")
 done
+
+configure_ko_for_agentgateway_egress
 
 while [[ "$#" -gt 0 ]]; do
   # Run ${demo}_cmdline if it exists. If it returns 0, then we successfully
@@ -431,6 +524,16 @@ while [[ "$#" -gt 0 ]]; do
   case $1 in
     --deploy-ate-system) deploy_ate_system ;;
     --router=*) ;;
+    --bundle-agentgateway-egress)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --bundle-agentgateway-egress requires a value (enable)" >&2
+        exit 1
+      fi
+      set_bundle_agentgateway_egress "$2"
+      shift
+      ;;
+    --bundle-agentgateway-egress=*) ;;
+    --agentgateway-egress-image=*) ;;
     --delete-ate-system) delete_ate_system ;;
     --delete-all) delete_all ;;
 

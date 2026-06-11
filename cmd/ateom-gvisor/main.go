@@ -27,6 +27,8 @@ import (
 	"sync"
 
 	"cloud.google.com/go/compute/metadata"
+	"github.com/agent-substrate/substrate/cmd/ateom-gvisor/egress"
+	agw "github.com/agent-substrate/substrate/cmd/ateom-gvisor/egress/agentgateway"
 	"github.com/agent-substrate/substrate/cmd/ateom-gvisor/internal/ateom"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/ateompath"
@@ -49,7 +51,8 @@ import (
 )
 
 var (
-	podUID = pflag.String("pod-uid", "", "The UID of the current pod")
+	podUID                   = pflag.String("pod-uid", "", "The UID of the current pod")
+	egressAgentgatewayBinary = pflag.String("egress-agentgateway-binary", "/app/agentgateway", "Path to the agentgateway binary used for local egress policy enforcement.")
 
 	showVersion = pflag.Bool("version", false, "Print version and exit.")
 
@@ -135,7 +138,12 @@ func do(ctx context.Context) error {
 	}
 
 	actorLogger := ateom.NewActorLogger(syncedWriter, metadata.OnGCE())
-	ateomService := NewService(interiorNetNS, actorLogger)
+	ateomService := NewService(interiorNetNS, actorLogger, agw.Provider{
+		BinaryPath: *egressAgentgatewayBinary,
+		PodUID:     *podUID,
+		ReapLock:   &reapLock,
+	})
+	defer ateomService.Stop(ctx)
 
 	svr := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -162,17 +170,27 @@ type AteomService struct {
 
 	interiorNetNS netns.NsHandle
 	actorLogger   *ateom.ActorLogger
+
+	egressProvider egress.Provider
+	egressGateway  egress.Gateway
 }
 
 var _ ateompb.AteomServer = (*AteomService)(nil)
 
 // NewService creates a new AteomService.
-func NewService(interiorNetNS netns.NsHandle, actorLogger *ateom.ActorLogger) *AteomService {
+func NewService(interiorNetNS netns.NsHandle, actorLogger *ateom.ActorLogger, egressProvider egress.Provider) *AteomService {
 	svc := &AteomService{
-		interiorNetNS: interiorNetNS,
-		actorLogger:   actorLogger,
+		interiorNetNS:  interiorNetNS,
+		actorLogger:    actorLogger,
+		egressProvider: egressProvider,
 	}
 	return svc
+}
+
+func (s *AteomService) Stop(ctx context.Context) {
+	if s.egressGateway != nil {
+		s.egressGateway.Stop(ctx)
+	}
 }
 
 func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkloadRequest) (resp *ateompb.RunWorkloadResponse, retErr error) {
@@ -186,7 +204,11 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	//   * Correct runsc version is downloaded and placed on disk.
 	//   * All OCI bundles are set up, including for "pause" container.
 
-	if err := s.setupActorNetwork(ctx); err != nil {
+	policy := req.GetSpec().GetEgressPolicy()
+	if err := s.applyEgressPolicy(ctx, req.GetActorTemplateNamespace(), policy); err != nil {
+		return nil, err
+	}
+	if err := s.setupActorNetwork(ctx, policy); err != nil {
 		return nil, fmt.Errorf("while setting up actor network: %w", err)
 	}
 	defer func() {
@@ -272,6 +294,9 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	}
 
 	s.cleanupActorNetworkOrExit(ctx, "Failed to clean up actor network after checkpoint")
+	if err := s.applyEgressPolicy(ctx, req.GetActorTemplateNamespace(), nil); err != nil {
+		return nil, err
+	}
 
 	s.actorLogger.EmitLifecycleLog("Actor checkpointed", req.GetActorId(), req.GetActorTemplateName(), req.GetActorTemplateNamespace())
 
@@ -316,7 +341,11 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	//   * All OCI bundles are set up, including for "pause" container.
 	//   * Checkpoint downloaded and placed on disk
 
-	if err := s.setupActorNetwork(ctx); err != nil {
+	policy := req.GetSpec().GetEgressPolicy()
+	if err := s.applyEgressPolicy(ctx, req.GetActorTemplateNamespace(), policy); err != nil {
+		return nil, err
+	}
+	if err := s.setupActorNetwork(ctx, policy); err != nil {
 		return nil, fmt.Errorf("while setting up actor network: %w", err)
 	}
 	defer func() {
@@ -363,7 +392,27 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	return &ateompb.RestoreWorkloadResponse{}, nil
 }
 
-func (s *AteomService) setupActorNetwork(ctx context.Context) (retErr error) {
+func (s *AteomService) applyEgressPolicy(ctx context.Context, defaultNamespace string, policy *ateompb.EgressPolicy) error {
+	if s.egressProvider == nil {
+		return nil
+	}
+	if s.egressProvider.NeedsGateway(policy) && s.egressGateway == nil {
+		egressGateway, err := s.egressProvider.NewGateway(ctx)
+		if err != nil {
+			return fmt.Errorf("while initializing %s egress gateway: %w", s.egressProvider.Name(), err)
+		}
+		s.egressGateway = egressGateway
+	}
+	if s.egressGateway == nil {
+		return nil
+	}
+	if err := s.egressGateway.ApplyPolicy(ctx, defaultNamespace, policy); err != nil {
+		return fmt.Errorf("while configuring %s egress gateway: %w", s.egressProvider.Name(), err)
+	}
+	return nil
+}
+
+func (s *AteomService) setupActorNetwork(ctx context.Context, egressPolicy *ateompb.EgressPolicy) (retErr error) {
 	// Build a fresh point-to-point network between the worker pod netns and the
 	// gVisor interior netns. The worker side keeps the pod's real eth0, creates
 	// ateom0 as the gateway, and moves only the veth peer into the actor netns.
@@ -431,7 +480,8 @@ func (s *AteomService) setupActorNetwork(ctx context.Context) (retErr error) {
 	if err := enableIPv4Forwarding(); err != nil {
 		return err
 	}
-	if err := installActorNftablesRules(podIP); err != nil {
+	routeEgressToGateway := s.egressProvider != nil && s.egressProvider.NeedsGateway(egressPolicy)
+	if err := installActorNftablesRules(podIP, routeEgressToGateway, s.egressCapturePorts()); err != nil {
 		return err
 	}
 
@@ -445,6 +495,13 @@ func (s *AteomService) setupActorNetwork(ctx context.Context) (retErr error) {
 	}
 
 	return nil
+}
+
+func (s *AteomService) egressCapturePorts() egress.CapturePorts {
+	if s.egressProvider == nil {
+		return egress.CapturePorts{}
+	}
+	return s.egressProvider.CapturePorts()
 }
 
 func configureActorVeth(ctx context.Context) error {
@@ -596,7 +653,7 @@ func enableIPv4Forwarding() error {
 	return nil
 }
 
-func installActorNftablesRules(podIP net.IP) error {
+func installActorNftablesRules(podIP net.IP, routeEgressToGateway bool, capturePorts egress.CapturePorts) error {
 	// Install a dedicated nftables table for the active actor. Keeping all
 	// rules in an ateom-owned table makes cleanup simple and avoids mutating
 	// Kubernetes or CNI-managed chains directly.
@@ -605,7 +662,8 @@ func installActorNftablesRules(podIP net.IP) error {
 	// networking supports dual-stack pods. The current compatibility path is
 	// IPv4-only.
 	//
-	// The temporary compatibility rules do three things:
+	// The temporary compatibility rules do three things when local egress
+	// gateway enforcement is not enabled:
 	//
 	//   * postrouting: masquerade actor egress from 169.254.17.2 behind the worker
 	//     pod IP so replies route back to the pod.
@@ -613,9 +671,16 @@ func installActorNftablesRules(podIP net.IP) error {
 	//     actor veth IP on TCP/80, preserving existing inbound behavior.
 	//   * forward: accept forwarded packets between the actor veth and pod eth0.
 	//
-	// This is not the final egress policy path. The later AgentGateway phase
-	// should replace the broad masquerade path with transparent TCP capture and
-	// default-deny rules.
+	// When local egress gateway enforcement is enabled, actor HTTP/HTTPS egress
+	// is transparently redirected to the gateway's local listener ports in this
+	// worker netns. In that mode, the gateway opens upstream connections from the
+	// worker pod netns using the pod IP, so ateom does not masquerade actor
+	// egress. The forward chain only permits inbound actor traffic and replies.
+	//
+	// TODO: If AgentGateway exposes SO_MARK configuration for its upstream
+	// sockets, use that mark to make the AGW-owned OUTPUT traffic explicit in
+	// nftables policy instead of relying solely on local redirect plus FORWARD
+	// isolation.
 	if err := removeActorNftablesRules(); err != nil {
 		return err
 	}
@@ -634,6 +699,12 @@ func installActorNftablesRules(podIP net.IP) error {
 		Hooknum:  nftables.ChainHookPrerouting,
 		Priority: nftables.ChainPriorityNATDest,
 	})
+	if routeEgressToGateway {
+		if capturePorts.HTTP == 0 || capturePorts.HTTPS == 0 {
+			return fmt.Errorf("local egress gateway capture ports must be set")
+		}
+		addTransparentHTTPEgressRedirect(c, table, prerouting, capturePorts)
+	}
 	// TODO: Support inbound UDP DNAT for actors that expose UDP protocols such
 	// as QUIC.
 	// TODO: Replace the hard-coded HTTP port with the actor's configured
@@ -661,35 +732,44 @@ func installActorNftablesRules(podIP net.IP) error {
 		Exprs: preroutingExprs,
 	})
 
-	postrouting := c.AddChain(&nftables.Chain{
-		Name:     "postrouting",
-		Table:    table,
-		Type:     nftables.ChainTypeNAT,
-		Hooknum:  nftables.ChainHookPostrouting,
-		Priority: nftables.ChainPriorityNATSource,
-	})
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: postrouting,
-		Exprs: append(ipSourceEqual(actorVethIP), &expr.Masq{}),
-	})
-
 	acceptPolicy := nftables.ChainPolicyAccept
+	forwardPolicy := &acceptPolicy
+	if routeEgressToGateway {
+		dropPolicy := nftables.ChainPolicyDrop
+		forwardPolicy = &dropPolicy
+	} else {
+		postrouting := c.AddChain(&nftables.Chain{
+			Name:     "postrouting",
+			Table:    table,
+			Type:     nftables.ChainTypeNAT,
+			Hooknum:  nftables.ChainHookPostrouting,
+			Priority: nftables.ChainPriorityNATSource,
+		})
+		c.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: postrouting,
+			Exprs: append(ipSourceEqual(actorVethIP), &expr.Masq{}),
+		})
+	}
 	forward := c.AddChain(&nftables.Chain{
 		Name:     "forward",
 		Table:    table,
 		Type:     nftables.ChainTypeFilter,
 		Hooknum:  nftables.ChainHookForward,
 		Priority: nftables.ChainPriorityFilter,
-		Policy:   &acceptPolicy,
+		Policy:   forwardPolicy,
 	})
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: forward,
-		Exprs: []expr.Any{
-			&expr.Verdict{Kind: expr.VerdictAccept},
-		},
-	})
+	if routeEgressToGateway {
+		addEgressGatewayForwardRules(c, table, forward)
+	} else {
+		c.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: forward,
+			Exprs: []expr.Any{
+				&expr.Verdict{Kind: expr.VerdictAccept},
+			},
+		})
+	}
 
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("while installing actor nftables rules: %w", err)
@@ -719,6 +799,40 @@ func removeActorNftablesRules() error {
 	return nil
 }
 
+func addEgressGatewayForwardRules(c *nftables.Conn, table *nftables.Table, forward *nftables.Chain) {
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: forward,
+		Exprs: append(establishedOrRelated(), &expr.Verdict{Kind: expr.VerdictAccept}),
+	})
+
+	inboundExprs := append(ipDestinationEqual(actorVethIP), tcpDestinationPortEqual(80)...)
+	inboundExprs = append(inboundExprs, &expr.Verdict{Kind: expr.VerdictAccept})
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: forward,
+		Exprs: inboundExprs,
+	})
+}
+
+func establishedOrRelated() []expr.Any {
+	return []expr.Any{
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1,
+			DestRegister:   1,
+			Len:            4,
+			Mask:           binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED),
+			Xor:            binaryutil.NativeEndian.PutUint32(0),
+		},
+		&expr.Cmp{
+			Op:       expr.CmpOpNeq,
+			Register: 1,
+			Data:     binaryutil.NativeEndian.PutUint32(0),
+		},
+	}
+}
+
 func ipSourceEqual(ip string) []expr.Any {
 	return ipPayloadEqual(12, ip)
 }
@@ -744,12 +858,43 @@ func ipPayloadEqual(offset uint32, ip string) []expr.Any {
 }
 
 func tcpDestinationPortEqual(port uint16) []expr.Any {
+	return destinationPortEqual("TCP", port)
+}
+
+func addTransparentHTTPEgressRedirect(c *nftables.Conn, table *nftables.Table, prerouting *nftables.Chain, capturePorts egress.CapturePorts) {
+	addTransparentEgressRedirect(c, table, prerouting, 80, capturePorts.HTTP)
+	addTransparentEgressRedirect(c, table, prerouting, 443, capturePorts.HTTPS)
+}
+
+func addTransparentEgressRedirect(c *nftables.Conn, table *nftables.Table, prerouting *nftables.Chain, originalPort uint16, proxyPort uint16) {
+	exprs := append(ipSourceEqual(actorVethIP), tcpDestinationPortEqual(originalPort)...)
+	exprs = append(exprs,
+		&expr.Immediate{
+			Register: 2,
+			Data:     binaryutil.BigEndian.PutUint16(proxyPort),
+		},
+		&expr.Redir{
+			RegisterProtoMin: 2,
+		},
+	)
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: prerouting,
+		Exprs: exprs,
+	})
+}
+
+func destinationPortEqual(protocol string, port uint16) []expr.Any {
+	proto := byte(unix.IPPROTO_TCP)
+	if protocol == "UDP" {
+		proto = unix.IPPROTO_UDP
+	}
 	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 		&expr.Cmp{
 			Op:       expr.CmpOpEq,
 			Register: 1,
-			Data:     []byte{unix.IPPROTO_TCP},
+			Data:     []byte{proto},
 		},
 		&expr.Payload{
 			DestRegister: 1,

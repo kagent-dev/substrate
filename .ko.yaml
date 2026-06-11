@@ -21,3 +21,6 @@ defaultPlatforms:
 baseImageOverrides:
   github.com/agent-substrate/substrate/demos/sandbox: alpine
   github.com/agent-substrate/substrate/demos/agent-secret: alpine
+
+x-agentgatewayEgressBaseImageOverrides:
+  github.com/agent-substrate/substrate/cmd/ateom-gvisor: cr.agentgateway.dev/agentgateway:latest-dev

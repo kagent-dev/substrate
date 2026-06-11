@@ -153,6 +153,329 @@ spec:
                   type: object
                 maxItems: 10
                 type: array
+              egressPolicy:
+                description: |-
+                  EgressPolicy defines the default outbound network policy for actors
+                  created from this template.
+                properties:
+                  allow:
+                    description: Allow contains destination rules actors created from
+                      this template may reach.
+                    items:
+                      properties:
+                        credentials:
+                          description: |-
+                            Credentials configures explicit egress gateway credential injection for
+                            matching outbound requests.
+                          properties:
+                            inject:
+                              description: |-
+                                Inject configures credentials that the egress gateway injects into
+                                matching outbound requests. Values are referenced from Kubernetes Secrets;
+                                the policy does not contain credential material.
+                              items:
+                                properties:
+                                  header:
+                                    description: Header is the outbound HTTP header
+                                      name to set.
+                                    type: string
+                                  valueFrom:
+                                    description: ValueFrom selects the source of the
+                                      injected credential value.
+                                    properties:
+                                      secretKeyRef:
+                                        description: SecretKeyRef selects a key in
+                                          a Kubernetes Secret.
+                                        properties:
+                                          key:
+                                            description: The key of the secret to
+                                              select from.  Must be a valid secret
+                                              key.
+                                            type: string
+                                          name:
+                                            default: ""
+                                            description: |-
+                                              Name of the referent.
+                                              This field is effectively required, but due to backwards compatibility is
+                                              allowed to be empty. Instances of this type with an empty value here are
+                                              almost certainly wrong.
+                                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                            type: string
+                                          optional:
+                                            description: Specify whether the Secret
+                                              or its key must be defined
+                                            type: boolean
+                                        required:
+                                        - key
+                                        type: object
+                                        x-kubernetes-map-type: atomic
+                                    type: object
+                                required:
+                                - header
+                                - valueFrom
+                                type: object
+                              type: array
+                          type: object
+                        name:
+                          description: Name is an optional human-readable identifier
+                            for this rule.
+                          type: string
+                        ports:
+                          description: |-
+                            Ports is the list of destination ports matched by this rule.
+                            If empty, the rule applies to all destination ports.
+                          items:
+                            properties:
+                              port:
+                                description: Port is the destination port number.
+                                format: int32
+                                type: integer
+                              protocol:
+                                description: Protocol is the transport protocol for
+                                  this port.
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                        tls:
+                          description: TLS defines transport security requirements
+                            for this destination.
+                          properties:
+                            intercept:
+                              description: Intercept configures explicit TLS interception
+                                for matching egress traffic.
+                              properties:
+                                issuerSecretRef:
+                                  description: |-
+                                    IssuerSecretRef references the CA material used by the egress gateway to
+                                    issue certificates for intercepted TLS traffic.
+                                  properties:
+                                    name:
+                                      description: name is unique within a namespace
+                                        to reference a secret resource.
+                                      type: string
+                                    namespace:
+                                      description: namespace defines the space within
+                                        which the secret name must be unique.
+                                      type: string
+                                  type: object
+                                  x-kubernetes-map-type: atomic
+                                validateUpstream:
+                                  description: |-
+                                    ValidateUpstream controls whether the egress gateway validates the
+                                    upstream service certificate before proxying intercepted traffic.
+                                  type: boolean
+                              type: object
+                            mode:
+                              description: Mode controls how TLS is handled for matching
+                                egress traffic.
+                              enum:
+                              - Require
+                              - Originate
+                              - Intercept
+                              - Disable
+                              type: string
+                            required:
+                              description: Required controls whether matching egress
+                                traffic must use TLS.
+                              type: boolean
+                          type: object
+                        to:
+                          description: To lists the destinations matched by this rule.
+                          items:
+                            properties:
+                              host:
+                                description: Host is the DNS name to match for egress
+                                  traffic.
+                                type: string
+                              ipBlock:
+                                description: IPBlock is the IP range to match for
+                                  egress traffic.
+                                properties:
+                                  cidr:
+                                    description: CIDR is an IP address range in CIDR
+                                      notation.
+                                    type: string
+                                required:
+                                - cidr
+                                type: object
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  audit:
+                    description: Audit configures egress logging and tracing for actors
+                      created from this template.
+                    properties:
+                      logs:
+                        description: Logs enables egress access logs for actors created
+                          from this template.
+                        type: boolean
+                      redactHeaders:
+                        description: RedactHeaders is the list of headers that must
+                          be redacted from audit output.
+                        items:
+                          type: string
+                        type: array
+                      traces:
+                        description: Traces enables egress tracing for actors created
+                          from this template.
+                        type: boolean
+                    type: object
+                  defaultAction:
+                    description: DefaultAction is applied when no allow rule matches.
+                    enum:
+                    - Allow
+                    - Deny
+                    type: string
+                  deny:
+                    description: Deny contains destination rules actors created from
+                      this template may not reach.
+                    items:
+                      properties:
+                        credentials:
+                          description: |-
+                            Credentials configures explicit egress gateway credential injection for
+                            matching outbound requests.
+                          properties:
+                            inject:
+                              description: |-
+                                Inject configures credentials that the egress gateway injects into
+                                matching outbound requests. Values are referenced from Kubernetes Secrets;
+                                the policy does not contain credential material.
+                              items:
+                                properties:
+                                  header:
+                                    description: Header is the outbound HTTP header
+                                      name to set.
+                                    type: string
+                                  valueFrom:
+                                    description: ValueFrom selects the source of the
+                                      injected credential value.
+                                    properties:
+                                      secretKeyRef:
+                                        description: SecretKeyRef selects a key in
+                                          a Kubernetes Secret.
+                                        properties:
+                                          key:
+                                            description: The key of the secret to
+                                              select from.  Must be a valid secret
+                                              key.
+                                            type: string
+                                          name:
+                                            default: ""
+                                            description: |-
+                                              Name of the referent.
+                                              This field is effectively required, but due to backwards compatibility is
+                                              allowed to be empty. Instances of this type with an empty value here are
+                                              almost certainly wrong.
+                                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                            type: string
+                                          optional:
+                                            description: Specify whether the Secret
+                                              or its key must be defined
+                                            type: boolean
+                                        required:
+                                        - key
+                                        type: object
+                                        x-kubernetes-map-type: atomic
+                                    type: object
+                                required:
+                                - header
+                                - valueFrom
+                                type: object
+                              type: array
+                          type: object
+                        name:
+                          description: Name is an optional human-readable identifier
+                            for this rule.
+                          type: string
+                        ports:
+                          description: |-
+                            Ports is the list of destination ports matched by this rule.
+                            If empty, the rule applies to all destination ports.
+                          items:
+                            properties:
+                              port:
+                                description: Port is the destination port number.
+                                format: int32
+                                type: integer
+                              protocol:
+                                description: Protocol is the transport protocol for
+                                  this port.
+                                type: string
+                            required:
+                            - port
+                            type: object
+                          type: array
+                        tls:
+                          description: TLS defines transport security requirements
+                            for this destination.
+                          properties:
+                            intercept:
+                              description: Intercept configures explicit TLS interception
+                                for matching egress traffic.
+                              properties:
+                                issuerSecretRef:
+                                  description: |-
+                                    IssuerSecretRef references the CA material used by the egress gateway to
+                                    issue certificates for intercepted TLS traffic.
+                                  properties:
+                                    name:
+                                      description: name is unique within a namespace
+                                        to reference a secret resource.
+                                      type: string
+                                    namespace:
+                                      description: namespace defines the space within
+                                        which the secret name must be unique.
+                                      type: string
+                                  type: object
+                                  x-kubernetes-map-type: atomic
+                                validateUpstream:
+                                  description: |-
+                                    ValidateUpstream controls whether the egress gateway validates the
+                                    upstream service certificate before proxying intercepted traffic.
+                                  type: boolean
+                              type: object
+                            mode:
+                              description: Mode controls how TLS is handled for matching
+                                egress traffic.
+                              enum:
+                              - Require
+                              - Originate
+                              - Intercept
+                              - Disable
+                              type: string
+                            required:
+                              description: Required controls whether matching egress
+                                traffic must use TLS.
+                              type: boolean
+                          type: object
+                        to:
+                          description: To lists the destinations matched by this rule.
+                          items:
+                            properties:
+                              host:
+                                description: Host is the DNS name to match for egress
+                                  traffic.
+                                type: string
+                              ipBlock:
+                                description: IPBlock is the IP range to match for
+                                  egress traffic.
+                                properties:
+                                  cidr:
+                                    description: CIDR is an IP address range in CIDR
+                                      notation.
+                                    type: string
+                                required:
+                                - cidr
+                                type: object
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                type: object
               pauseImage:
                 description: |-
                   PauseImage is the container to use as the root sandbox container.

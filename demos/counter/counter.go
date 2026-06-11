@@ -20,6 +20,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -42,6 +44,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	defaultMux := http.NewServeMux()
+	defaultMux.HandleFunc("/egress", handleEgress)
 	defaultMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		count := atomic.AddUint64(&requestCount, 1)
@@ -92,6 +95,59 @@ func writeRandomFile() error {
 	}
 
 	return nil
+}
+
+func handleEgress(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	targetURL := r.URL.Query().Get("url")
+	if targetURL == "" {
+		targetURL = "http://example.com/"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	if caPEM := os.Getenv("EGRESS_CA_CERT_PEM"); caPEM != "" {
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM([]byte(caPEM)) {
+			http.Error(w, "EGRESS_CA_CERT_PEM does not contain a valid PEM certificate", http.StatusBadGateway)
+			return
+		}
+		transport.TLSClientConfig = &tls.Config{
+			RootCAs: roots,
+		}
+	}
+	client := &http.Client{Transport: transport}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "Egress request failed", slog.String("url", targetURL), slog.Any("err", err))
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	slog.InfoContext(ctx, "Egress request completed", slog.String("url", targetURL), slog.Int("status", resp.StatusCode))
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "egress url: %s\nstatus: %d\nbody_prefix:\n%s\n", targetURL, resp.StatusCode, string(body))
 }
 
 func hashRandomFile() string {
