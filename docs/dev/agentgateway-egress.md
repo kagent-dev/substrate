@@ -288,3 +288,73 @@ The request should return `200`. The template above passes the CA certificate fr
 adds that CA to its HTTPS client trust roots. Without that trust root, the
 request fails with `x509: certificate signed by unknown authority`, which still
 confirms interception is happening.
+
+## Credential Injection
+
+Use `credentials.inject` on an allow rule to set outbound HTTP headers from
+Kubernetes Secrets. For HTTPS destinations such as OpenAI, the rule must use
+TLS `Intercept`; TLS passthrough cannot modify request headers.
+
+Create a secret whose value is the complete upstream header value. For OpenAI,
+store the `Bearer ` prefix with the key:
+
+```sh
+kubectl -n ate-demo-counter create secret generic openai-api-key \
+  --from-literal=authorization="Bearer ${OPENAI_API_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n ate-demo-counter create role ateom-openai-secret-reader \
+  --verb=get \
+  --resource=secrets \
+  --resource-name=openai-api-key \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n ate-demo-counter create rolebinding ateom-openai-secret-reader \
+  --role=ateom-openai-secret-reader \
+  --serviceaccount=ate-demo-counter:default \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Apply an `ActorTemplate` policy that allows `api.openai.com`, intercepts TLS,
+and injects the `Authorization` header from the secret:
+
+```yaml
+apiVersion: ate.dev/v1alpha1
+kind: ActorTemplate
+metadata:
+  name: counter
+  namespace: ate-demo-counter
+spec:
+  egressPolicy:
+    defaultAction: Deny
+    allow:
+    - name: openai-api
+      to:
+      - host: api.openai.com
+      ports:
+      - port: 443
+        protocol: TCP
+      tls:
+        mode: Intercept
+        required: true
+        intercept:
+          issuerSecretRef:
+            name: example-mitm
+            namespace: ate-demo-counter
+          validateUpstream: true
+      credentials:
+        inject:
+        - header: Authorization
+          valueFrom:
+            secretKeyRef:
+              name: openai-api-key
+              key: authorization
+    audit:
+      logs: true
+      redactHeaders:
+      - Authorization
+```
+
+The worker pod service account needs read access to both `example-mitm` for TLS
+interception and `openai-api-key` for credential injection. Add
+`Authorization` to `audit.redactHeaders` whenever request logging is enabled.

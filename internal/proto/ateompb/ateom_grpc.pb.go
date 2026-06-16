@@ -16,7 +16,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v4.25.3
-// source: ateom.proto
+// source: internal/proto/ateompb/ateom.proto
 
 package ateompb
 
@@ -251,5 +251,5 @@ var Ateom_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "ateom.proto",
+	Metadata: "internal/proto/ateompb/ateom.proto",
 }

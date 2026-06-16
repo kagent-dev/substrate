@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-substrate/substrate/internal/proto/ateompb"
+	"github.com/agent-substrate/substrate/internal/proto/egresspb"
 )
 
 func TestRenderEgressAgentgatewayConfigAddsHTTPRouteAndHeaders(t *testing.T) {
@@ -96,13 +96,13 @@ func TestRenderEgressAgentgatewayConfigAddsTLSPassthroughTCPRoute(t *testing.T) 
 }
 
 func TestRenderEgressAgentgatewayConfigDefaultsPort443ToTLSPassthrough(t *testing.T) {
-	policy := &ateompb.EgressPolicy{
+	policy := &egresspb.EgressPolicy{
 		DefaultAction: "Deny",
-		Allow: []*ateompb.EgressPolicyRule{{
-			To: []*ateompb.EgressPolicyDestination{
+		Allow: []*egresspb.EgressPolicyRule{{
+			To: []*egresspb.EgressPolicyDestination{
 				{Host: "example.com"},
 			},
-			Ports: []*ateompb.EgressPort{
+			Ports: []*egresspb.EgressPort{
 				{Port: 80, Protocol: "TCP"},
 				{Port: 443, Protocol: "TCP"},
 			},
@@ -132,6 +132,9 @@ func TestRenderEgressAgentgatewayConfigDefaultsPort443ToTLSPassthrough(t *testin
 
 func TestRenderEgressAgentgatewayConfigAddsInterceptHTTPSBind(t *testing.T) {
 	secrets := fakeEgressSecretResolver{
+		values: map[string]string{
+			"dev-agents/openai-token/token": "Bearer test-token",
+		},
 		certs: map[string]fakeTLSSecret{
 			"dev-agents/egress-ca": {
 				cert: []byte("cert"),
@@ -141,8 +144,8 @@ func TestRenderEgressAgentgatewayConfigAddsInterceptHTTPSBind(t *testing.T) {
 	}
 	policy := egressPolicyForTest()
 	policy.Allow[0].Tls.Mode = "Intercept"
-	policy.Allow[0].Tls.Intercept = &ateompb.EgressTLSInterceptPolicy{
-		IssuerSecretRef: &ateompb.SecretReference{
+	policy.Allow[0].Tls.Intercept = &egresspb.EgressTLSInterceptPolicy{
+		IssuerSecretRef: &egresspb.SecretReference{
 			Name:      "egress-ca",
 			Namespace: "dev-agents",
 		},
@@ -165,6 +168,8 @@ func TestRenderEgressAgentgatewayConfigAddsInterceptHTTPSBind(t *testing.T) {
 		"host: api.openai.com:443",
 		"backendTLS:",
 		"hostname: api.openai.com",
+		"requestHeaderModifier:",
+		"Authorization: Bearer test-token",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered config missing %q:\n%s", want, got)
@@ -183,8 +188,8 @@ func TestRenderEgressAgentgatewayConfigCanDisableInterceptUpstreamValidation(t *
 	}
 	policy := egressPolicyForTest()
 	policy.Allow[0].Tls.Mode = "Intercept"
-	policy.Allow[0].Tls.Intercept = &ateompb.EgressTLSInterceptPolicy{
-		IssuerSecretRef: &ateompb.SecretReference{
+	policy.Allow[0].Tls.Intercept = &egresspb.EgressTLSInterceptPolicy{
+		IssuerSecretRef: &egresspb.SecretReference{
 			Name:      "egress-ca",
 			Namespace: "dev-agents",
 		},
@@ -206,27 +211,27 @@ func TestRenderEgressAgentgatewayConfigCanDisableInterceptUpstreamValidation(t *
 	}
 }
 
-func egressPolicyForTest() *ateompb.EgressPolicy {
-	return &ateompb.EgressPolicy{
+func egressPolicyForTest() *egresspb.EgressPolicy {
+	return &egresspb.EgressPolicy{
 		DefaultAction: "Deny",
-		Allow: []*ateompb.EgressPolicyRule{
+		Allow: []*egresspb.EgressPolicyRule{
 			{
-				To: []*ateompb.EgressPolicyDestination{
+				To: []*egresspb.EgressPolicyDestination{
 					{Host: "api.openai.com"},
 				},
-				Ports: []*ateompb.EgressPort{
+				Ports: []*egresspb.EgressPort{
 					{Port: 443, Protocol: "TCP"},
 				},
-				Tls: &ateompb.EgressTLSPolicy{
+				Tls: &egresspb.EgressTLSPolicy{
 					Mode:     "Require",
 					Required: true,
 				},
-				Credentials: &ateompb.EgressCredentialPolicy{
-					Inject: []*ateompb.EgressCredentialInjection{
+				Credentials: &egresspb.EgressCredentialPolicy{
+					Inject: []*egresspb.EgressCredentialInjection{
 						{
 							Header: "Authorization",
-							ValueFrom: &ateompb.EgressCredentialValueFrom{
-								SecretKeyRef: &ateompb.SecretKeySelector{
+							ValueFrom: &egresspb.EgressCredentialValueFrom{
+								SecretKeyRef: &egresspb.SecretKeySelector{
 									Name: "openai-token",
 									Key:  "token",
 								},

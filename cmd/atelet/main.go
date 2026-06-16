@@ -588,101 +588,10 @@ func (s *AteomHerder) dialAteom(ctx context.Context, targetAteomUid string) (ate
 // the ateom-facing one — currently just the container names.
 func buildAteomWorkloadSpec(spec *ateletpb.WorkloadSpec) *ateompb.WorkloadSpec {
 	out := &ateompb.WorkloadSpec{
-		EgressPolicy: buildAteomEgressPolicy(spec.GetEgressPolicy()),
+		EgressPolicy: spec.GetEgressPolicy(),
 	}
 	for _, ctr := range spec.GetContainers() {
 		out.Containers = append(out.Containers, &ateompb.Container{Name: ctr.GetName()})
-	}
-	return out
-}
-
-func buildAteomEgressPolicy(policy *ateletpb.EgressPolicy) *ateompb.EgressPolicy {
-	if policy == nil {
-		return nil
-	}
-	return &ateompb.EgressPolicy{
-		DefaultAction: policy.GetDefaultAction(),
-		Allow:         buildAteomEgressPolicyRules(policy.GetAllow()),
-		Deny:          buildAteomEgressPolicyRules(policy.GetDeny()),
-		Audit:         buildAteomEgressAuditPolicy(policy.GetAudit()),
-	}
-}
-
-func buildAteomEgressAuditPolicy(policy *ateletpb.EgressAuditPolicy) *ateompb.EgressAuditPolicy {
-	if policy == nil {
-		return nil
-	}
-	return &ateompb.EgressAuditPolicy{
-		Logs:          policy.GetLogs(),
-		Traces:        policy.GetTraces(),
-		RedactHeaders: append([]string(nil), policy.GetRedactHeaders()...),
-	}
-}
-
-func buildAteomEgressPolicyRules(rules []*ateletpb.EgressPolicyRule) []*ateompb.EgressPolicyRule {
-	out := make([]*ateompb.EgressPolicyRule, 0, len(rules))
-	for _, rule := range rules {
-		outRule := &ateompb.EgressPolicyRule{
-			Tls:         buildAteomEgressTLSPolicy(rule.GetTls()),
-			Credentials: buildAteomEgressCredentialPolicy(rule.GetCredentials()),
-		}
-		for _, dest := range rule.GetTo() {
-			outRule.To = append(outRule.To, &ateompb.EgressPolicyDestination{
-				Host: dest.GetHost(),
-				Cidr: dest.GetCidr(),
-			})
-		}
-		for _, port := range rule.GetPorts() {
-			outRule.Ports = append(outRule.Ports, &ateompb.EgressPort{
-				Port:     port.GetPort(),
-				Protocol: port.GetProtocol(),
-			})
-		}
-		out = append(out, outRule)
-	}
-	return out
-}
-
-func buildAteomEgressTLSPolicy(policy *ateletpb.EgressTLSPolicy) *ateompb.EgressTLSPolicy {
-	if policy == nil {
-		return nil
-	}
-	out := &ateompb.EgressTLSPolicy{
-		Mode:     policy.GetMode(),
-		Required: policy.GetRequired(),
-	}
-	if policy.GetIntercept() != nil {
-		out.Intercept = &ateompb.EgressTLSInterceptPolicy{
-			ValidateUpstream: policy.GetIntercept().GetValidateUpstream(),
-		}
-		if policy.GetIntercept().GetIssuerSecretRef() != nil {
-			out.Intercept.IssuerSecretRef = &ateompb.SecretReference{
-				Name:      policy.GetIntercept().GetIssuerSecretRef().GetName(),
-				Namespace: policy.GetIntercept().GetIssuerSecretRef().GetNamespace(),
-			}
-		}
-	}
-	return out
-}
-
-func buildAteomEgressCredentialPolicy(policy *ateletpb.EgressCredentialPolicy) *ateompb.EgressCredentialPolicy {
-	if policy == nil {
-		return nil
-	}
-	out := &ateompb.EgressCredentialPolicy{}
-	for _, injection := range policy.GetInject() {
-		outInjection := &ateompb.EgressCredentialInjection{
-			Header: injection.GetHeader(),
-		}
-		if injection.GetValueFrom().GetSecretKeyRef() != nil {
-			outInjection.ValueFrom = &ateompb.EgressCredentialValueFrom{
-				SecretKeyRef: &ateompb.SecretKeySelector{
-					Name: injection.GetValueFrom().GetSecretKeyRef().GetName(),
-					Key:  injection.GetValueFrom().GetSecretKeyRef().GetKey(),
-				},
-			}
-		}
-		out.Inject = append(out.Inject, outInjection)
 	}
 	return out
 }

@@ -16,6 +16,8 @@ syntax = "proto3";
 
 package ateom;
 
+import "internal/proto/egresspb/egress.proto";
+
 option go_package = "github.com/agent-substrate/substrate/internal/proto/ateompb";
 
 // Ateom is the interface to control a single gVisor (or, in the future microVM)
@@ -59,76 +61,12 @@ message RunWorkloadRequest {
 
 // WorkloadSpec parallels Pod, but with far fewer configurable fields.
 message WorkloadSpec {
-  repeated Container containers    = 1;
-  EgressPolicy       egress_policy = 2;
+  repeated Container   containers    = 1;
+  egress.EgressPolicy  egress_policy = 2;
 }
 
 message Container {
   string name = 1;
-}
-
-message EgressPolicy {
-  string                    default_action = 1;
-  repeated EgressPolicyRule allow          = 2;
-  repeated EgressPolicyRule deny           = 3;
-  EgressAuditPolicy         audit          = 4;
-}
-
-message EgressPolicyRule {
-  repeated EgressPolicyDestination to          = 1;
-  repeated EgressPort              ports       = 2;
-  EgressTLSPolicy                  tls         = 3;
-  EgressCredentialPolicy           credentials = 4;
-}
-
-message EgressPolicyDestination {
-  string host = 1;
-  string cidr = 2;
-}
-
-message EgressPort {
-  uint32 port     = 1;
-  string protocol = 2;
-}
-
-message EgressTLSPolicy {
-  string                   mode              = 1;
-  bool                     required          = 2;
-  EgressTLSInterceptPolicy intercept         = 3;
-}
-
-message EgressTLSInterceptPolicy {
-  SecretReference issuer_secret_ref = 1;
-  bool            validate_upstream = 2;
-}
-
-message EgressCredentialPolicy {
-  repeated EgressCredentialInjection inject = 1;
-}
-
-message EgressCredentialInjection {
-  string                    header     = 1;
-  EgressCredentialValueFrom value_from = 2;
-}
-
-message EgressCredentialValueFrom {
-  SecretKeySelector secret_key_ref = 1;
-}
-
-message EgressAuditPolicy {
-  bool            logs           = 1;
-  bool            traces         = 2;
-  repeated string redact_headers = 3;
-}
-
-message SecretReference {
-  string name      = 1;
-  string namespace = 2;
-}
-
-message SecretKeySelector {
-  string name = 1;
-  string key  = 2;
 }
 
 message RunWorkloadResponse {

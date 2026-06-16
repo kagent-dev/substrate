@@ -19,7 +19,7 @@ package egress
 import (
 	"context"
 
-	"github.com/agent-substrate/substrate/internal/proto/ateompb"
+	"github.com/agent-substrate/substrate/internal/proto/egresspb"
 )
 
 // CapturePorts identifies the local listener ports used for transparent actor
@@ -32,7 +32,7 @@ type CapturePorts struct {
 // Gateway is a local egress gateway process that enforces an ActorTemplate
 // egress policy for the currently active actor.
 type Gateway interface {
-	ApplyPolicy(ctx context.Context, defaultNamespace string, policy *ateompb.EgressPolicy) error
+	ApplyPolicy(ctx context.Context, defaultNamespace string, policy *egresspb.EgressPolicy) error
 	Stop(ctx context.Context)
 }
 
@@ -43,6 +43,6 @@ type Gateway interface {
 type Provider interface {
 	Name() string
 	CapturePorts() CapturePorts
-	NeedsGateway(policy *ateompb.EgressPolicy) bool
+	NeedsGateway(policy *egresspb.EgressPolicy) bool
 	NewGateway(ctx context.Context) (Gateway, error)
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateompath"
 	"github.com/agent-substrate/substrate/internal/contextlogging"
 	"github.com/agent-substrate/substrate/internal/proto/ateompb"
+	"github.com/agent-substrate/substrate/internal/proto/egresspb"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/google/nftables"
@@ -392,7 +393,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	return &ateompb.RestoreWorkloadResponse{}, nil
 }
 
-func (s *AteomService) applyEgressPolicy(ctx context.Context, defaultNamespace string, policy *ateompb.EgressPolicy) error {
+func (s *AteomService) applyEgressPolicy(ctx context.Context, defaultNamespace string, policy *egresspb.EgressPolicy) error {
 	if s.egressProvider == nil {
 		return nil
 	}
@@ -412,7 +413,7 @@ func (s *AteomService) applyEgressPolicy(ctx context.Context, defaultNamespace s
 	return nil
 }
 
-func (s *AteomService) setupActorNetwork(ctx context.Context, egressPolicy *ateompb.EgressPolicy) (retErr error) {
+func (s *AteomService) setupActorNetwork(ctx context.Context, egressPolicy *egresspb.EgressPolicy) (retErr error) {
 	// Build a fresh point-to-point network between the worker pod netns and the
 	// gVisor interior netns. The worker side keeps the pod's real eth0, creates
 	// ateom0 as the gateway, and moves only the veth peer into the actor netns.
@@ -737,6 +738,14 @@ func installActorNftablesRules(podIP net.IP, routeEgressToGateway bool, captureP
 	if routeEgressToGateway {
 		dropPolicy := nftables.ChainPolicyDrop
 		forwardPolicy = &dropPolicy
+		postrouting := c.AddChain(&nftables.Chain{
+			Name:     "postrouting",
+			Table:    table,
+			Type:     nftables.ChainTypeNAT,
+			Hooknum:  nftables.ChainHookPostrouting,
+			Priority: nftables.ChainPriorityNATSource,
+		})
+		addEgressGatewayDNSMasquerade(c, table, postrouting)
 	} else {
 		postrouting := c.AddChain(&nftables.Chain{
 			Name:     "postrouting",
@@ -806,6 +815,8 @@ func addEgressGatewayForwardRules(c *nftables.Conn, table *nftables.Table, forwa
 		Exprs: append(establishedOrRelated(), &expr.Verdict{Kind: expr.VerdictAccept}),
 	})
 
+	addEgressGatewayDNSForwardRules(c, table, forward)
+
 	inboundExprs := append(ipDestinationEqual(actorVethIP), tcpDestinationPortEqual(80)...)
 	inboundExprs = append(inboundExprs, &expr.Verdict{Kind: expr.VerdictAccept})
 	c.AddRule(&nftables.Rule{
@@ -813,6 +824,30 @@ func addEgressGatewayForwardRules(c *nftables.Conn, table *nftables.Table, forwa
 		Chain: forward,
 		Exprs: inboundExprs,
 	})
+}
+
+func addEgressGatewayDNSForwardRules(c *nftables.Conn, table *nftables.Table, forward *nftables.Chain) {
+	for _, protocol := range []string{"UDP", "TCP"} {
+		exprs := append(ipSourceEqual(actorVethIP), destinationPortEqual(protocol, 53)...)
+		exprs = append(exprs, &expr.Verdict{Kind: expr.VerdictAccept})
+		c.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: forward,
+			Exprs: exprs,
+		})
+	}
+}
+
+func addEgressGatewayDNSMasquerade(c *nftables.Conn, table *nftables.Table, postrouting *nftables.Chain) {
+	for _, protocol := range []string{"UDP", "TCP"} {
+		exprs := append(ipSourceEqual(actorVethIP), destinationPortEqual(protocol, 53)...)
+		exprs = append(exprs, &expr.Masq{})
+		c.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: postrouting,
+			Exprs: exprs,
+		})
+	}
 }
 
 func establishedOrRelated() []expr.Any {

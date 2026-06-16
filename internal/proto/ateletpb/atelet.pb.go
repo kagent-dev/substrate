@@ -16,11 +16,12 @@
 // versions:
 // 	protoc-gen-go v1.36.11-devel
 // 	protoc        v4.25.3
-// source: atelet.proto
+// source: internal/proto/ateletpb/atelet.proto
 
 package ateletpb
 
 import (
+	egresspb "github.com/agent-substrate/substrate/internal/proto/egresspb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -49,7 +50,7 @@ type RunRequest struct {
 
 func (x *RunRequest) Reset() {
 	*x = RunRequest{}
-	mi := &file_atelet_proto_msgTypes[0]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -61,7 +62,7 @@ func (x *RunRequest) String() string {
 func (*RunRequest) ProtoMessage() {}
 
 func (x *RunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[0]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -74,7 +75,7 @@ func (x *RunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRequest.ProtoReflect.Descriptor instead.
 func (*RunRequest) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{0}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *RunRequest) GetTargetAteomUid() string {
@@ -128,7 +129,7 @@ type GCPAuthenticationConfig struct {
 
 func (x *GCPAuthenticationConfig) Reset() {
 	*x = GCPAuthenticationConfig{}
-	mi := &file_atelet_proto_msgTypes[1]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -140,7 +141,7 @@ func (x *GCPAuthenticationConfig) String() string {
 func (*GCPAuthenticationConfig) ProtoMessage() {}
 
 func (x *GCPAuthenticationConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[1]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -153,7 +154,7 @@ func (x *GCPAuthenticationConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GCPAuthenticationConfig.ProtoReflect.Descriptor instead.
 func (*GCPAuthenticationConfig) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{1}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GCPAuthenticationConfig) GetUse() bool {
@@ -172,7 +173,7 @@ type AuthenticationConfig struct {
 
 func (x *AuthenticationConfig) Reset() {
 	*x = AuthenticationConfig{}
-	mi := &file_atelet_proto_msgTypes[2]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -184,7 +185,7 @@ func (x *AuthenticationConfig) String() string {
 func (*AuthenticationConfig) ProtoMessage() {}
 
 func (x *AuthenticationConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[2]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -197,7 +198,7 @@ func (x *AuthenticationConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthenticationConfig.ProtoReflect.Descriptor instead.
 func (*AuthenticationConfig) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{2}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AuthenticationConfig) GetGcp() *GCPAuthenticationConfig {
@@ -220,7 +221,7 @@ type RunscPlatformConfig struct {
 
 func (x *RunscPlatformConfig) Reset() {
 	*x = RunscPlatformConfig{}
-	mi := &file_atelet_proto_msgTypes[3]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +233,7 @@ func (x *RunscPlatformConfig) String() string {
 func (*RunscPlatformConfig) ProtoMessage() {}
 
 func (x *RunscPlatformConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[3]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +246,7 @@ func (x *RunscPlatformConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunscPlatformConfig.ProtoReflect.Descriptor instead.
 func (*RunscPlatformConfig) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{3}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RunscPlatformConfig) GetSha256Hash() string {
@@ -274,7 +275,7 @@ type RunscConfig struct {
 
 func (x *RunscConfig) Reset() {
 	*x = RunscConfig{}
-	mi := &file_atelet_proto_msgTypes[4]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +287,7 @@ func (x *RunscConfig) String() string {
 func (*RunscConfig) ProtoMessage() {}
 
 func (x *RunscConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[4]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,7 +300,7 @@ func (x *RunscConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunscConfig.ProtoReflect.Descriptor instead.
 func (*RunscConfig) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{4}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RunscConfig) GetAmd64() *RunscPlatformConfig {
@@ -328,14 +329,14 @@ type WorkloadSpec struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Containers    []*Container           `protobuf:"bytes,1,rep,name=containers,proto3" json:"containers,omitempty"`
 	PauseImage    string                 `protobuf:"bytes,2,opt,name=pause_image,json=pauseImage,proto3" json:"pause_image,omitempty"`
-	EgressPolicy  *EgressPolicy          `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
+	EgressPolicy  *egresspb.EgressPolicy `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkloadSpec) Reset() {
 	*x = WorkloadSpec{}
-	mi := &file_atelet_proto_msgTypes[5]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -347,7 +348,7 @@ func (x *WorkloadSpec) String() string {
 func (*WorkloadSpec) ProtoMessage() {}
 
 func (x *WorkloadSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[5]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -360,7 +361,7 @@ func (x *WorkloadSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadSpec.ProtoReflect.Descriptor instead.
 func (*WorkloadSpec) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{5}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WorkloadSpec) GetContainers() []*Container {
@@ -377,7 +378,7 @@ func (x *WorkloadSpec) GetPauseImage() string {
 	return ""
 }
 
-func (x *WorkloadSpec) GetEgressPolicy() *EgressPolicy {
+func (x *WorkloadSpec) GetEgressPolicy() *egresspb.EgressPolicy {
 	if x != nil {
 		return x.EgressPolicy
 	}
@@ -396,7 +397,7 @@ type Container struct {
 
 func (x *Container) Reset() {
 	*x = Container{}
-	mi := &file_atelet_proto_msgTypes[6]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -408,7 +409,7 @@ func (x *Container) String() string {
 func (*Container) ProtoMessage() {}
 
 func (x *Container) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[6]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -421,7 +422,7 @@ func (x *Container) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Container.ProtoReflect.Descriptor instead.
 func (*Container) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{6}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Container) GetName() string {
@@ -462,7 +463,7 @@ type EnvEntry struct {
 
 func (x *EnvEntry) Reset() {
 	*x = EnvEntry{}
-	mi := &file_atelet_proto_msgTypes[7]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +475,7 @@ func (x *EnvEntry) String() string {
 func (*EnvEntry) ProtoMessage() {}
 
 func (x *EnvEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[7]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +488,7 @@ func (x *EnvEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnvEntry.ProtoReflect.Descriptor instead.
 func (*EnvEntry) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{7}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EnvEntry) GetName() string {
@@ -504,662 +505,6 @@ func (x *EnvEntry) GetValue() string {
 	return ""
 }
 
-type EgressPolicy struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DefaultAction string                 `protobuf:"bytes,1,opt,name=default_action,json=defaultAction,proto3" json:"default_action,omitempty"`
-	Allow         []*EgressPolicyRule    `protobuf:"bytes,2,rep,name=allow,proto3" json:"allow,omitempty"`
-	Deny          []*EgressPolicyRule    `protobuf:"bytes,3,rep,name=deny,proto3" json:"deny,omitempty"`
-	Audit         *EgressAuditPolicy     `protobuf:"bytes,4,opt,name=audit,proto3" json:"audit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressPolicy) Reset() {
-	*x = EgressPolicy{}
-	mi := &file_atelet_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressPolicy) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressPolicy) ProtoMessage() {}
-
-func (x *EgressPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressPolicy.ProtoReflect.Descriptor instead.
-func (*EgressPolicy) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *EgressPolicy) GetDefaultAction() string {
-	if x != nil {
-		return x.DefaultAction
-	}
-	return ""
-}
-
-func (x *EgressPolicy) GetAllow() []*EgressPolicyRule {
-	if x != nil {
-		return x.Allow
-	}
-	return nil
-}
-
-func (x *EgressPolicy) GetDeny() []*EgressPolicyRule {
-	if x != nil {
-		return x.Deny
-	}
-	return nil
-}
-
-func (x *EgressPolicy) GetAudit() *EgressAuditPolicy {
-	if x != nil {
-		return x.Audit
-	}
-	return nil
-}
-
-type EgressPolicyRule struct {
-	state         protoimpl.MessageState     `protogen:"open.v1"`
-	To            []*EgressPolicyDestination `protobuf:"bytes,1,rep,name=to,proto3" json:"to,omitempty"`
-	Ports         []*EgressPort              `protobuf:"bytes,2,rep,name=ports,proto3" json:"ports,omitempty"`
-	Tls           *EgressTLSPolicy           `protobuf:"bytes,3,opt,name=tls,proto3" json:"tls,omitempty"`
-	Credentials   *EgressCredentialPolicy    `protobuf:"bytes,4,opt,name=credentials,proto3" json:"credentials,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressPolicyRule) Reset() {
-	*x = EgressPolicyRule{}
-	mi := &file_atelet_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressPolicyRule) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressPolicyRule) ProtoMessage() {}
-
-func (x *EgressPolicyRule) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressPolicyRule.ProtoReflect.Descriptor instead.
-func (*EgressPolicyRule) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *EgressPolicyRule) GetTo() []*EgressPolicyDestination {
-	if x != nil {
-		return x.To
-	}
-	return nil
-}
-
-func (x *EgressPolicyRule) GetPorts() []*EgressPort {
-	if x != nil {
-		return x.Ports
-	}
-	return nil
-}
-
-func (x *EgressPolicyRule) GetTls() *EgressTLSPolicy {
-	if x != nil {
-		return x.Tls
-	}
-	return nil
-}
-
-func (x *EgressPolicyRule) GetCredentials() *EgressCredentialPolicy {
-	if x != nil {
-		return x.Credentials
-	}
-	return nil
-}
-
-type EgressPolicyDestination struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	Cidr          string                 `protobuf:"bytes,2,opt,name=cidr,proto3" json:"cidr,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressPolicyDestination) Reset() {
-	*x = EgressPolicyDestination{}
-	mi := &file_atelet_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressPolicyDestination) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressPolicyDestination) ProtoMessage() {}
-
-func (x *EgressPolicyDestination) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressPolicyDestination.ProtoReflect.Descriptor instead.
-func (*EgressPolicyDestination) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *EgressPolicyDestination) GetHost() string {
-	if x != nil {
-		return x.Host
-	}
-	return ""
-}
-
-func (x *EgressPolicyDestination) GetCidr() string {
-	if x != nil {
-		return x.Cidr
-	}
-	return ""
-}
-
-type EgressPort struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Port          uint32                 `protobuf:"varint,1,opt,name=port,proto3" json:"port,omitempty"`
-	Protocol      string                 `protobuf:"bytes,2,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressPort) Reset() {
-	*x = EgressPort{}
-	mi := &file_atelet_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressPort) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressPort) ProtoMessage() {}
-
-func (x *EgressPort) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressPort.ProtoReflect.Descriptor instead.
-func (*EgressPort) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *EgressPort) GetPort() uint32 {
-	if x != nil {
-		return x.Port
-	}
-	return 0
-}
-
-func (x *EgressPort) GetProtocol() string {
-	if x != nil {
-		return x.Protocol
-	}
-	return ""
-}
-
-type EgressTLSPolicy struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Mode          string                    `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
-	Required      bool                      `protobuf:"varint,2,opt,name=required,proto3" json:"required,omitempty"`
-	Intercept     *EgressTLSInterceptPolicy `protobuf:"bytes,3,opt,name=intercept,proto3" json:"intercept,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressTLSPolicy) Reset() {
-	*x = EgressTLSPolicy{}
-	mi := &file_atelet_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressTLSPolicy) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressTLSPolicy) ProtoMessage() {}
-
-func (x *EgressTLSPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressTLSPolicy.ProtoReflect.Descriptor instead.
-func (*EgressTLSPolicy) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *EgressTLSPolicy) GetMode() string {
-	if x != nil {
-		return x.Mode
-	}
-	return ""
-}
-
-func (x *EgressTLSPolicy) GetRequired() bool {
-	if x != nil {
-		return x.Required
-	}
-	return false
-}
-
-func (x *EgressTLSPolicy) GetIntercept() *EgressTLSInterceptPolicy {
-	if x != nil {
-		return x.Intercept
-	}
-	return nil
-}
-
-type EgressTLSInterceptPolicy struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	IssuerSecretRef  *SecretReference       `protobuf:"bytes,1,opt,name=issuer_secret_ref,json=issuerSecretRef,proto3" json:"issuer_secret_ref,omitempty"`
-	ValidateUpstream bool                   `protobuf:"varint,2,opt,name=validate_upstream,json=validateUpstream,proto3" json:"validate_upstream,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *EgressTLSInterceptPolicy) Reset() {
-	*x = EgressTLSInterceptPolicy{}
-	mi := &file_atelet_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressTLSInterceptPolicy) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressTLSInterceptPolicy) ProtoMessage() {}
-
-func (x *EgressTLSInterceptPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressTLSInterceptPolicy.ProtoReflect.Descriptor instead.
-func (*EgressTLSInterceptPolicy) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *EgressTLSInterceptPolicy) GetIssuerSecretRef() *SecretReference {
-	if x != nil {
-		return x.IssuerSecretRef
-	}
-	return nil
-}
-
-func (x *EgressTLSInterceptPolicy) GetValidateUpstream() bool {
-	if x != nil {
-		return x.ValidateUpstream
-	}
-	return false
-}
-
-type EgressCredentialPolicy struct {
-	state         protoimpl.MessageState       `protogen:"open.v1"`
-	Inject        []*EgressCredentialInjection `protobuf:"bytes,1,rep,name=inject,proto3" json:"inject,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressCredentialPolicy) Reset() {
-	*x = EgressCredentialPolicy{}
-	mi := &file_atelet_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressCredentialPolicy) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressCredentialPolicy) ProtoMessage() {}
-
-func (x *EgressCredentialPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressCredentialPolicy.ProtoReflect.Descriptor instead.
-func (*EgressCredentialPolicy) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *EgressCredentialPolicy) GetInject() []*EgressCredentialInjection {
-	if x != nil {
-		return x.Inject
-	}
-	return nil
-}
-
-type EgressCredentialInjection struct {
-	state         protoimpl.MessageState     `protogen:"open.v1"`
-	Header        string                     `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
-	ValueFrom     *EgressCredentialValueFrom `protobuf:"bytes,2,opt,name=value_from,json=valueFrom,proto3" json:"value_from,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressCredentialInjection) Reset() {
-	*x = EgressCredentialInjection{}
-	mi := &file_atelet_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressCredentialInjection) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressCredentialInjection) ProtoMessage() {}
-
-func (x *EgressCredentialInjection) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressCredentialInjection.ProtoReflect.Descriptor instead.
-func (*EgressCredentialInjection) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *EgressCredentialInjection) GetHeader() string {
-	if x != nil {
-		return x.Header
-	}
-	return ""
-}
-
-func (x *EgressCredentialInjection) GetValueFrom() *EgressCredentialValueFrom {
-	if x != nil {
-		return x.ValueFrom
-	}
-	return nil
-}
-
-type EgressCredentialValueFrom struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SecretKeyRef  *SecretKeySelector     `protobuf:"bytes,1,opt,name=secret_key_ref,json=secretKeyRef,proto3" json:"secret_key_ref,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressCredentialValueFrom) Reset() {
-	*x = EgressCredentialValueFrom{}
-	mi := &file_atelet_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressCredentialValueFrom) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressCredentialValueFrom) ProtoMessage() {}
-
-func (x *EgressCredentialValueFrom) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressCredentialValueFrom.ProtoReflect.Descriptor instead.
-func (*EgressCredentialValueFrom) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *EgressCredentialValueFrom) GetSecretKeyRef() *SecretKeySelector {
-	if x != nil {
-		return x.SecretKeyRef
-	}
-	return nil
-}
-
-type EgressAuditPolicy struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Logs          bool                   `protobuf:"varint,1,opt,name=logs,proto3" json:"logs,omitempty"`
-	Traces        bool                   `protobuf:"varint,2,opt,name=traces,proto3" json:"traces,omitempty"`
-	RedactHeaders []string               `protobuf:"bytes,3,rep,name=redact_headers,json=redactHeaders,proto3" json:"redact_headers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EgressAuditPolicy) Reset() {
-	*x = EgressAuditPolicy{}
-	mi := &file_atelet_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EgressAuditPolicy) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EgressAuditPolicy) ProtoMessage() {}
-
-func (x *EgressAuditPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EgressAuditPolicy.ProtoReflect.Descriptor instead.
-func (*EgressAuditPolicy) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *EgressAuditPolicy) GetLogs() bool {
-	if x != nil {
-		return x.Logs
-	}
-	return false
-}
-
-func (x *EgressAuditPolicy) GetTraces() bool {
-	if x != nil {
-		return x.Traces
-	}
-	return false
-}
-
-func (x *EgressAuditPolicy) GetRedactHeaders() []string {
-	if x != nil {
-		return x.RedactHeaders
-	}
-	return nil
-}
-
-type SecretReference struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SecretReference) Reset() {
-	*x = SecretReference{}
-	mi := &file_atelet_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SecretReference) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SecretReference) ProtoMessage() {}
-
-func (x *SecretReference) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SecretReference.ProtoReflect.Descriptor instead.
-func (*SecretReference) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *SecretReference) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *SecretReference) GetNamespace() string {
-	if x != nil {
-		return x.Namespace
-	}
-	return ""
-}
-
-type SecretKeySelector struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SecretKeySelector) Reset() {
-	*x = SecretKeySelector{}
-	mi := &file_atelet_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SecretKeySelector) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SecretKeySelector) ProtoMessage() {}
-
-func (x *SecretKeySelector) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SecretKeySelector.ProtoReflect.Descriptor instead.
-func (*SecretKeySelector) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *SecretKeySelector) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *SecretKeySelector) GetKey() string {
-	if x != nil {
-		return x.Key
-	}
-	return ""
-}
-
 type RunResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1168,7 +513,7 @@ type RunResponse struct {
 
 func (x *RunResponse) Reset() {
 	*x = RunResponse{}
-	mi := &file_atelet_proto_msgTypes[20]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +525,7 @@ func (x *RunResponse) String() string {
 func (*RunResponse) ProtoMessage() {}
 
 func (x *RunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[20]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,7 +538,7 @@ func (x *RunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunResponse.ProtoReflect.Descriptor instead.
 func (*RunResponse) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{20}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{8}
 }
 
 type CheckpointRequest struct {
@@ -1221,7 +566,7 @@ type CheckpointRequest struct {
 
 func (x *CheckpointRequest) Reset() {
 	*x = CheckpointRequest{}
-	mi := &file_atelet_proto_msgTypes[21]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1233,7 +578,7 @@ func (x *CheckpointRequest) String() string {
 func (*CheckpointRequest) ProtoMessage() {}
 
 func (x *CheckpointRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[21]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1246,7 +591,7 @@ func (x *CheckpointRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointRequest.ProtoReflect.Descriptor instead.
 func (*CheckpointRequest) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{21}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CheckpointRequest) GetTargetAteomUid() string {
@@ -1306,7 +651,7 @@ type CheckpointResponse struct {
 
 func (x *CheckpointResponse) Reset() {
 	*x = CheckpointResponse{}
-	mi := &file_atelet_proto_msgTypes[22]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +663,7 @@ func (x *CheckpointResponse) String() string {
 func (*CheckpointResponse) ProtoMessage() {}
 
 func (x *CheckpointResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[22]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +676,7 @@ func (x *CheckpointResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointResponse.ProtoReflect.Descriptor instead.
 func (*CheckpointResponse) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{22}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{10}
 }
 
 type RestoreRequest struct {
@@ -1350,7 +695,7 @@ type RestoreRequest struct {
 
 func (x *RestoreRequest) Reset() {
 	*x = RestoreRequest{}
-	mi := &file_atelet_proto_msgTypes[23]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +707,7 @@ func (x *RestoreRequest) String() string {
 func (*RestoreRequest) ProtoMessage() {}
 
 func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[23]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +720,7 @@ func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
 func (*RestoreRequest) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{23}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RestoreRequest) GetTargetAteomUid() string {
@@ -1435,7 +780,7 @@ type RestoreResponse struct {
 
 func (x *RestoreResponse) Reset() {
 	*x = RestoreResponse{}
-	mi := &file_atelet_proto_msgTypes[24]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1447,7 +792,7 @@ func (x *RestoreResponse) String() string {
 func (*RestoreResponse) ProtoMessage() {}
 
 func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atelet_proto_msgTypes[24]
+	mi := &file_internal_proto_ateletpb_atelet_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1460,14 +805,14 @@ func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreResponse.ProtoReflect.Descriptor instead.
 func (*RestoreResponse) Descriptor() ([]byte, []int) {
-	return file_atelet_proto_rawDescGZIP(), []int{24}
+	return file_internal_proto_ateletpb_atelet_proto_rawDescGZIP(), []int{12}
 }
 
-var File_atelet_proto protoreflect.FileDescriptor
+var File_internal_proto_ateletpb_atelet_proto protoreflect.FileDescriptor
 
-const file_atelet_proto_rawDesc = "" +
+const file_internal_proto_ateletpb_atelet_proto_rawDesc = "" +
 	"\n" +
-	"\fatelet.proto\x12\x06atelet\"\x90\x02\n" +
+	"$internal/proto/ateletpb/atelet.proto\x12\x06atelet\x1a$internal/proto/egresspb/egress.proto\"\x90\x02\n" +
 	"\n" +
 	"RunRequest\x12(\n" +
 	"\x10target_ateom_uid\x18\x01 \x01(\tR\x0etargetAteomUid\x128\n" +
@@ -1494,7 +839,7 @@ const file_atelet_proto_rawDesc = "" +
 	"containers\x12\x1f\n" +
 	"\vpause_image\x18\x02 \x01(\tR\n" +
 	"pauseImage\x129\n" +
-	"\regress_policy\x18\x03 \x01(\v2\x14.atelet.EgressPolicyR\fegressPolicy\"s\n" +
+	"\regress_policy\x18\x03 \x01(\v2\x14.egress.EgressPolicyR\fegressPolicy\"s\n" +
 	"\tContainer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
@@ -1502,49 +847,7 @@ const file_atelet_proto_rawDesc = "" +
 	"\x03env\x18\x04 \x03(\v2\x10.atelet.EnvEntryR\x03env\"4\n" +
 	"\bEnvEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xc4\x01\n" +
-	"\fEgressPolicy\x12%\n" +
-	"\x0edefault_action\x18\x01 \x01(\tR\rdefaultAction\x12.\n" +
-	"\x05allow\x18\x02 \x03(\v2\x18.atelet.EgressPolicyRuleR\x05allow\x12,\n" +
-	"\x04deny\x18\x03 \x03(\v2\x18.atelet.EgressPolicyRuleR\x04deny\x12/\n" +
-	"\x05audit\x18\x04 \x01(\v2\x19.atelet.EgressAuditPolicyR\x05audit\"\xda\x01\n" +
-	"\x10EgressPolicyRule\x12/\n" +
-	"\x02to\x18\x01 \x03(\v2\x1f.atelet.EgressPolicyDestinationR\x02to\x12(\n" +
-	"\x05ports\x18\x02 \x03(\v2\x12.atelet.EgressPortR\x05ports\x12)\n" +
-	"\x03tls\x18\x03 \x01(\v2\x17.atelet.EgressTLSPolicyR\x03tls\x12@\n" +
-	"\vcredentials\x18\x04 \x01(\v2\x1e.atelet.EgressCredentialPolicyR\vcredentials\"A\n" +
-	"\x17EgressPolicyDestination\x12\x12\n" +
-	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
-	"\x04cidr\x18\x02 \x01(\tR\x04cidr\"<\n" +
-	"\n" +
-	"EgressPort\x12\x12\n" +
-	"\x04port\x18\x01 \x01(\rR\x04port\x12\x1a\n" +
-	"\bprotocol\x18\x02 \x01(\tR\bprotocol\"\x81\x01\n" +
-	"\x0fEgressTLSPolicy\x12\x12\n" +
-	"\x04mode\x18\x01 \x01(\tR\x04mode\x12\x1a\n" +
-	"\brequired\x18\x02 \x01(\bR\brequired\x12>\n" +
-	"\tintercept\x18\x03 \x01(\v2 .atelet.EgressTLSInterceptPolicyR\tintercept\"\x8c\x01\n" +
-	"\x18EgressTLSInterceptPolicy\x12C\n" +
-	"\x11issuer_secret_ref\x18\x01 \x01(\v2\x17.atelet.SecretReferenceR\x0fissuerSecretRef\x12+\n" +
-	"\x11validate_upstream\x18\x02 \x01(\bR\x10validateUpstream\"S\n" +
-	"\x16EgressCredentialPolicy\x129\n" +
-	"\x06inject\x18\x01 \x03(\v2!.atelet.EgressCredentialInjectionR\x06inject\"u\n" +
-	"\x19EgressCredentialInjection\x12\x16\n" +
-	"\x06header\x18\x01 \x01(\tR\x06header\x12@\n" +
-	"\n" +
-	"value_from\x18\x02 \x01(\v2!.atelet.EgressCredentialValueFromR\tvalueFrom\"\\\n" +
-	"\x19EgressCredentialValueFrom\x12?\n" +
-	"\x0esecret_key_ref\x18\x01 \x01(\v2\x19.atelet.SecretKeySelectorR\fsecretKeyRef\"f\n" +
-	"\x11EgressAuditPolicy\x12\x12\n" +
-	"\x04logs\x18\x01 \x01(\bR\x04logs\x12\x16\n" +
-	"\x06traces\x18\x02 \x01(\bR\x06traces\x12%\n" +
-	"\x0eredact_headers\x18\x03 \x03(\tR\rredactHeaders\"C\n" +
-	"\x0fSecretReference\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace\"9\n" +
-	"\x11SecretKeySelector\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\tR\x03key\"\r\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\r\n" +
 	"\vRunResponse\"\xc7\x02\n" +
 	"\x11CheckpointRequest\x12(\n" +
 	"\x10target_ateom_uid\x18\x01 \x01(\tR\x0etargetAteomUid\x128\n" +
@@ -1571,46 +874,35 @@ const file_atelet_proto_rawDesc = "" +
 	"\aRestore\x12\x16.atelet.RestoreRequest\x1a\x17.atelet.RestoreResponse\"\x00B>Z<github.com/agent-substrate/substrate/internal/proto/ateletpbb\x06proto3"
 
 var (
-	file_atelet_proto_rawDescOnce sync.Once
-	file_atelet_proto_rawDescData []byte
+	file_internal_proto_ateletpb_atelet_proto_rawDescOnce sync.Once
+	file_internal_proto_ateletpb_atelet_proto_rawDescData []byte
 )
 
-func file_atelet_proto_rawDescGZIP() []byte {
-	file_atelet_proto_rawDescOnce.Do(func() {
-		file_atelet_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_atelet_proto_rawDesc), len(file_atelet_proto_rawDesc)))
+func file_internal_proto_ateletpb_atelet_proto_rawDescGZIP() []byte {
+	file_internal_proto_ateletpb_atelet_proto_rawDescOnce.Do(func() {
+		file_internal_proto_ateletpb_atelet_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_proto_ateletpb_atelet_proto_rawDesc), len(file_internal_proto_ateletpb_atelet_proto_rawDesc)))
 	})
-	return file_atelet_proto_rawDescData
+	return file_internal_proto_ateletpb_atelet_proto_rawDescData
 }
 
-var file_atelet_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
-var file_atelet_proto_goTypes = []any{
-	(*RunRequest)(nil),                // 0: atelet.RunRequest
-	(*GCPAuthenticationConfig)(nil),   // 1: atelet.GCPAuthenticationConfig
-	(*AuthenticationConfig)(nil),      // 2: atelet.AuthenticationConfig
-	(*RunscPlatformConfig)(nil),       // 3: atelet.RunscPlatformConfig
-	(*RunscConfig)(nil),               // 4: atelet.RunscConfig
-	(*WorkloadSpec)(nil),              // 5: atelet.WorkloadSpec
-	(*Container)(nil),                 // 6: atelet.Container
-	(*EnvEntry)(nil),                  // 7: atelet.EnvEntry
-	(*EgressPolicy)(nil),              // 8: atelet.EgressPolicy
-	(*EgressPolicyRule)(nil),          // 9: atelet.EgressPolicyRule
-	(*EgressPolicyDestination)(nil),   // 10: atelet.EgressPolicyDestination
-	(*EgressPort)(nil),                // 11: atelet.EgressPort
-	(*EgressTLSPolicy)(nil),           // 12: atelet.EgressTLSPolicy
-	(*EgressTLSInterceptPolicy)(nil),  // 13: atelet.EgressTLSInterceptPolicy
-	(*EgressCredentialPolicy)(nil),    // 14: atelet.EgressCredentialPolicy
-	(*EgressCredentialInjection)(nil), // 15: atelet.EgressCredentialInjection
-	(*EgressCredentialValueFrom)(nil), // 16: atelet.EgressCredentialValueFrom
-	(*EgressAuditPolicy)(nil),         // 17: atelet.EgressAuditPolicy
-	(*SecretReference)(nil),           // 18: atelet.SecretReference
-	(*SecretKeySelector)(nil),         // 19: atelet.SecretKeySelector
-	(*RunResponse)(nil),               // 20: atelet.RunResponse
-	(*CheckpointRequest)(nil),         // 21: atelet.CheckpointRequest
-	(*CheckpointResponse)(nil),        // 22: atelet.CheckpointResponse
-	(*RestoreRequest)(nil),            // 23: atelet.RestoreRequest
-	(*RestoreResponse)(nil),           // 24: atelet.RestoreResponse
+var file_internal_proto_ateletpb_atelet_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_internal_proto_ateletpb_atelet_proto_goTypes = []any{
+	(*RunRequest)(nil),              // 0: atelet.RunRequest
+	(*GCPAuthenticationConfig)(nil), // 1: atelet.GCPAuthenticationConfig
+	(*AuthenticationConfig)(nil),    // 2: atelet.AuthenticationConfig
+	(*RunscPlatformConfig)(nil),     // 3: atelet.RunscPlatformConfig
+	(*RunscConfig)(nil),             // 4: atelet.RunscConfig
+	(*WorkloadSpec)(nil),            // 5: atelet.WorkloadSpec
+	(*Container)(nil),               // 6: atelet.Container
+	(*EnvEntry)(nil),                // 7: atelet.EnvEntry
+	(*RunResponse)(nil),             // 8: atelet.RunResponse
+	(*CheckpointRequest)(nil),       // 9: atelet.CheckpointRequest
+	(*CheckpointResponse)(nil),      // 10: atelet.CheckpointResponse
+	(*RestoreRequest)(nil),          // 11: atelet.RestoreRequest
+	(*RestoreResponse)(nil),         // 12: atelet.RestoreResponse
+	(*egresspb.EgressPolicy)(nil),   // 13: egress.EgressPolicy
 }
-var file_atelet_proto_depIdxs = []int32{
+var file_internal_proto_ateletpb_atelet_proto_depIdxs = []int32{
 	4,  // 0: atelet.RunRequest.runsc:type_name -> atelet.RunscConfig
 	5,  // 1: atelet.RunRequest.spec:type_name -> atelet.WorkloadSpec
 	1,  // 2: atelet.AuthenticationConfig.gcp:type_name -> atelet.GCPAuthenticationConfig
@@ -1618,57 +910,45 @@ var file_atelet_proto_depIdxs = []int32{
 	3,  // 4: atelet.RunscConfig.arm64:type_name -> atelet.RunscPlatformConfig
 	2,  // 5: atelet.RunscConfig.authentication:type_name -> atelet.AuthenticationConfig
 	6,  // 6: atelet.WorkloadSpec.containers:type_name -> atelet.Container
-	8,  // 7: atelet.WorkloadSpec.egress_policy:type_name -> atelet.EgressPolicy
+	13, // 7: atelet.WorkloadSpec.egress_policy:type_name -> egress.EgressPolicy
 	7,  // 8: atelet.Container.env:type_name -> atelet.EnvEntry
-	9,  // 9: atelet.EgressPolicy.allow:type_name -> atelet.EgressPolicyRule
-	9,  // 10: atelet.EgressPolicy.deny:type_name -> atelet.EgressPolicyRule
-	17, // 11: atelet.EgressPolicy.audit:type_name -> atelet.EgressAuditPolicy
-	10, // 12: atelet.EgressPolicyRule.to:type_name -> atelet.EgressPolicyDestination
-	11, // 13: atelet.EgressPolicyRule.ports:type_name -> atelet.EgressPort
-	12, // 14: atelet.EgressPolicyRule.tls:type_name -> atelet.EgressTLSPolicy
-	14, // 15: atelet.EgressPolicyRule.credentials:type_name -> atelet.EgressCredentialPolicy
-	13, // 16: atelet.EgressTLSPolicy.intercept:type_name -> atelet.EgressTLSInterceptPolicy
-	18, // 17: atelet.EgressTLSInterceptPolicy.issuer_secret_ref:type_name -> atelet.SecretReference
-	15, // 18: atelet.EgressCredentialPolicy.inject:type_name -> atelet.EgressCredentialInjection
-	16, // 19: atelet.EgressCredentialInjection.value_from:type_name -> atelet.EgressCredentialValueFrom
-	19, // 20: atelet.EgressCredentialValueFrom.secret_key_ref:type_name -> atelet.SecretKeySelector
-	4,  // 21: atelet.CheckpointRequest.runsc:type_name -> atelet.RunscConfig
-	5,  // 22: atelet.CheckpointRequest.spec:type_name -> atelet.WorkloadSpec
-	4,  // 23: atelet.RestoreRequest.runsc:type_name -> atelet.RunscConfig
-	5,  // 24: atelet.RestoreRequest.spec:type_name -> atelet.WorkloadSpec
-	0,  // 25: atelet.AteomHerder.Run:input_type -> atelet.RunRequest
-	21, // 26: atelet.AteomHerder.Checkpoint:input_type -> atelet.CheckpointRequest
-	23, // 27: atelet.AteomHerder.Restore:input_type -> atelet.RestoreRequest
-	20, // 28: atelet.AteomHerder.Run:output_type -> atelet.RunResponse
-	22, // 29: atelet.AteomHerder.Checkpoint:output_type -> atelet.CheckpointResponse
-	24, // 30: atelet.AteomHerder.Restore:output_type -> atelet.RestoreResponse
-	28, // [28:31] is the sub-list for method output_type
-	25, // [25:28] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	4,  // 9: atelet.CheckpointRequest.runsc:type_name -> atelet.RunscConfig
+	5,  // 10: atelet.CheckpointRequest.spec:type_name -> atelet.WorkloadSpec
+	4,  // 11: atelet.RestoreRequest.runsc:type_name -> atelet.RunscConfig
+	5,  // 12: atelet.RestoreRequest.spec:type_name -> atelet.WorkloadSpec
+	0,  // 13: atelet.AteomHerder.Run:input_type -> atelet.RunRequest
+	9,  // 14: atelet.AteomHerder.Checkpoint:input_type -> atelet.CheckpointRequest
+	11, // 15: atelet.AteomHerder.Restore:input_type -> atelet.RestoreRequest
+	8,  // 16: atelet.AteomHerder.Run:output_type -> atelet.RunResponse
+	10, // 17: atelet.AteomHerder.Checkpoint:output_type -> atelet.CheckpointResponse
+	12, // 18: atelet.AteomHerder.Restore:output_type -> atelet.RestoreResponse
+	16, // [16:19] is the sub-list for method output_type
+	13, // [13:16] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
-func init() { file_atelet_proto_init() }
-func file_atelet_proto_init() {
-	if File_atelet_proto != nil {
+func init() { file_internal_proto_ateletpb_atelet_proto_init() }
+func file_internal_proto_ateletpb_atelet_proto_init() {
+	if File_internal_proto_ateletpb_atelet_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atelet_proto_rawDesc), len(file_atelet_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_ateletpb_atelet_proto_rawDesc), len(file_internal_proto_ateletpb_atelet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_atelet_proto_goTypes,
-		DependencyIndexes: file_atelet_proto_depIdxs,
-		MessageInfos:      file_atelet_proto_msgTypes,
+		GoTypes:           file_internal_proto_ateletpb_atelet_proto_goTypes,
+		DependencyIndexes: file_internal_proto_ateletpb_atelet_proto_depIdxs,
+		MessageInfos:      file_internal_proto_ateletpb_atelet_proto_msgTypes,
 	}.Build()
-	File_atelet_proto = out.File
-	file_atelet_proto_goTypes = nil
-	file_atelet_proto_depIdxs = nil
+	File_internal_proto_ateletpb_atelet_proto = out.File
+	file_internal_proto_ateletpb_atelet_proto_goTypes = nil
+	file_internal_proto_ateletpb_atelet_proto_depIdxs = nil
 }

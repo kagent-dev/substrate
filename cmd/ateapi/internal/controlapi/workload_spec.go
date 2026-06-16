@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
+	"github.com/agent-substrate/substrate/internal/proto/egresspb"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -90,11 +91,11 @@ func checkpointWorkloadSpecFromActorTemplate(actorTemplate *atev1alpha1.ActorTem
 	return workloadSpec
 }
 
-func buildAteletEgressPolicy(policy *atev1alpha1.EgressPolicy) *ateletpb.EgressPolicy {
+func buildAteletEgressPolicy(policy *atev1alpha1.EgressPolicy) *egresspb.EgressPolicy {
 	if policy == nil {
 		return nil
 	}
-	return &ateletpb.EgressPolicy{
+	return &egresspb.EgressPolicy{
 		DefaultAction: string(policy.DefaultAction),
 		Allow:         buildAteletEgressPolicyRules(policy.Allow),
 		Deny:          buildAteletEgressPolicyRules(policy.Deny),
@@ -102,30 +103,30 @@ func buildAteletEgressPolicy(policy *atev1alpha1.EgressPolicy) *ateletpb.EgressP
 	}
 }
 
-func buildAteletEgressAuditPolicy(policy *atev1alpha1.EgressAuditPolicy) *ateletpb.EgressAuditPolicy {
+func buildAteletEgressAuditPolicy(policy *atev1alpha1.EgressAuditPolicy) *egresspb.EgressAuditPolicy {
 	if policy == nil {
 		return nil
 	}
-	return &ateletpb.EgressAuditPolicy{
+	return &egresspb.EgressAuditPolicy{
 		Logs:          policy.Logs,
 		Traces:        policy.Traces,
 		RedactHeaders: append([]string(nil), policy.RedactHeaders...),
 	}
 }
 
-func buildAteletEgressPolicyRules(rules []atev1alpha1.EgressPolicyRule) []*ateletpb.EgressPolicyRule {
-	out := make([]*ateletpb.EgressPolicyRule, 0, len(rules))
+func buildAteletEgressPolicyRules(rules []atev1alpha1.EgressPolicyRule) []*egresspb.EgressPolicyRule {
+	out := make([]*egresspb.EgressPolicyRule, 0, len(rules))
 	for _, rule := range rules {
-		outRule := &ateletpb.EgressPolicyRule{}
+		outRule := &egresspb.EgressPolicyRule{}
 		for _, dest := range rule.To {
-			outDest := &ateletpb.EgressPolicyDestination{Host: dest.Host}
+			outDest := &egresspb.EgressPolicyDestination{Host: dest.Host}
 			if dest.IPBlock != nil {
 				outDest.Cidr = dest.IPBlock.CIDR
 			}
 			outRule.To = append(outRule.To, outDest)
 		}
 		for _, port := range rule.Ports {
-			outRule.Ports = append(outRule.Ports, &ateletpb.EgressPort{
+			outRule.Ports = append(outRule.Ports, &egresspb.EgressPort{
 				Port:     uint32(port.Port),
 				Protocol: string(port.Protocol),
 			})
@@ -137,20 +138,20 @@ func buildAteletEgressPolicyRules(rules []atev1alpha1.EgressPolicyRule) []*atele
 	return out
 }
 
-func buildAteletEgressTLSPolicy(policy *atev1alpha1.EgressTLSPolicy) *ateletpb.EgressTLSPolicy {
+func buildAteletEgressTLSPolicy(policy *atev1alpha1.EgressTLSPolicy) *egresspb.EgressTLSPolicy {
 	if policy == nil {
 		return nil
 	}
-	out := &ateletpb.EgressTLSPolicy{
+	out := &egresspb.EgressTLSPolicy{
 		Mode:     string(policy.Mode),
 		Required: policy.Required,
 	}
 	if policy.Intercept != nil {
-		out.Intercept = &ateletpb.EgressTLSInterceptPolicy{
+		out.Intercept = &egresspb.EgressTLSInterceptPolicy{
 			ValidateUpstream: policy.Intercept.ValidateUpstream,
 		}
 		if policy.Intercept.IssuerSecretRef != nil {
-			out.Intercept.IssuerSecretRef = &ateletpb.SecretReference{
+			out.Intercept.IssuerSecretRef = &egresspb.SecretReference{
 				Name:      policy.Intercept.IssuerSecretRef.Name,
 				Namespace: policy.Intercept.IssuerSecretRef.Namespace,
 			}
@@ -159,18 +160,18 @@ func buildAteletEgressTLSPolicy(policy *atev1alpha1.EgressTLSPolicy) *ateletpb.E
 	return out
 }
 
-func buildAteletEgressCredentialPolicy(policy *atev1alpha1.EgressCredentialPolicy) *ateletpb.EgressCredentialPolicy {
+func buildAteletEgressCredentialPolicy(policy *atev1alpha1.EgressCredentialPolicy) *egresspb.EgressCredentialPolicy {
 	if policy == nil {
 		return nil
 	}
-	out := &ateletpb.EgressCredentialPolicy{}
+	out := &egresspb.EgressCredentialPolicy{}
 	for _, injection := range policy.Inject {
-		outInjection := &ateletpb.EgressCredentialInjection{
+		outInjection := &egresspb.EgressCredentialInjection{
 			Header: injection.Header,
 		}
 		if injection.ValueFrom.SecretKeyRef != nil {
-			outInjection.ValueFrom = &ateletpb.EgressCredentialValueFrom{
-				SecretKeyRef: &ateletpb.SecretKeySelector{
+			outInjection.ValueFrom = &egresspb.EgressCredentialValueFrom{
+				SecretKeyRef: &egresspb.SecretKeySelector{
 					Name: injection.ValueFrom.SecretKeyRef.Name,
 					Key:  injection.ValueFrom.SecretKeyRef.Key,
 				},

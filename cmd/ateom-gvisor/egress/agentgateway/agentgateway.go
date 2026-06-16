@@ -28,7 +28,7 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateom-gvisor/egress"
 	"github.com/agent-substrate/substrate/internal/ateompath"
-	"github.com/agent-substrate/substrate/internal/proto/ateompb"
+	"github.com/agent-substrate/substrate/internal/proto/egresspb"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,7 +61,7 @@ func (p Provider) CapturePorts() egress.CapturePorts {
 	}
 }
 
-func (p Provider) NeedsGateway(policy *ateompb.EgressPolicy) bool {
+func (p Provider) NeedsGateway(policy *egresspb.EgressPolicy) bool {
 	return PolicyNeedsAgentgateway(policy)
 }
 
@@ -107,7 +107,7 @@ func NewManager(ctx context.Context, binaryPath, podUID string, reapLock *sync.R
 	return manager, nil
 }
 
-func (m *Manager) ApplyPolicy(ctx context.Context, defaultNamespace string, policy *ateompb.EgressPolicy) error {
+func (m *Manager) ApplyPolicy(ctx context.Context, defaultNamespace string, policy *egresspb.EgressPolicy) error {
 	if m == nil {
 		return nil
 	}
@@ -176,7 +176,7 @@ func (m *Manager) stopLocked(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) writeConfig(ctx context.Context, defaultNamespace string, policy *ateompb.EgressPolicy) error {
+func (m *Manager) writeConfig(ctx context.Context, defaultNamespace string, policy *egresspb.EgressPolicy) error {
 	if err := os.MkdirAll(filepath.Dir(m.configPath), 0o700); err != nil {
 		return fmt.Errorf("while creating egress agentgateway config directory: %w", err)
 	}
@@ -193,7 +193,7 @@ func (m *Manager) writeConfig(ctx context.Context, defaultNamespace string, poli
 	return nil
 }
 
-func PolicyNeedsAgentgateway(policy *ateompb.EgressPolicy) bool {
+func PolicyNeedsAgentgateway(policy *egresspb.EgressPolicy) bool {
 	if policy == nil {
 		return false
 	}
@@ -218,7 +218,7 @@ func PolicyNeedsAgentgateway(policy *ateompb.EgressPolicy) bool {
 	return false
 }
 
-func egressRuleHasTransparentTLSRoute(rule *ateompb.EgressPolicyRule) bool {
+func egressRuleHasTransparentTLSRoute(rule *egresspb.EgressPolicyRule) bool {
 	hasHost := false
 	for _, dest := range rule.GetTo() {
 		if dest.GetHost() != "" {
@@ -237,7 +237,7 @@ func egressRuleHasTransparentTLSRoute(rule *ateompb.EgressPolicyRule) bool {
 	return false
 }
 
-func egressRuleHasTransparentHTTPRoute(rule *ateompb.EgressPolicyRule) bool {
+func egressRuleHasTransparentHTTPRoute(rule *egresspb.EgressPolicyRule) bool {
 	hasHost := false
 	for _, dest := range rule.GetTo() {
 		if dest.GetHost() != "" {
@@ -336,7 +336,7 @@ type localAgentgatewayBackendPolicies struct {
 	BackendTLS map[string]any `json:"backendTLS,omitempty"`
 }
 
-func renderEgressAgentgatewayConfig(ctx context.Context, secrets secretResolver, defaultNamespace, tlsDir string, policy *ateompb.EgressPolicy) ([]byte, error) {
+func renderEgressAgentgatewayConfig(ctx context.Context, secrets secretResolver, defaultNamespace, tlsDir string, policy *egresspb.EgressPolicy) ([]byte, error) {
 	cfg := localAgentgatewayConfig{
 		Config: localAgentgatewaySettings{
 			AdminAddr:     "127.0.0.1:15000",
@@ -403,7 +403,7 @@ func renderEgressAgentgatewayConfig(ctx context.Context, secrets secretResolver,
 	return append([]byte("# yaml-language-server: $schema=https://agentgateway.dev/schema/config\n"), out...), nil
 }
 
-func routesForEgressRule(ctx context.Context, secrets secretResolver, defaultNamespace, _ string, rule *ateompb.EgressPolicyRule) ([]localAgentgatewayRoute, error) {
+func routesForEgressRule(ctx context.Context, secrets secretResolver, defaultNamespace, _ string, rule *egresspb.EgressPolicyRule) ([]localAgentgatewayRoute, error) {
 	var routes []localAgentgatewayRoute
 	for _, dest := range rule.GetTo() {
 		host := dest.GetHost()
@@ -442,7 +442,7 @@ func routesForEgressRule(ctx context.Context, secrets secretResolver, defaultNam
 	return routes, nil
 }
 
-func tcpRoutesForEgressRule(rule *ateompb.EgressPolicyRule) []localAgentgatewayTCPRoute {
+func tcpRoutesForEgressRule(rule *egresspb.EgressPolicyRule) []localAgentgatewayTCPRoute {
 	var routes []localAgentgatewayTCPRoute
 	for _, dest := range rule.GetTo() {
 		host := dest.GetHost()
@@ -482,7 +482,7 @@ func egressAuthorityMatches(host string, port uint32) []localAgentgatewayMatch {
 	return matches
 }
 
-func egressInjectedHeaders(ctx context.Context, secrets secretResolver, defaultNamespace string, policy *ateompb.EgressCredentialPolicy) (map[string]string, error) {
+func egressInjectedHeaders(ctx context.Context, secrets secretResolver, defaultNamespace string, policy *egresspb.EgressCredentialPolicy) (map[string]string, error) {
 	if policy == nil || len(policy.GetInject()) == 0 {
 		return nil, nil
 	}
@@ -508,7 +508,7 @@ func egressInjectedHeaders(ctx context.Context, secrets secretResolver, defaultN
 	return headers, nil
 }
 
-func backendTLSForEgressRule(rule *ateompb.EgressPolicyRule, host string) map[string]any {
+func backendTLSForEgressRule(rule *egresspb.EgressPolicyRule, host string) map[string]any {
 	backendTLS := map[string]any{
 		"hostname": host,
 	}
@@ -518,7 +518,7 @@ func backendTLSForEgressRule(rule *ateompb.EgressPolicyRule, host string) map[st
 	return backendTLS
 }
 
-func frontendTLSForInterceptRule(ctx context.Context, secrets secretResolver, defaultNamespace, tlsDir string, rule *ateompb.EgressPolicyRule) (*localAgentgatewayFrontendTLS, error) {
+func frontendTLSForInterceptRule(ctx context.Context, secrets secretResolver, defaultNamespace, tlsDir string, rule *egresspb.EgressPolicyRule) (*localAgentgatewayFrontendTLS, error) {
 	if secrets == nil {
 		return nil, fmt.Errorf("egress TLS intercept requires Kubernetes secret access")
 	}
@@ -557,38 +557,38 @@ func denyEgressRoute() localAgentgatewayRoute {
 	}
 }
 
-func egressRuleRequiresBackendTLS(rule *ateompb.EgressPolicyRule) bool {
+func egressRuleRequiresBackendTLS(rule *egresspb.EgressPolicyRule) bool {
 	tls := rule.GetTls()
 	return tls.GetRequired() || tls.GetMode() == "Require" || tls.GetMode() == "Originate" || tls.GetMode() == "Intercept"
 }
 
-func egressPortUsesTLSPassthrough(rule *ateompb.EgressPolicyRule, port *ateompb.EgressPort) bool {
+func egressPortUsesTLSPassthrough(rule *egresspb.EgressPolicyRule, port *egresspb.EgressPort) bool {
 	if !isTCPEgressPort(port) || effectiveEgressPort(port) != 443 {
 		return false
 	}
 	return rule.GetTls().GetMode() != "Intercept"
 }
 
-func effectiveEgressPorts(rule *ateompb.EgressPolicyRule) []*ateompb.EgressPort {
+func effectiveEgressPorts(rule *egresspb.EgressPolicyRule) []*egresspb.EgressPort {
 	ports := rule.GetPorts()
 	if len(ports) == 0 {
-		return []*ateompb.EgressPort{{Port: 443, Protocol: "TCP"}}
+		return []*egresspb.EgressPort{{Port: 443, Protocol: "TCP"}}
 	}
 	return ports
 }
 
-func isTCPEgressPort(port *ateompb.EgressPort) bool {
+func isTCPEgressPort(port *egresspb.EgressPort) bool {
 	return port.GetProtocol() == "" || strings.EqualFold(port.GetProtocol(), "TCP")
 }
 
-func effectiveEgressPort(port *ateompb.EgressPort) uint32 {
+func effectiveEgressPort(port *egresspb.EgressPort) uint32 {
 	if port.GetPort() == 0 {
 		return 443
 	}
 	return port.GetPort()
 }
 
-func localRouteName(host string, port *ateompb.EgressPort) string {
+func localRouteName(host string, port *egresspb.EgressPort) string {
 	base := host
 	base = strings.NewReplacer(".", "-", "_", "-", ":", "-").Replace(base)
 	return fmt.Sprintf("allow-%s-%d", base, effectiveEgressPort(port))
