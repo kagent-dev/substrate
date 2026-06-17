@@ -22,6 +22,7 @@ kind: Kustomization
 # resource. hack/install-ate.sh applies the ConfigMap directly for the targeted
 # single-component redeploys.
 resources:
+  - ../ate-client.yaml
   - ../ate-api-server.yaml
   - ../ate-controller.yaml
   - ./atelet

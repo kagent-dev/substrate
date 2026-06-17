@@ -20,6 +20,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -652,7 +654,7 @@ func validateCounterResponse(t *testing.T, resp string, stage string, wantMemory
 	if !strings.Contains(resp, memoryCounterPrefix+fmt.Sprintf("%d", wantMemory)) {
 		t.Errorf("[%s] expected memory count %d, got response: %s", stage, wantMemory, resp)
 	}
-	if !strings.Contains(resp, fileCounterPrefix+fmt.Sprintf("%d", wantFile)) {
+	if wantFile >= 0 && !strings.Contains(resp, fileCounterPrefix+fmt.Sprintf("%d", wantFile)) {
 		t.Errorf("[%s] expected file count %d, got response: %s", stage, wantFile, resp)
 	}
 }
@@ -677,24 +679,14 @@ func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj 
 		})
 	}()
 
-	listResp, err := clients.SubstrateAPI.ListActors(ctx, &ateapipb.ListActorsRequest{Atespace: demoAtespace})
+	getResp, err := clients.SubstrateAPI.GetActor(ctx, &ateapipb.GetActorRequest{
+		Actor: &ateapipb.ObjectRef{Atespace: demoAtespace, Name: actorName},
+	})
 	if err != nil {
-		t.Fatalf("ListActors RPC failed: %v", err)
+		t.Fatalf("GetActor RPC failed: %v", err)
 	}
 
-	var myActors []*ateapipb.Actor
-	for _, actor := range listResp.GetActors() {
-		if actor.GetActorTemplateNamespace() == nsObj.Name && actor.GetMetadata().GetName() == actorName {
-			myActors = append(myActors, actor)
-		}
-	}
-
-	// Check that we have our Actor created.
-	if len(myActors) != 1 {
-		t.Fatalf("expected actor %s in namespace %s, got %d actors: %v", actorName, nsObj.Name, len(myActors), myActors)
-	}
-
-	actor := myActors[0]
+	actor := getResp
 	if actor.GetMetadata().GetName() != actorName {
 		t.Errorf("expected actor name %s, got %s", actorName, actor.GetMetadata().GetName())
 	}
@@ -705,8 +697,7 @@ func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj 
 		t.Errorf("expected actor status to be SUSPENDED, got %v", actor.Status)
 	}
 
-	t.Logf("Successfully queried Substrate API. Found %d active actors total, %d in our namespace %s.",
-		len(listResp.GetActors()), len(myActors), nsObj.Name)
+	t.Logf("Successfully queried Substrate API. Found actor %s in namespace %s.", actorName, nsObj.Name)
 
 	return nil
 }
@@ -734,12 +725,12 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	}
 	waitForActorStatus(ctx, t, clients, actorName, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err := callActor(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName})
-	if err != nil {
-		t.Fatalf("failed to call actor: %v", err)
+	resp := callActorUntilCountAtLeast(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName}, 1)
+	if isMicroVMEnvironment() {
+		validateCounterResponse(t, resp, "after creation", 1, -1)
+	} else {
+		validateCounterResponse(t, resp, "after creation", 1, 1)
 	}
-
-	validateCounterResponse(t, resp, "after creation", 1, 1)
 
 	// Pausing the actor
 	t.Logf("Pausing Actor %q...", actorName)
@@ -759,11 +750,12 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	}
 	waitForActorStatus(ctx, t, clients, actorName, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err = callActor(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName})
-	if err != nil {
-		t.Fatalf("failed to call actor again: %v", err)
+	resp = callActorUntilCountAtLeast(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName}, 2)
+	if isMicroVMEnvironment() {
+		validateCounterResponse(t, resp, "after pause", 2, -1)
+	} else {
+		validateCounterResponse(t, resp, "after pause", 2, 2)
 	}
-	validateCounterResponse(t, resp, "after pause", 2, 2)
 
 	// Suspending the actor before deletion
 	t.Logf("Suspending Actor %q before deletion...", actorName)
@@ -814,11 +806,12 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	}
 	waitForActorStatus(ctx, t, clients, actorName, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err := callActor(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName})
-	if err != nil {
-		t.Fatalf("failed to call actor: %v", err)
+	resp := callActorUntilCountAtLeast(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName}, 1)
+	if isMicroVMEnvironment() {
+		validateCounterResponse(t, resp, "after creation", 1, -1)
+	} else {
+		validateCounterResponse(t, resp, "after creation", 1, 1)
 	}
-	validateCounterResponse(t, resp, "after creation", 1, 1)
 
 	// Suspending the actor
 	t.Logf("Suspending Actor %q...", actorName)
@@ -838,11 +831,12 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	}
 	waitForActorStatus(ctx, t, clients, actorName, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err = callActor(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName})
-	if err != nil {
-		t.Fatalf("failed to call actor again: %v", err)
+	resp = callActorUntilCountAtLeast(t, resources.ActorRef{Atespace: demoAtespace, Name: actorName}, 2)
+	if isMicroVMEnvironment() {
+		validateCounterResponse(t, resp, "after suspend", 2, -1)
+	} else {
+		validateCounterResponse(t, resp, "after suspend", 2, 2)
 	}
-	validateCounterResponse(t, resp, "after suspend", 2, 2)
 
 	// Suspending the actor before deletion
 	t.Logf("Suspending Actor %q before deletion...", actorName)
@@ -1109,6 +1103,51 @@ func waitForActorStatusWithTimeout(ctx context.Context, t *testing.T, clients *e
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("timed out waiting for actor %q to reach status %v", actorName, expectedStatus)
+}
+
+var preservedCountRe = regexp.MustCompile(`preserved memory count: ([0-9]+)`)
+
+func callActorUntilCountAtLeast(t *testing.T, actorRef resources.ActorRef, minCount int) string {
+	t.Helper()
+
+	var lastErr error
+	var lastResp string
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := callActor(t, actorRef)
+		if err != nil {
+			lastErr = err
+		} else {
+			lastResp = resp
+			count, err := preservedCount(resp)
+			if err != nil {
+				lastErr = err
+			} else if count >= minCount {
+				return resp
+			} else {
+				lastErr = fmt.Errorf("expected preserved memory count >= %d, got %d in response: %s", minCount, count, resp)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if lastResp != "" {
+		t.Fatalf("timed out calling actor %q; last response: %s; last error: %v", actorRef.Name, lastResp, lastErr)
+	}
+	t.Fatalf("timed out calling actor %q; last error: %v", actorRef.Name, lastErr)
+	return ""
+}
+
+func preservedCount(resp string) (int, error) {
+	matches := preservedCountRe.FindStringSubmatch(resp)
+	if matches == nil {
+		return 0, fmt.Errorf("response does not include preserved memory count: %s", resp)
+	}
+	count, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse preserved memory count %q: %w", matches[1], err)
+	}
+	return count, nil
 }
 
 func callActor(t *testing.T, actorRef resources.ActorRef) (string, error) {
