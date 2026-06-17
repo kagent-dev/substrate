@@ -30,6 +30,7 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/actoridjwt"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/localca"
 	"github.com/agent-substrate/substrate/internal/localjwtauthority"
 	"github.com/agent-substrate/substrate/internal/principal"
