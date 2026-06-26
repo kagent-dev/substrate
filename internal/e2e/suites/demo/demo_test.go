@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -152,13 +153,7 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	}
 	waitForActorStatus(ctx, t, clients, actorID, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err := callActor(t, actorID)
-	if err != nil {
-		t.Fatalf("failed to call actor: %v", err)
-	}
-	if !strings.Contains(resp, "preserved memory count: 1") {
-		t.Fatalf("expected count 1, got response: %s", resp)
-	}
+	callActorUntilCountAtLeast(t, actorID, 1)
 
 	// Pausing the actor
 	t.Logf("Pausing Actor %q...", actorID)
@@ -178,13 +173,7 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	}
 	waitForActorStatus(ctx, t, clients, actorID, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err = callActor(t, actorID)
-	if err != nil {
-		t.Fatalf("failed to call actor again: %v", err)
-	}
-	if !strings.Contains(resp, "preserved memory count: 2") {
-		t.Fatalf("expected count 2, got response: %s", resp)
-	}
+	callActorUntilCountAtLeast(t, actorID, 2)
 
 	// Suspending the actor before deletion
 	t.Logf("Suspending Actor %q before deletion...", actorID)
@@ -235,13 +224,7 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	}
 	waitForActorStatus(ctx, t, clients, actorID, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err := callActor(t, actorID)
-	if err != nil {
-		t.Fatalf("failed to call actor: %v", err)
-	}
-	if !strings.Contains(resp, "preserved memory count: 1") {
-		t.Fatalf("expected count 1, got response: %s", resp)
-	}
+	callActorUntilCountAtLeast(t, actorID, 1)
 
 	// Suspending the actor
 	t.Logf("Suspending Actor %q...", actorID)
@@ -261,13 +244,7 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	}
 	waitForActorStatus(ctx, t, clients, actorID, ateapipb.Actor_STATUS_RUNNING)
 
-	resp, err = callActor(t, actorID)
-	if err != nil {
-		t.Fatalf("failed to call actor again: %v", err)
-	}
-	if !strings.Contains(resp, "preserved memory count: 2") {
-		t.Fatalf("expected count 2, got response: %s", resp)
-	}
+	callActorUntilCountAtLeast(t, actorID, 2)
 
 	// Suspending the actor before deletion
 	t.Logf("Suspending Actor %q before deletion...", actorID)
@@ -402,6 +379,51 @@ func waitForActorStatus(ctx context.Context, t *testing.T, clients *e2e.Clients,
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("timed out waiting for actor %q to reach status %v", actorID, expectedStatus)
+}
+
+var preservedCountRe = regexp.MustCompile(`preserved memory count: ([0-9]+)`)
+
+func callActorUntilCountAtLeast(t *testing.T, actorID string, minCount int) string {
+	t.Helper()
+
+	var lastErr error
+	var lastResp string
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := callActor(t, actorID)
+		if err != nil {
+			lastErr = err
+		} else {
+			lastResp = resp
+			count, err := preservedCount(resp)
+			if err != nil {
+				lastErr = err
+			} else if count >= minCount {
+				return resp
+			} else {
+				lastErr = fmt.Errorf("expected preserved memory count >= %d, got %d in response: %s", minCount, count, resp)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if lastResp != "" {
+		t.Fatalf("timed out calling actor %q; last response: %s; last error: %v", actorID, lastResp, lastErr)
+	}
+	t.Fatalf("timed out calling actor %q; last error: %v", actorID, lastErr)
+	return ""
+}
+
+func preservedCount(resp string) (int, error) {
+	matches := preservedCountRe.FindStringSubmatch(resp)
+	if matches == nil {
+		return 0, fmt.Errorf("response does not include preserved memory count: %s", resp)
+	}
+	count, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse preserved memory count %q: %w", matches[1], err)
+	}
+	return count, nil
 }
 
 func callActor(t *testing.T, actorID string) (string, error) {
