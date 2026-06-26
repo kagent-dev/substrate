@@ -20,7 +20,7 @@ metadata:
   name: {{ .Values.ateApiServerEnvVarsConfigMap }}
   namespace: {{ .Release.Namespace }}
 data:
-  ATE_API_REDIS_ADDRESS: {{ .Values.redis.clusterAddress | default (printf "valkey-cluster.%s.svc:6379" .Release.Namespace) | quote }}
+  ATE_API_REDIS_ADDRESS: {{ .Values.redis.clusterAddress | default (printf "%s.%s.svc:6379" (include "substrate.fullname" (list "valkey-cluster" .)) .Release.Namespace) | quote }}
   ATE_API_REDIS_USE_IAM_AUTH: {{ .Values.redis.useIAMAuth | toString | quote }}
   ATE_API_REDIS_TLS_SERVER_NAME: {{ .Values.redis.tlsServerName | quote }}
   ATE_API_REDIS_CLIENT_CERT: {{ .Values.redis.clientCert | default "" | quote }}
