@@ -26,6 +26,7 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/ateredis"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/volume"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
@@ -129,7 +130,7 @@ func setupTestWithVolumePlugins(t *testing.T, ns string, plugins map[string]volu
 
 	// 3. Initialize Informers
 	workerFactory, workerInformer := controlapi.WorkerPodInformer(k8sClient)
-	ateletFactory, ateletInformer := controlapi.AteletInformer(k8sClient)
+	ateletFactory, ateletInformer := controlapi.AteletInformer(k8sClient, installdefaults.SystemNamespace)
 	scFactory := informers.NewSharedInformerFactory(k8sClient, 0)
 	scLister := scFactory.Storage().V1().StorageClasses().Lister()
 

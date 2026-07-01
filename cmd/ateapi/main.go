@@ -37,6 +37,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/credbundle"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/agent-substrate/substrate/internal/volume"
@@ -161,8 +162,13 @@ func main() {
 	sandboxConfigLister := ateFactory.Api().V1alpha1().SandboxConfigs().Lister()
 	csiDriverConfigLister := ateFactory.Api().V1alpha1().CSIDriverConfigs().Lister()
 
+	// atelet shares ateapi's namespace in every supported deployment topology,
+	// so we read it from Kubernetes' downward API rather than expose a flag.
+	ateletNamespace := installdefaults.NamespaceFromPodEnv()
+	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace))
+
 	workerPodInformerFactory, workerPodInformer := controlapi.WorkerPodInformer(clientset)
-	ateletPodInformerFactory, ateletPodInformer := controlapi.AteletInformer(clientset)
+	ateletPodInformerFactory, ateletPodInformer := controlapi.AteletInformer(clientset, ateletNamespace)
 	scInformerFactory := informers.NewSharedInformerFactory(clientset, 0)
 	storageClassLister := scInformerFactory.Storage().V1().StorageClasses().Lister()
 
