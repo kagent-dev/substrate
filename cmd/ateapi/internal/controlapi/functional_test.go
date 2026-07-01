@@ -30,6 +30,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/envtestbins"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
+	"github.com/agent-substrate/substrate/internal/resources"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/client/clientset/versioned"
 	"github.com/agent-substrate/substrate/pkg/client/informers/externalversions"
@@ -353,6 +354,13 @@ func setupTest(t *testing.T, ns string) *testContext {
 		mr.Close()
 		t.Fatalf("failed to seed test atespace %q: %v", testAtespace, err)
 	}
+	if _, err := client.CreateAtespace(context.Background(), &ateapipb.CreateAtespaceRequest{Name: resources.GoldenActorAtespace}); err != nil {
+		conn.Close()
+		grpcServer.Stop()
+		cancel()
+		mr.Close()
+		t.Fatalf("failed to seed golden atespace %q: %v", resources.GoldenActorAtespace, err)
+	}
 
 	cleanup := func() {
 		conn.Close()
@@ -407,6 +415,13 @@ func createAtespace(t *testing.T, tc *testContext, name string) {
 	}
 }
 
+func ensureAtespace(t *testing.T, tc *testContext, name string) {
+	t.Helper()
+	if _, err := tc.client.CreateAtespace(context.Background(), &ateapipb.CreateAtespaceRequest{Name: name}); err != nil && status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("CreateAtespace(%s) failed: %v", name, err)
+	}
+}
+
 const poolLabelKey = "pool"
 
 func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, containers []atev1alpha1.Container) {
@@ -415,6 +430,7 @@ func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, cont
 	// Sandbox binaries now live on a (cluster-scoped) SandboxConfig resolved via
 	// the actor's WorkerPool, not on the ActorTemplate. Create a default gvisor
 	// SandboxConfig so a boot-from-spec Run can resolve its assets.
+	ensureAtespace(t, tc, ns)
 	ensureDefaultGvisorSandboxConfig(t, tc)
 	createWorkerPool(t, tc, ns, "pool1", map[string]string{poolLabelKey: ns})
 
@@ -434,35 +450,20 @@ func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, cont
 			},
 		},
 	}
-	createdTemplate, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).Create(context.Background(), actorTemplate, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("failed to create actor template: %v", err)
-	}
-
-	createdTemplate.Status = atev1alpha1.ActorTemplateStatus{
+	actorTemplate.Status = atev1alpha1.ActorTemplateStatus{
 		GoldenSnapshot: "gs://my-bucket/my-folder",
 	}
 
-	_, err = tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).UpdateStatus(context.Background(), createdTemplate, metav1.UpdateOptions{})
-	if err != nil {
-		t.Fatalf("failed to update status: %v", err)
-	}
-
-	// Wait for Informer cache to sync
-	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		tmpl, err := tc.actorTemplateLister.ActorTemplates(ns).Get("tmpl1")
-		if err != nil {
-			return false, nil // Retry if not found in cache yet
-		}
-		return tmpl.Status.GoldenSnapshot != "", nil
+	_, err := tc.client.CreateActorTemplate(context.Background(), &ateapipb.CreateActorTemplateRequest{
+		ActorTemplate: apiActorTemplateToProto(actorTemplate),
 	})
 	if err != nil {
-		t.Fatalf("failed to wait for template status update in informer: %v", err)
+		t.Fatalf("failed to create actor template: %v", err)
 	}
 }
 
-// ensureDefaultGvisorSandboxConfig creates the cluster-scoped default gvisor
-// SandboxConfig (idempotently) and waits for it to appear in the lister.
+// ensureDefaultGvisorSandboxConfig creates the API-native default gvisor
+// SandboxConfig idempotently.
 func ensureDefaultGvisorSandboxConfig(t *testing.T, tc *testContext) {
 	t.Helper()
 	const name = "gvisor-default"
@@ -483,18 +484,21 @@ func ensureDefaultGvisorSandboxConfig(t *testing.T, tc *testContext) {
 			},
 		},
 	}
-	if _, err := tc.substrateClient.ApiV1alpha1().SandboxConfigs().Create(context.Background(), sc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+	if _, err := tc.client.CreateSandboxConfig(context.Background(), &ateapipb.CreateSandboxConfigRequest{
+		SandboxConfig: apiSandboxConfigToProto(sc),
+	}); err != nil && status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("failed to create default SandboxConfig: %v", err)
-	}
-	if err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, err := tc.sandboxConfigLister.Get(name)
-		return err == nil, nil
-	}); err != nil {
-		t.Fatalf("default SandboxConfig not synced into lister: %v", err)
 	}
 }
 
 func createWorkerPool(t *testing.T, tc *testContext, ns string, name string, labels map[string]string) {
+	t.Helper()
+	createWorkerPoolWithoutGrant(t, tc, ns, name, labels)
+	createWorkerPoolGrant(t, tc, testAtespace, ns, name)
+	createWorkerPoolGrant(t, tc, resources.GoldenActorAtespace, ns, name)
+}
+
+func createWorkerPoolWithoutGrant(t *testing.T, tc *testContext, ns string, name string, labels map[string]string) {
 	t.Helper()
 	wp := &atev1alpha1.WorkerPool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -507,22 +511,33 @@ func createWorkerPool(t *testing.T, tc *testContext, ns string, name string, lab
 			AteomImage: "ateom@sha256:abc",
 		},
 	}
-	_, err := tc.substrateClient.ApiV1alpha1().WorkerPools(ns).Create(context.Background(), wp, metav1.CreateOptions{})
+	_, err := tc.client.CreateWorkerPool(context.Background(), &ateapipb.CreateWorkerPoolRequest{
+		WorkerPool: apiWorkerPoolToProto(wp),
+	})
 	if err != nil {
 		t.Fatalf("failed to create WorkerPool: %v", err)
 	}
+}
 
-	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, err := tc.workerPoolLister.WorkerPools(ns).Get(name)
-		return err == nil, nil
+func createWorkerPoolGrant(t *testing.T, tc *testContext, atespace string, ns string, name string) {
+	t.Helper()
+	_, err := tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{
+		Grant: &ateapipb.WorkerPoolGrant{
+			Atespace: atespace,
+			WorkerPool: &ateapipb.WorkerPoolRef{
+				Namespace: ns,
+				Name:      name,
+			},
+		},
 	})
 	if err != nil {
-		t.Fatalf("failed to wait for WorkerPool %s/%s in informer: %v", ns, name, err)
+		t.Fatalf("failed to create WorkerPoolGrant %s/%s/%s: %v", atespace, ns, name, err)
 	}
 }
 
 func createTemplateWithSelector(t *testing.T, tc *testContext, ns string, name string, selector *metav1.LabelSelector) {
 	t.Helper()
+	ensureAtespace(t, tc, ns)
 	ensureDefaultGvisorSandboxConfig(t, tc)
 	actorTemplate := &atev1alpha1.ActorTemplate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -540,17 +555,11 @@ func createTemplateWithSelector(t *testing.T, tc *testContext, ns string, name s
 			WorkerSelector: selector,
 		},
 	}
-	_, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).Create(context.Background(), actorTemplate, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("failed to create actor template: %v", err)
-	}
-
-	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		_, err := tc.actorTemplateLister.ActorTemplates(ns).Get(name)
-		return err == nil, nil
+	_, err := tc.client.CreateActorTemplate(context.Background(), &ateapipb.CreateActorTemplateRequest{
+		ActorTemplate: apiActorTemplateToProto(actorTemplate),
 	})
 	if err != nil {
-		t.Fatalf("failed to wait for template %s/%s in informer: %v", ns, name, err)
+		t.Fatalf("failed to create actor template: %v", err)
 	}
 }
 
@@ -1263,6 +1272,32 @@ func TestResumeActor_NoEligiblePool(t *testing.T) {
 		ActorRef: &ateapipb.ActorRef{Atespace: testAtespace, Name: createResp.GetActor().GetActorId()},
 	})
 	assertGrpcError(t, err, codes.FailedPrecondition, "no worker pool matches the template's sandboxClass and the template/actor selectors")
+}
+
+func TestResumeActor_NoGrantedPool(t *testing.T) {
+	ns := namespaceForTest("ns-resume-no-granted-pool")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	createWorkerPoolWithoutGrant(t, tc, ns, "pool-a", map[string]string{"group": ns})
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+		MatchLabels: map[string]string{"group": ns},
+	})
+	createWorkerPod(t, tc, ns, "worker-a", "node1", "pool-a")
+
+	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
+		ActorRef:               &ateapipb.ActorRef{Atespace: testAtespace, Name: "id1"},
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+	})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		ActorRef: &ateapipb.ActorRef{Atespace: testAtespace, Name: "id1"},
+	})
+	assertGrpcError(t, err, codes.FailedPrecondition, "no granted worker pool matches the template's sandboxClass and the template/actor selectors")
 }
 
 // TestResumeActor_MultiPoolSelector exercises the AND-of-two-selectors path
@@ -2287,6 +2322,62 @@ func TestCreateActor_AtespaceNotFound(t *testing.T) {
 		ActorTemplateName:      "tmpl1",
 	})
 	assertGrpcError(t, err, codes.FailedPrecondition, "Atespace missing-as not found")
+}
+
+func TestWorkerPoolGrantLifecycle(t *testing.T) {
+	ns := namespaceForTest("ns-workerpool-grant")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+	createWorkerPoolWithoutGrant(t, tc, ns, "pool-a", map[string]string{"tier": "test"})
+
+	grant := &ateapipb.WorkerPoolGrant{
+		Atespace: testAtespace,
+		WorkerPool: &ateapipb.WorkerPoolRef{
+			Namespace: ns,
+			Name:      "pool-a",
+		},
+	}
+	createResp, err := tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{Grant: grant})
+	if err != nil {
+		t.Fatalf("CreateWorkerPoolGrant failed: %v", err)
+	}
+	if diff := cmp.Diff(grant, createResp.GetGrant(), protocmp.Transform()); diff != "" {
+		t.Errorf("CreateWorkerPoolGrant mismatch (-want +got):\n%s", diff)
+	}
+
+	_, err = tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{Grant: grant})
+	assertGrpcError(t, err, codes.AlreadyExists, fmt.Sprintf("WorkerPoolGrant %s/%s/pool-a already exists", testAtespace, ns))
+
+	getResp, err := tc.client.GetWorkerPoolGrant(context.Background(), &ateapipb.GetWorkerPoolGrantRequest{
+		Atespace:   testAtespace,
+		WorkerPool: grant.GetWorkerPool(),
+	})
+	if err != nil {
+		t.Fatalf("GetWorkerPoolGrant failed: %v", err)
+	}
+	if diff := cmp.Diff(grant, getResp.GetGrant(), protocmp.Transform()); diff != "" {
+		t.Errorf("GetWorkerPoolGrant mismatch (-want +got):\n%s", diff)
+	}
+
+	listResp, err := tc.client.ListWorkerPoolGrants(context.Background(), &ateapipb.ListWorkerPoolGrantsRequest{Atespace: testAtespace})
+	if err != nil {
+		t.Fatalf("ListWorkerPoolGrants failed: %v", err)
+	}
+	if diff := cmp.Diff([]*ateapipb.WorkerPoolGrant{grant}, listResp.GetGrants(), protocmp.Transform()); diff != "" {
+		t.Errorf("ListWorkerPoolGrants mismatch (-want +got):\n%s", diff)
+	}
+
+	if _, err := tc.client.DeleteWorkerPoolGrant(context.Background(), &ateapipb.DeleteWorkerPoolGrantRequest{
+		Atespace:   testAtespace,
+		WorkerPool: grant.GetWorkerPool(),
+	}); err != nil {
+		t.Fatalf("DeleteWorkerPoolGrant failed: %v", err)
+	}
+	_, err = tc.client.GetWorkerPoolGrant(context.Background(), &ateapipb.GetWorkerPoolGrantRequest{
+		Atespace:   testAtespace,
+		WorkerPool: grant.GetWorkerPool(),
+	})
+	assertGrpcError(t, err, codes.NotFound, fmt.Sprintf("WorkerPoolGrant %s/%s/pool-a not found", testAtespace, ns))
 }
 
 func TestCreateAtespace_Success(t *testing.T) {

@@ -135,7 +135,7 @@ kubectl ate get atespace <atespace>
 kubectl ate delete atespace <atespace>
 ```
 
-> **Note:** `create actor … -a <atespace>` requires the atespace to already exist, otherwise it fails with `FailedPrecondition`. `delete atespace` only removes an **empty** atespace; delete its actors first (cascade delete is not yet supported).
+> **Note:** `create actor … -a <atespace>` requires the atespace to already exist, otherwise it fails with `FailedPrecondition`. `delete atespace` only removes an **empty** atespace; delete its actors and revoke its worker pool grants first (cascade delete is not yet supported).
 
 ### Actor Lifecycle
 Manage the execution state of your workloads.
@@ -187,4 +187,14 @@ kubectl ate admin make-jwt-pool \
 
 # DANGEROUS: Completely flush all Actor and Worker tracking state from Redis
 kubectl ate admin debug-flush-redis
+
+# Grant an atespace access to a WorkerPool
+kubectl ate admin workerpool grant <namespace>/<workerpool> --atespace <atespace>
+
+# List all WorkerPool access grants, or only grants for one atespace
+kubectl ate admin workerpool grants
+kubectl ate admin workerpool grants --atespace <atespace>
+
+# Revoke an atespace's access to a WorkerPool
+kubectl ate admin workerpool revoke <namespace>/<workerpool> --atespace <atespace>
 ```

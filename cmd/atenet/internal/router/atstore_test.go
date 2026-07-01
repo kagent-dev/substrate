@@ -19,7 +19,20 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	"google.golang.org/grpc"
 )
+
+type apiStoreClient struct {
+	ateapipb.ControlClient
+	resp *ateapipb.ListActorTemplatesResponse
+}
+
+func (c *apiStoreClient) ListActorTemplates(ctx context.Context, in *ateapipb.ListActorTemplatesRequest, opts ...grpc.CallOption) (*ateapipb.ListActorTemplatesResponse, error) {
+	return c.resp, nil
+}
 
 func TestFileATStore(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -144,5 +157,33 @@ items:
 				}
 			}
 		})
+	}
+}
+
+func TestAPIATStore(t *testing.T) {
+	store := newAPIATStore(&apiStoreClient{resp: &ateapipb.ListActorTemplatesResponse{
+		ActorTemplates: []*ateapipb.ActorTemplate{
+			{
+				Atespace: "team-a",
+				Name:     "ready",
+				Status:   &ateapipb.ActorTemplateStatus{Phase: string(v1alpha1.PhaseReady), GoldenSnapshot: "gs://snap"},
+			},
+			{
+				Atespace: "team-a",
+				Name:     "initial",
+				Status:   &ateapipb.ActorTemplateStatus{Phase: string(v1alpha1.PhaseInitial)},
+			},
+		},
+	}})
+
+	templates, err := store.readyTemplates(context.Background())
+	if err != nil {
+		t.Fatalf("readyTemplates() error: %v", err)
+	}
+	if len(templates) != 1 {
+		t.Fatalf("got %d templates, want 1", len(templates))
+	}
+	if templates[0].Namespace != "team-a" || templates[0].Name != "ready" || templates[0].Status.GoldenSnapshot != "gs://snap" {
+		t.Fatalf("unexpected template: %#v", templates[0])
 	}
 }

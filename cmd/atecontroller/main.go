@@ -18,7 +18,6 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/atecontroller/internal/controllers"
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
-	clientv1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
@@ -47,7 +46,6 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(clientv1alpha1.AddToScheme(scheme)) // Register our CRD
 }
 
 func main() {
@@ -87,20 +85,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.WorkerPoolReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "WorkerPool")
+	if err := mgr.Add(&controllers.APIWorkerPoolProjector{
+		Client:    mgr.GetClient(),
+		AteClient: ateapiClient,
+	}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "APIWorkerPoolProjector")
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ActorTemplateReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
+	if err := mgr.Add(&controllers.APIActorTemplateProjector{
 		AteClient: ateapiClient,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ActorTemplate")
+	}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "APIActorTemplateProjector")
 		os.Exit(1)
 	}
 

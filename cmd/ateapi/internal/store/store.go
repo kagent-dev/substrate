@@ -68,8 +68,74 @@ type Interface interface {
 	AtespaceExists(ctx context.Context, name string) (bool, error)
 
 	// Removes an empty atespace. Returns ErrNotFound if missing, or
-	// ErrFailedPrecondition if any actor:<name>:* key still exists.
+	// ErrFailedPrecondition if any actor:<name>:* or workerpoolgrant:<name>:* key still exists.
 	DeleteAtespace(ctx context.Context, name string) error
+
+	// Stores a new ActorTemplate. Returns ErrAlreadyExists if the key is taken.
+	CreateActorTemplate(ctx context.Context, actorTemplate *ateapipb.ActorTemplate) error
+
+	// Fetches an ActorTemplate by atespace and name. Returns ErrNotFound if missing.
+	GetActorTemplate(ctx context.Context, atespace, name string) (*ateapipb.ActorTemplate, error)
+
+	// Lists ActorTemplates in the given atespace, or across all atespaces if empty.
+	ListActorTemplates(ctx context.Context, atespace string) ([]*ateapipb.ActorTemplate, error)
+
+	// Updates an ActorTemplate with optimistic concurrency.
+	UpdateActorTemplate(ctx context.Context, actorTemplate *ateapipb.ActorTemplate, expectedVersion int64) error
+
+	// Removes an ActorTemplate. Returns ErrNotFound if missing.
+	DeleteActorTemplate(ctx context.Context, atespace, name string) error
+
+	// WatchActorTemplates returns ActorTemplate changes.
+	WatchActorTemplates(ctx context.Context) (*ActorTemplateWatch, error)
+
+	// Stores a new WorkerPool. Returns ErrAlreadyExists if the key is taken.
+	CreateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool) error
+
+	// Fetches a WorkerPool by namespace and name. Returns ErrNotFound if missing.
+	GetWorkerPool(ctx context.Context, namespace, name string) (*ateapipb.WorkerPool, error)
+
+	// Lists all WorkerPools.
+	ListWorkerPools(ctx context.Context) ([]*ateapipb.WorkerPool, error)
+
+	// Updates a WorkerPool with optimistic concurrency.
+	UpdateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool, expectedVersion int64) error
+
+	// Removes a WorkerPool. Returns ErrNotFound if missing.
+	DeleteWorkerPool(ctx context.Context, namespace, name string) error
+
+	// WatchWorkerPools returns WorkerPool changes.
+	WatchWorkerPools(ctx context.Context) (*WorkerPoolWatch, error)
+
+	// Stores a new SandboxConfig. Returns ErrAlreadyExists if the key is taken.
+	CreateSandboxConfig(ctx context.Context, sandboxConfig *ateapipb.SandboxConfig) error
+
+	// Fetches a SandboxConfig by name. Returns ErrNotFound if missing.
+	GetSandboxConfig(ctx context.Context, name string) (*ateapipb.SandboxConfig, error)
+
+	// Lists all SandboxConfigs.
+	ListSandboxConfigs(ctx context.Context) ([]*ateapipb.SandboxConfig, error)
+
+	// Updates a SandboxConfig with optimistic concurrency.
+	UpdateSandboxConfig(ctx context.Context, sandboxConfig *ateapipb.SandboxConfig, expectedVersion int64) error
+
+	// Removes a SandboxConfig. Returns ErrNotFound if missing.
+	DeleteSandboxConfig(ctx context.Context, name string) error
+
+	// Stores a worker pool grant. Returns ErrAlreadyExists if the grant exists.
+	CreateWorkerPoolGrant(ctx context.Context, grant *ateapipb.WorkerPoolGrant) error
+
+	// Fetches a worker pool grant. Returns ErrNotFound if missing.
+	GetWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (*ateapipb.WorkerPoolGrant, error)
+
+	// Lists worker pool grants in the given atespace, or all grants if atespace is empty.
+	ListWorkerPoolGrants(ctx context.Context, atespace string) ([]*ateapipb.WorkerPoolGrant, error)
+
+	// Reports whether a worker pool grant exists.
+	WorkerPoolGranted(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (bool, error)
+
+	// Removes a worker pool grant. Returns ErrNotFound if missing.
+	DeleteWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) error
 
 	// Fetches worker state by namespace, pool, and pod name. Returns ErrNotFound if missing.
 	GetWorker(ctx context.Context, namespace, pool, pod string) (*ateapipb.Worker, error)
@@ -124,6 +190,24 @@ type WorkerEvent struct {
 	Worker *ateapipb.Worker
 }
 
+type ResourceEventType int
+
+const (
+	ResourceEventCreated ResourceEventType = iota
+	ResourceEventUpdated
+	ResourceEventDeleted
+)
+
+type ActorTemplateEvent struct {
+	Type          ResourceEventType
+	ActorTemplate *ateapipb.ActorTemplate
+}
+
+type WorkerPoolEvent struct {
+	Type       ResourceEventType
+	WorkerPool *ateapipb.WorkerPool
+}
+
 // WorkerWatch is an active subscription to worker state changes. The caller
 // must call Close when done to release the underlying subscription. Events is
 // closed when Close is called, the originating context is cancelled, or the
@@ -144,3 +228,25 @@ func NewWorkerWatch(events <-chan WorkerEvent, stop context.CancelFunc) *WorkerW
 
 // Close releases the subscription. Safe to call multiple times.
 func (w *WorkerWatch) Close() { w.stop() }
+
+type ActorTemplateWatch struct {
+	Events <-chan ActorTemplateEvent
+	stop   context.CancelFunc
+}
+
+func NewActorTemplateWatch(events <-chan ActorTemplateEvent, stop context.CancelFunc) *ActorTemplateWatch {
+	return &ActorTemplateWatch{Events: events, stop: stop}
+}
+
+func (w *ActorTemplateWatch) Close() { w.stop() }
+
+type WorkerPoolWatch struct {
+	Events <-chan WorkerPoolEvent
+	stop   context.CancelFunc
+}
+
+func NewWorkerPoolWatch(events <-chan WorkerPoolEvent, stop context.CancelFunc) *WorkerPoolWatch {
+	return &WorkerPoolWatch{Events: events, stop: stop}
+}
+
+func (w *WorkerPoolWatch) Close() { w.stop() }

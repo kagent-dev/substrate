@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -40,6 +41,7 @@ func NewController(
 	k8sClient client.Client,
 	clientset kubernetes.Interface,
 	cfg RouterConfig,
+	apiClient ateapipb.ControlClient,
 	xdsSrv *XdsServer,
 	extprocSrv *ExtProcServer,
 ) *Controller {
@@ -49,7 +51,7 @@ func NewController(
 	if cfg.TemplatesFile != "" {
 		store = newFileATStore(cfg.TemplatesFile)
 	} else {
-		store = newk8sATStore(k8sClient)
+		store = newAPIATStore(apiClient)
 	}
 
 	return &Controller{

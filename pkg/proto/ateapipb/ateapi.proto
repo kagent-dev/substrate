@@ -18,6 +18,8 @@ syntax = "proto3";
 
 package ateapi;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
 
 
@@ -61,6 +63,69 @@ service Control {
 
   // Delete an empty Atespace. Rejects (FailedPrecondition) if any actors remain.
   rpc DeleteAtespace(DeleteAtespaceRequest) returns (DeleteAtespaceResponse) {}
+
+  // Create an atespace-scoped ActorTemplate.
+  rpc CreateActorTemplate(CreateActorTemplateRequest) returns (CreateActorTemplateResponse) {}
+
+  // Get an ActorTemplate.
+  rpc GetActorTemplate(GetActorTemplateRequest) returns (GetActorTemplateResponse) {}
+
+  // List ActorTemplates.
+  rpc ListActorTemplates(ListActorTemplatesRequest) returns (ListActorTemplatesResponse) {}
+
+  // Update an ActorTemplate.
+  rpc UpdateActorTemplate(UpdateActorTemplateRequest) returns (UpdateActorTemplateResponse) {}
+
+  // Delete an ActorTemplate.
+  rpc DeleteActorTemplate(DeleteActorTemplateRequest) returns (DeleteActorTemplateResponse) {}
+
+  // Watch ActorTemplate changes after an initial snapshot.
+  rpc WatchActorTemplates(WatchActorTemplatesRequest) returns (stream WatchActorTemplatesResponse) {}
+
+  // Create a WorkerPool.
+  rpc CreateWorkerPool(CreateWorkerPoolRequest) returns (CreateWorkerPoolResponse) {}
+
+  // Get a WorkerPool.
+  rpc GetWorkerPool(GetWorkerPoolRequest) returns (GetWorkerPoolResponse) {}
+
+  // List WorkerPools.
+  rpc ListWorkerPools(ListWorkerPoolsRequest) returns (ListWorkerPoolsResponse) {}
+
+  // Update a WorkerPool.
+  rpc UpdateWorkerPool(UpdateWorkerPoolRequest) returns (UpdateWorkerPoolResponse) {}
+
+  // Delete a WorkerPool.
+  rpc DeleteWorkerPool(DeleteWorkerPoolRequest) returns (DeleteWorkerPoolResponse) {}
+
+  // Watch WorkerPool changes after an initial snapshot.
+  rpc WatchWorkerPools(WatchWorkerPoolsRequest) returns (stream WatchWorkerPoolsResponse) {}
+
+  // Create a SandboxConfig.
+  rpc CreateSandboxConfig(CreateSandboxConfigRequest) returns (CreateSandboxConfigResponse) {}
+
+  // Get a SandboxConfig.
+  rpc GetSandboxConfig(GetSandboxConfigRequest) returns (GetSandboxConfigResponse) {}
+
+  // List SandboxConfigs.
+  rpc ListSandboxConfigs(ListSandboxConfigsRequest) returns (ListSandboxConfigsResponse) {}
+
+  // Update a SandboxConfig.
+  rpc UpdateSandboxConfig(UpdateSandboxConfigRequest) returns (UpdateSandboxConfigResponse) {}
+
+  // Delete a SandboxConfig.
+  rpc DeleteSandboxConfig(DeleteSandboxConfigRequest) returns (DeleteSandboxConfigResponse) {}
+
+  // Grant an atespace access to a worker pool.
+  rpc CreateWorkerPoolGrant(CreateWorkerPoolGrantRequest) returns (CreateWorkerPoolGrantResponse) {}
+
+  // Get a WorkerPoolGrant by atespace and worker pool.
+  rpc GetWorkerPoolGrant(GetWorkerPoolGrantRequest) returns (GetWorkerPoolGrantResponse) {}
+
+  // List WorkerPoolGrants, optionally scoped to one atespace.
+  rpc ListWorkerPoolGrants(ListWorkerPoolGrantsRequest) returns (ListWorkerPoolGrantsResponse) {}
+
+  // Delete a WorkerPoolGrant.
+  rpc DeleteWorkerPoolGrant(DeleteWorkerPoolGrantRequest) returns (DeleteWorkerPoolGrantResponse) {}
 
   // Debugging: drop all data from the ate database.
   rpc DebugClear(DebugClearRequest) returns (DebugClearResponse) {}
@@ -178,6 +243,357 @@ message DeleteAtespaceRequest {
 }
 message DeleteAtespaceResponse {}
 
+message ActorTemplateRef {
+  string atespace = 1;
+  string name     = 2;
+}
+
+message ActorTemplate {
+  string atespace = 1;
+  string name     = 2;
+  int64  version  = 3;
+  ActorTemplateSpec spec = 4;
+  ActorTemplateStatus status = 5;
+}
+
+message ActorTemplateSpec {
+  string pause_image = 1;
+  repeated Container containers = 2;
+  SnapshotsConfig snapshots_config = 3;
+  string sandbox_class = 4;
+  LabelSelector worker_selector = 5;
+  repeated Volume volumes = 6;
+}
+
+message ActorTemplateStatus {
+  string phase = 1;
+  string golden_actor_id = 2;
+  google.protobuf.Timestamp take_golden_snapshot_at = 3;
+  string golden_snapshot = 4;
+  repeated Condition conditions = 5;
+}
+
+message Condition {
+  string type = 1;
+  string status = 2;
+  int64 observed_generation = 3;
+  google.protobuf.Timestamp last_transition_time = 4;
+  string reason = 5;
+  string message = 6;
+}
+
+message Volume {
+  string name = 1;
+  VolumeSource volume_source = 2;
+}
+
+message VolumeSource {
+  DurableDirVolumeSource durable_dir = 1;
+}
+
+message DurableDirVolumeSource {}
+
+message VolumeMount {
+  string name = 1;
+  string mount_path = 2;
+}
+
+message Container {
+  string name = 1;
+  string image = 2;
+  repeated string command = 3;
+  repeated EnvVar env = 4;
+  ContainerReadyz readyz = 5;
+  repeated VolumeMount volume_mounts = 6;
+}
+
+message ContainerReadyz {
+  HTTPGetAction http_get = 1;
+}
+
+message HTTPGetAction {
+  string path = 1;
+  int32 port = 2;
+}
+
+message EnvVar {
+  string name = 1;
+  optional string value = 2;
+  EnvVarSource value_from = 3;
+}
+
+message EnvVarSource {
+  SecretKeySelector secret_key_ref = 1;
+}
+
+message SecretKeySelector {
+  string name = 1;
+  string key = 2;
+  optional bool optional = 3;
+}
+
+message SnapshotsConfig {
+  string location = 1;
+  string on_pause = 2;
+  string on_commit = 3;
+}
+
+message LabelSelector {
+  map<string, string> match_labels = 1;
+  repeated LabelSelectorRequirement match_expressions = 2;
+}
+
+message LabelSelectorRequirement {
+  string key = 1;
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message CreateActorTemplateRequest {
+  ActorTemplate actor_template = 1;
+}
+message CreateActorTemplateResponse {
+  ActorTemplate actor_template = 1;
+}
+
+message GetActorTemplateRequest {
+  ActorTemplateRef actor_template = 1;
+}
+message GetActorTemplateResponse {
+  ActorTemplate actor_template = 1;
+}
+
+message ListActorTemplatesRequest {
+  string atespace = 1;
+}
+message ListActorTemplatesResponse {
+  repeated ActorTemplate actor_templates = 1;
+}
+
+message UpdateActorTemplateRequest {
+  ActorTemplate actor_template = 1;
+}
+message UpdateActorTemplateResponse {
+  ActorTemplate actor_template = 1;
+}
+
+message DeleteActorTemplateRequest {
+  ActorTemplateRef actor_template = 1;
+}
+message DeleteActorTemplateResponse {}
+
+enum ResourceEventType {
+  RESOURCE_EVENT_TYPE_UNSPECIFIED = 0;
+  RESOURCE_EVENT_TYPE_CREATED = 1;
+  RESOURCE_EVENT_TYPE_UPDATED = 2;
+  RESOURCE_EVENT_TYPE_DELETED = 3;
+}
+
+message WatchActorTemplatesRequest {}
+message WatchActorTemplatesResponse {
+  ResourceEventType type = 1;
+  ActorTemplate actor_template = 2;
+}
+
+message WorkerPool {
+  string namespace = 1;
+  string name      = 2;
+  int64  version   = 3;
+  map<string, string> labels = 4;
+  WorkerPoolSpec spec = 5;
+  WorkerPoolStatus status = 6;
+}
+
+message WorkerPoolSpec {
+  int32 replicas = 1;
+  string ateom_image = 2;
+  WorkerPoolPodTemplate template = 3;
+  string sandbox_class = 4;
+  string sandbox_config_name = 5;
+}
+
+message WorkerPoolStatus {
+  int32 replicas = 1;
+}
+
+message WorkerPoolPodTemplate {
+  map<string, string> node_selector = 1;
+  repeated Toleration tolerations = 2;
+  string priority_class_name = 3;
+  NodeAffinity node_affinity = 4;
+  ResourceRequirements resources = 5;
+}
+
+message Toleration {
+  string key = 1;
+  string operator = 2;
+  string value = 3;
+  string effect = 4;
+  optional int64 toleration_seconds = 5;
+}
+
+message NodeAffinity {
+  NodeSelector required_during_scheduling_ignored_during_execution = 1;
+  repeated PreferredSchedulingTerm preferred_during_scheduling_ignored_during_execution = 2;
+}
+
+message NodeSelector {
+  repeated NodeSelectorTerm node_selector_terms = 1;
+}
+
+message PreferredSchedulingTerm {
+  int32 weight = 1;
+  NodeSelectorTerm preference = 2;
+}
+
+message NodeSelectorTerm {
+  repeated NodeSelectorRequirement match_expressions = 1;
+  repeated NodeSelectorRequirement match_fields = 2;
+}
+
+message NodeSelectorRequirement {
+  string key = 1;
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message ResourceRequirements {
+  map<string, string> limits = 1;
+  map<string, string> requests = 2;
+}
+
+message CreateWorkerPoolRequest {
+  WorkerPool worker_pool = 1;
+}
+message CreateWorkerPoolResponse {
+  WorkerPool worker_pool = 1;
+}
+
+message GetWorkerPoolRequest {
+  WorkerPoolRef worker_pool = 1;
+}
+message GetWorkerPoolResponse {
+  WorkerPool worker_pool = 1;
+}
+
+message ListWorkerPoolsRequest {}
+message ListWorkerPoolsResponse {
+  repeated WorkerPool worker_pools = 1;
+}
+
+message UpdateWorkerPoolRequest {
+  WorkerPool worker_pool = 1;
+}
+message UpdateWorkerPoolResponse {
+  WorkerPool worker_pool = 1;
+}
+
+message DeleteWorkerPoolRequest {
+  WorkerPoolRef worker_pool = 1;
+}
+message DeleteWorkerPoolResponse {}
+
+message WatchWorkerPoolsRequest {}
+message WatchWorkerPoolsResponse {
+  ResourceEventType type = 1;
+  WorkerPool worker_pool = 2;
+}
+
+message SandboxConfig {
+  string name    = 1;
+  int64  version = 2;
+  SandboxConfigSpec spec = 3;
+}
+
+message SandboxConfigSpec {
+  string sandbox_class = 1;
+  bool default = 2;
+  map<string, SandboxAssetFiles> assets = 3;
+}
+
+message SandboxAssetFiles {
+  map<string, AssetFile> files = 1;
+}
+
+message AssetFile {
+  string url = 1;
+  string sha256 = 2;
+}
+
+message CreateSandboxConfigRequest {
+  SandboxConfig sandbox_config = 1;
+}
+message CreateSandboxConfigResponse {
+  SandboxConfig sandbox_config = 1;
+}
+
+message GetSandboxConfigRequest {
+  string name = 1;
+}
+message GetSandboxConfigResponse {
+  SandboxConfig sandbox_config = 1;
+}
+
+message ListSandboxConfigsRequest {}
+message ListSandboxConfigsResponse {
+  repeated SandboxConfig sandbox_configs = 1;
+}
+
+message UpdateSandboxConfigRequest {
+  SandboxConfig sandbox_config = 1;
+}
+message UpdateSandboxConfigResponse {
+  SandboxConfig sandbox_config = 1;
+}
+
+message DeleteSandboxConfigRequest {
+  string name = 1;
+}
+message DeleteSandboxConfigResponse {}
+
+// WorkerPoolRef identifies a worker pool. This POC keeps the Kubernetes
+// namespace because WorkerPool is still a namespaced CRD. Once WorkerPool moves
+// fully behind ate-api-server, this can collapse to a global worker pool name.
+message WorkerPoolRef {
+  string namespace = 1;
+  string name      = 2;
+}
+
+// WorkerPoolGrant allows one atespace to schedule actors onto one worker pool.
+message WorkerPoolGrant {
+  string atespace = 1;
+  WorkerPoolRef worker_pool = 2;
+}
+
+message CreateWorkerPoolGrantRequest {
+  WorkerPoolGrant grant = 1;
+}
+message CreateWorkerPoolGrantResponse {
+  WorkerPoolGrant grant = 1;
+}
+
+message GetWorkerPoolGrantRequest {
+  string atespace = 1;
+  WorkerPoolRef worker_pool = 2;
+}
+message GetWorkerPoolGrantResponse {
+  WorkerPoolGrant grant = 1;
+}
+
+message ListWorkerPoolGrantsRequest {
+  // If set, list only grants for this atespace. Empty lists all grants.
+  string atespace = 1;
+}
+message ListWorkerPoolGrantsResponse {
+  repeated WorkerPoolGrant grants = 1;
+}
+
+message DeleteWorkerPoolGrantRequest {
+  string atespace = 1;
+  WorkerPoolRef worker_pool = 2;
+}
+message DeleteWorkerPoolGrantResponse {}
+
 message GetActorRequest {
   ActorRef actor_ref = 1;
 }
@@ -200,6 +616,10 @@ message CreateActorRequest {
   // worker_selector sets the actor's placement constraint at creation time.
   // If empty, the actor matches any pool admitted by the template's selector.
   Selector worker_selector = 4;
+
+  // The API-native ActorTemplate to derive from. Preferred over the legacy
+  // actor_template_namespace/name fields above.
+  ActorTemplateRef actor_template = 5;
 }
 
 message CreateActorResponse {

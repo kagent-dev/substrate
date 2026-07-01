@@ -19,7 +19,8 @@ import (
 	"fmt"
 
 	v1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // atStore defines an interface for retrieving a collection of ActorTemplates.
@@ -27,29 +28,36 @@ type atStore interface {
 	readyTemplates(ctx context.Context) ([]*v1alpha1.ActorTemplate, error)
 }
 
-// k8sATStore implements the atStore interface using a Kubernetes client.
-type k8sATStore struct {
-	k8sClient client.Client
+type apiATStore struct {
+	apiClient ateapipb.ControlClient
 }
 
-func newk8sATStore(k8sClient client.Client) *k8sATStore {
-	return &k8sATStore{
-		k8sClient: k8sClient,
-	}
+func newAPIATStore(apiClient ateapipb.ControlClient) *apiATStore {
+	return &apiATStore{apiClient: apiClient}
 }
 
-func (t *k8sATStore) readyTemplates(ctx context.Context) ([]*v1alpha1.ActorTemplate, error) {
-	var atList v1alpha1.ActorTemplateList
-	if err := t.k8sClient.List(ctx, &atList); err != nil {
+func (t *apiATStore) readyTemplates(ctx context.Context) ([]*v1alpha1.ActorTemplate, error) {
+	resp, err := t.apiClient.ListActorTemplates(ctx, &ateapipb.ListActorTemplatesRequest{})
+	if err != nil {
 		return nil, fmt.Errorf("failed to list ActorTemplates: %w", err)
 	}
 
 	var templates []*v1alpha1.ActorTemplate
-	for i := range atList.Items {
-		if atList.Items[i].Status.Phase != v1alpha1.PhaseReady {
+	for _, at := range resp.GetActorTemplates() {
+		if at.GetStatus().GetPhase() != string(v1alpha1.PhaseReady) {
 			continue
 		}
-		templates = append(templates, &atList.Items[i])
+		templates = append(templates, &v1alpha1.ActorTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      at.GetName(),
+				Namespace: at.GetAtespace(),
+			},
+			Status: v1alpha1.ActorTemplateStatus{
+				Phase:          v1alpha1.PhaseType(at.GetStatus().GetPhase()),
+				GoldenSnapshot: at.GetStatus().GetGoldenSnapshot(),
+				GoldenActorID:  at.GetStatus().GetGoldenActorId(),
+			},
+		})
 	}
 	return templates, nil
 }

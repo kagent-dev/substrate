@@ -164,6 +164,47 @@ func PrintAtespace(atespace *ateapipb.Atespace, format string) error {
 	return PrintAtespaces([]*ateapipb.Atespace{atespace}, format)
 }
 
+// PrintWorkerPoolGrants prints a slice of worker pool grants to stdout in the requested format.
+func PrintWorkerPoolGrants(grants []*ateapipb.WorkerPoolGrant, format string) error {
+	return PrintWorkerPoolGrantsTo(os.Stdout, grants, format)
+}
+
+func sortWorkerPoolGrants(grants []*ateapipb.WorkerPoolGrant) {
+	slices.SortFunc(grants, func(a, b *ateapipb.WorkerPoolGrant) int {
+		if c := cmp.Compare(a.GetAtespace(), b.GetAtespace()); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.GetWorkerPool().GetNamespace(), b.GetWorkerPool().GetNamespace()); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.GetWorkerPool().GetName(), b.GetWorkerPool().GetName())
+	})
+}
+
+// PrintWorkerPoolGrantsTo prints a slice of worker pool grants to the provided writer.
+func PrintWorkerPoolGrantsTo(out io.Writer, grants []*ateapipb.WorkerPoolGrant, format string) error {
+	sortWorkerPoolGrants(grants)
+	switch format {
+	case "json", "yaml":
+		return printProto(out, &ateapipb.ListWorkerPoolGrantsResponse{Grants: grants}, format)
+	case "table":
+		w := tabwriter.NewWriter(out, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "ATESPACE\tWORKERPOOL")
+		for _, grant := range grants {
+			wp := grant.GetWorkerPool()
+			fmt.Fprintf(w, "%s\t%s/%s\n", grant.GetAtespace(), wp.GetNamespace(), wp.GetName())
+		}
+		return w.Flush()
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+// PrintWorkerPoolGrant prints a single worker pool grant in the requested format.
+func PrintWorkerPoolGrant(grant *ateapipb.WorkerPoolGrant, format string) error {
+	return PrintWorkerPoolGrants([]*ateapipb.WorkerPoolGrant{grant}, format)
+}
+
 func printProto(out io.Writer, msg proto.Message, format string) error {
 	m := protojson.MarshalOptions{}
 	b, err := m.Marshal(msg)

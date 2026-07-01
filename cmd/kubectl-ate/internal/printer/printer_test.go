@@ -330,3 +330,75 @@ func TestPrintAtespacesTo_Invalid(t *testing.T) {
 		t.Errorf("expected error for invalid format, got nil")
 	}
 }
+
+func TestPrintWorkerPoolGrantsTo_Table(t *testing.T) {
+	var buf bytes.Buffer
+	grants := []*ateapipb.WorkerPoolGrant{
+		{
+			Atespace: "team-b",
+			WorkerPool: &ateapipb.WorkerPoolRef{
+				Namespace: "worker-ns",
+				Name:      "pool-b",
+			},
+		},
+		{
+			Atespace: "team-a",
+			WorkerPool: &ateapipb.WorkerPoolRef{
+				Namespace: "worker-ns",
+				Name:      "pool-a",
+			},
+		},
+	}
+
+	if err := PrintWorkerPoolGrantsTo(&buf, grants, "table"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := `ATESPACE   WORKERPOOL
+team-a     worker-ns/pool-a
+team-b     worker-ns/pool-b
+`
+	if diff := cmp.Diff(expected, buf.String()); diff != "" {
+		t.Errorf("output mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestPrintWorkerPoolGrantsTo_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	grants := []*ateapipb.WorkerPoolGrant{
+		{
+			Atespace: "team-a",
+			WorkerPool: &ateapipb.WorkerPoolRef{
+				Namespace: "worker-ns",
+				Name:      "pool-a",
+			},
+		},
+	}
+
+	if err := PrintWorkerPoolGrantsTo(&buf, grants, "json"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := `{
+  "grants": [
+    {
+      "atespace": "team-a",
+      "workerPool": {
+        "name": "pool-a",
+        "namespace": "worker-ns"
+      }
+    }
+  ]
+}
+`
+	if diff := cmp.Diff(expected, buf.String()); diff != "" {
+		t.Errorf("output mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestPrintWorkerPoolGrantsTo_Invalid(t *testing.T) {
+	var buf bytes.Buffer
+	if err := PrintWorkerPoolGrantsTo(&buf, nil, "xml"); err == nil {
+		t.Errorf("expected error for invalid format, got nil")
+	}
+}

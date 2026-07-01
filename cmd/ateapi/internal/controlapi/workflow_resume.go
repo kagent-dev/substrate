@@ -27,7 +27,6 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -53,8 +52,7 @@ type ResumeState struct {
 }
 
 type LoadActorForResumeStep struct {
-	store               store.Interface
-	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	store store.Interface
 }
 
 func (s *LoadActorForResumeStep) Name() string { return "LoadActorForResume" }
@@ -72,11 +70,11 @@ func (s *LoadActorForResumeStep) Execute(ctx context.Context, input *ResumeInput
 	}
 	state.Actor = actor
 
-	actorTemplate, err := s.actorTemplateLister.ActorTemplates(actor.GetActorTemplateNamespace()).Get(actor.GetActorTemplateName())
+	actorTemplate, err := s.store.GetActorTemplate(ctx, actor.GetActorTemplateNamespace(), actor.GetActorTemplateName())
 	if err != nil {
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	state.ActorTemplate = actorTemplate
+	state.ActorTemplate = protoActorTemplateToAPI(actorTemplate)
 
 	return nil
 }
@@ -113,9 +111,8 @@ func eligibleWorkerPools(pools []*atev1alpha1.WorkerPool, templateClass atev1alp
 }
 
 type AssignWorkerStep struct {
-	store            store.Interface
-	workerCache      *workercache.Cache
-	workerPoolLister listersv1alpha1.WorkerPoolLister
+	store       store.Interface
+	workerCache *workercache.Cache
 }
 
 func (s *AssignWorkerStep) Name() string { return "AssignWorker" }
@@ -124,9 +121,17 @@ func (s *AssignWorkerStep) IsComplete(ctx context.Context, input *ResumeInput, s
 	return state.Actor.GetStatus() == ateapipb.Actor_STATUS_RUNNING, nil
 }
 func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, state *ResumeState) error {
-	pools, err := s.workerPoolLister.List(labels.Everything())
+	protoPools, err := s.store.ListWorkerPools(ctx)
 	if err != nil {
 		return fmt.Errorf("while listing worker pools: %w", err)
+	}
+	pools := make([]*atev1alpha1.WorkerPool, 0, len(protoPools))
+	for _, protoPool := range protoPools {
+		pool, err := protoWorkerPoolToAPI(protoPool)
+		if err != nil {
+			return fmt.Errorf("while converting WorkerPool: %w", err)
+		}
+		pools = append(pools, pool)
 	}
 	eligible, err := eligibleWorkerPools(pools, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector())
 	if err != nil {
@@ -134,6 +139,12 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 	}
 	if len(eligible) == 0 {
 		return status.Errorf(codes.FailedPrecondition, "no worker pool matches the template's sandboxClass and the template/actor selectors")
+	}
+	if err := s.filterUngrantedWorkerPools(ctx, input.Atespace, eligible); err != nil {
+		return err
+	}
+	if len(eligible) == 0 {
+		return status.Errorf(codes.FailedPrecondition, "no granted worker pool matches the template's sandboxClass and the template/actor selectors")
 	}
 
 	workers, err := s.workerCache.Workers()
@@ -203,6 +214,19 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 	return nil
 }
 
+func (s *AssignWorkerStep) filterUngrantedWorkerPools(ctx context.Context, atespace string, eligible map[types.NamespacedName]struct{}) error {
+	for pool := range eligible {
+		granted, err := s.store.WorkerPoolGranted(ctx, atespace, pool.Namespace, pool.Name)
+		if err != nil {
+			return fmt.Errorf("while checking worker pool grant: %w", err)
+		}
+		if !granted {
+			delete(eligible, pool)
+		}
+	}
+	return nil
+}
+
 func (s *AssignWorkerStep) RetryBackoff() *wait.Backoff {
 	return &wait.Backoff{
 		Steps:    5,
@@ -236,11 +260,10 @@ func (s *AssignWorkerStep) findFreeWorker(workers []*ateapipb.Worker, eligible m
 }
 
 type CallAteletRestoreStep struct {
-	dialer              *AteletDialer
-	kubeClient          kubernetes.Interface
-	secretCache         *envSecretCache
-	workerPoolLister    listersv1alpha1.WorkerPoolLister
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister
+	dialer      *AteletDialer
+	kubeClient  kubernetes.Interface
+	secretCache *envSecretCache
+	store       store.Interface
 }
 
 func (s *CallAteletRestoreStep) Name() string { return "CallAteletRestore" }
@@ -325,7 +348,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 		// Booting from scratch: resolve the sandbox binaries from the pool's
 		// SandboxConfig and send them so atelet can fetch and record them.
 		// (Restores above are self-describing via the snapshot manifest.)
-		sandboxAssets, err := resolveSandboxAssets(s.workerPoolLister, s.sandboxConfigLister, state.Actor.GetAteomPodNamespace(), state.Actor.GetWorkerPoolName())
+		sandboxAssets, err := resolveSandboxAssets(ctx, s.store, state.Actor.GetAteomPodNamespace(), state.Actor.GetWorkerPoolName())
 		if err != nil {
 			return fmt.Errorf("while resolving sandbox assets: %w", err)
 		}

@@ -25,7 +25,6 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -33,10 +32,11 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 	if err := validateCreateActorRequest(req); err != nil {
 		return nil, err
 	}
-	_, err := s.actorTemplateLister.ActorTemplates(req.GetActorTemplateNamespace()).Get(req.GetActorTemplateName())
+	templateRef := createActorTemplateRef(req)
+	_, err := s.persistence.GetActorTemplate(ctx, templateRef.GetAtespace(), templateRef.GetName())
 	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			return nil, status.Errorf(codes.FailedPrecondition, "ActorTemplate %s/%s not found", req.GetActorTemplateNamespace(), req.GetActorTemplateName())
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.FailedPrecondition, "ActorTemplate %s/%s not found", templateRef.GetAtespace(), templateRef.GetName())
 		}
 		return nil, fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
@@ -55,8 +55,8 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		ActorId:                id,
 		Version:                1,
 		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
-		ActorTemplateNamespace: req.GetActorTemplateNamespace(),
-		ActorTemplateName:      req.GetActorTemplateName(),
+		ActorTemplateNamespace: templateRef.GetAtespace(),
+		ActorTemplateName:      templateRef.GetName(),
 		WorkerSelector:         req.GetWorkerSelector(),
 		Atespace:               req.GetActorRef().GetAtespace(),
 	}
@@ -79,11 +79,16 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 }
 
 func validateCreateActorRequest(req *ateapipb.CreateActorRequest) error {
-	if req.GetActorTemplateNamespace() == "" {
-		return status.Error(codes.InvalidArgument, "actor_template_namespace is required")
+	if req.GetActorTemplate() == nil {
+		if req.GetActorTemplateNamespace() == "" {
+			return status.Error(codes.InvalidArgument, "actor_template_namespace is required")
+		}
+		if req.GetActorTemplateName() == "" {
+			return status.Error(codes.InvalidArgument, "actor_template_name is required")
+		}
 	}
-	if req.GetActorTemplateName() == "" {
-		return status.Error(codes.InvalidArgument, "actor_template_name is required")
+	if err := validateActorTemplateRef(createActorTemplateRef(req)); err != nil {
+		return err
 	}
 	if req.GetActorRef().GetName() == "" {
 		return status.Error(codes.InvalidArgument, "actor_id is required")
@@ -101,6 +106,16 @@ func validateCreateActorRequest(req *ateapipb.CreateActorRequest) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	return nil
+}
+
+func createActorTemplateRef(req *ateapipb.CreateActorRequest) *ateapipb.ActorTemplateRef {
+	if req.GetActorTemplate() != nil {
+		return req.GetActorTemplate()
+	}
+	return &ateapipb.ActorTemplateRef{
+		Atespace: req.GetActorTemplateNamespace(),
+		Name:     req.GetActorTemplateName(),
+	}
 }
 
 func validateSelector(sel *ateapipb.Selector) error {

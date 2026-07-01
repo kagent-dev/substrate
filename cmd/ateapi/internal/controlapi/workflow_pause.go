@@ -25,7 +25,6 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -43,8 +42,7 @@ type PauseState struct {
 }
 
 type LoadActorForPauseStep struct {
-	store               store.Interface
-	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	store store.Interface
 }
 
 func (s *LoadActorForPauseStep) Name() string { return "LoadActorForPause" }
@@ -59,11 +57,11 @@ func (s *LoadActorForPauseStep) Execute(ctx context.Context, input *PauseInput, 
 	}
 	state.Actor = actor
 
-	actorTemplate, err := s.actorTemplateLister.ActorTemplates(actor.GetActorTemplateNamespace()).Get(actor.GetActorTemplateName())
+	actorTemplate, err := s.store.GetActorTemplate(ctx, actor.GetActorTemplateNamespace(), actor.GetActorTemplateName())
 	if err != nil {
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	state.ActorTemplate = actorTemplate
+	state.ActorTemplate = protoActorTemplateToAPI(actorTemplate)
 
 	return nil
 }

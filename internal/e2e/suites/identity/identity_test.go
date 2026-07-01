@@ -19,15 +19,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/agent-substrate/substrate/internal/e2e"
 	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -58,8 +57,9 @@ func TestActorIdentity_AfterRestore_IsOwnID_NotGolden(t *testing.T) {
 	ctx := context.Background()
 	clients := e2e.GetClients()
 
-	deployProbe(t, env["BUCKET_NAME"])
-	golden := waitForGolden(t, ctx, clients)
+	deployProbe(t, ctx, clients, env["BUCKET_NAME"])
+	golden, at := waitForGolden(t, ctx, clients)
+	e2e.GrantAtespaceToTemplateWorkerPools(t, ctx, clients, probeNamespace, at)
 
 	// Two distinct actors from the same golden snapshot.
 	ids := []string{"probe-alpha", "probe-beta"}
@@ -90,63 +90,77 @@ func TestActorIdentity_AfterRestore_IsOwnID_NotGolden(t *testing.T) {
 	}
 }
 
-func deployProbe(t *testing.T, bucket string) {
+func deployProbe(t *testing.T, ctx context.Context, clients *e2e.Clients, bucket string) {
 	t.Helper()
-	root, err := e2e.FindRepoRoot()
-	if err != nil {
-		t.Fatalf("FindRepoRoot: %v", err)
-	}
 
-	// Render the manifest template to a file so both apply and delete can
-	// consume it without any shell involved.
-	tmpl, err := os.ReadFile(filepath.Join(root, "internal/e2e/fixtures/probe/probe.yaml.tmpl"))
-	if err != nil {
-		t.Fatalf("reading probe manifest template: %v", err)
+	_, err := clients.K8s.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: probeNamespace},
+	}, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("create namespace %s: %v", probeNamespace, err)
 	}
-	manifest := filepath.Join(t.TempDir(), "probe.yaml")
-	rendered := strings.ReplaceAll(string(tmpl), "${BUCKET_NAME}", bucket)
-	if err := os.WriteFile(manifest, []byte(rendered), 0o644); err != nil {
-		t.Fatalf("writing rendered probe manifest: %v", err)
-	}
-
-	// Build/push the probe image and apply the manifest through the repo's
-	// pinned ko (hack/run-tool.sh ko); CI does not install ko on PATH, and every
-	// other deploy in this repo goes through this wrapper. The trailing
-	// `-- --context=...` mirrors run_ko in hack/install-ate.sh: ko's apply
-	// subcommand forwards args after `--` to kubectl. KO_CONFIG_PATH is
-	// required because ko resolves .ko.yaml from its working directory, which
-	// is the test's package dir, not the repo root; without it the build
-	// silently loses defaultPlatforms (and produces amd64-only images that
-	// cannot run on arm64 nodes).
-	applyArgs := []string{"ko", "apply", "-f", manifest}
-	if e2e.KubeContext != "" {
-		applyArgs = append(applyArgs, "--", "--context="+e2e.KubeContext)
-	}
-	e2e.RunCmdWithEnv(t, []string{"KO_CONFIG_PATH=" + root}, filepath.Join(root, "hack/run-tool.sh"), applyArgs...)
-
 	t.Cleanup(func() {
-		// Deletion needs no image build, so go straight to kubectl (matching
-		// demo-counter_delete in hack/install-demo-counter.sh). `ko delete`
-		// rejects this arg shape ("you may not specify resource arguments as
-		// well").
-		delArgs := []string{"delete", "--ignore-not-found", "-f", manifest}
-		if e2e.KubeContext != "" {
-			delArgs = append([]string{"--context=" + e2e.KubeContext}, delArgs...)
-		}
-		e2e.RunCmd(t, "kubectl", delArgs...)
+		_ = clients.K8s.CoreV1().Namespaces().Delete(context.Background(), probeNamespace, metav1.DeleteOptions{})
 	})
+
+	e2e.EnsureGvisorSandboxConfig(t, ctx, clients)
+	ateomImage := e2e.KoBuild(t, "./cmd/ateom-gvisor")
+	probeImage := e2e.KoBuild(t, "./internal/e2e/fixtures/probe")
+
+	_, _ = clients.SubstrateAPI.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{Name: probeNamespace})
+	_, err = clients.SubstrateAPI.CreateWorkerPool(ctx, &ateapipb.CreateWorkerPoolRequest{
+		WorkerPool: &ateapipb.WorkerPool{
+			Namespace: probeNamespace,
+			Name:      probeTemplate,
+			Labels:    map[string]string{"workload": probeTemplate},
+			Spec: &ateapipb.WorkerPoolSpec{
+				Replicas:     3,
+				AteomImage:   ateomImage,
+				SandboxClass: string(v1alpha1.SandboxClassGvisor),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkerPool %s/%s: %v", probeNamespace, probeTemplate, err)
+	}
+
+	_, err = clients.SubstrateAPI.CreateActorTemplate(ctx, &ateapipb.CreateActorTemplateRequest{
+		ActorTemplate: &ateapipb.ActorTemplate{
+			Atespace: probeNamespace,
+			Name:     probeTemplate,
+			Spec: &ateapipb.ActorTemplateSpec{
+				PauseImage: e2e.PauseImage,
+				Containers: []*ateapipb.Container{{
+					Name:    probeTemplate,
+					Image:   probeImage,
+					Command: []string{"/ko-app/probe"},
+				}},
+				WorkerSelector: &ateapipb.LabelSelector{MatchLabels: map[string]string{"workload": probeTemplate}},
+				SnapshotsConfig: &ateapipb.SnapshotsConfig{
+					Location: "gs://" + bucket + "/ate-e2e-probe/",
+				},
+				SandboxClass: string(v1alpha1.SandboxClassGvisor),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateActorTemplate %s/%s: %v", probeNamespace, probeTemplate, err)
+	}
 }
 
-func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) string {
+func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) (string, *v1alpha1.ActorTemplate) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		at, err := clients.SubstrateK8s.ApiV1alpha1().ActorTemplates(probeNamespace).Get(ctx, probeTemplate, metav1.GetOptions{})
+		resp, err := clients.SubstrateAPI.GetActorTemplate(ctx, &ateapipb.GetActorTemplateRequest{
+			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: probeNamespace, Name: probeTemplate},
+		})
 		if err == nil {
+			at := actorTemplateAPI(resp.GetActorTemplate())
 			switch at.Status.Phase {
 			case v1alpha1.PhaseReady:
 				t.Logf("probe ActorTemplate ready, golden=%s", at.Status.GoldenActorID)
-				return at.Status.GoldenActorID
+				return at.Status.GoldenActorID, at
 			case v1alpha1.PhaseFailed:
 				t.Fatalf("probe ActorTemplate entered PhaseFailed")
 			}
@@ -154,7 +168,27 @@ func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) stri
 		time.Sleep(2 * time.Second)
 	}
 	t.Fatalf("timed out waiting for probe ActorTemplate to be Ready")
-	return ""
+	return "", nil
+}
+
+func actorTemplateAPI(at *ateapipb.ActorTemplate) *v1alpha1.ActorTemplate {
+	out := &v1alpha1.ActorTemplate{
+		ObjectMeta: metav1.ObjectMeta{Namespace: at.GetAtespace(), Name: at.GetName()},
+		Spec: v1alpha1.ActorTemplateSpec{
+			SandboxClass: v1alpha1.SandboxClass(at.GetSpec().GetSandboxClass()),
+		},
+		Status: v1alpha1.ActorTemplateStatus{
+			Phase:          v1alpha1.PhaseType(at.GetStatus().GetPhase()),
+			GoldenActorID:  at.GetStatus().GetGoldenActorId(),
+			GoldenSnapshot: at.GetStatus().GetGoldenSnapshot(),
+		},
+	}
+	if at.GetSpec().GetWorkerSelector() != nil {
+		out.Spec.WorkerSelector = &metav1.LabelSelector{
+			MatchLabels: at.GetSpec().GetWorkerSelector().GetMatchLabels(),
+		}
+	}
+	return out
 }
 
 func createAndResumeActor(t *testing.T, ctx context.Context, clients *e2e.Clients, id string) {

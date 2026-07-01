@@ -115,14 +115,11 @@ func runStep[Params any, Context any](ctx context.Context, params Params, wCtx C
 
 // ActorWorkflow handles the workflows for actor's resume / suspend operations.
 type ActorWorkflow struct {
-	store               store.Interface
-	workerCache         *workercache.Cache
-	dialer              *AteletDialer
-	actorTemplateLister listersv1alpha1.ActorTemplateLister
-	workerPoolLister    listersv1alpha1.WorkerPoolLister
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister
-	kubeClient          kubernetes.Interface
-	secretCache         *envSecretCache
+	store       store.Interface
+	workerCache *workercache.Cache
+	dialer      *AteletDialer
+	kubeClient  kubernetes.Interface
+	secretCache *envSecretCache
 }
 
 // NewActorWorkflow creates a new ActorWorkflow.
@@ -136,14 +133,11 @@ func NewActorWorkflow(
 	kubeClient kubernetes.Interface,
 ) *ActorWorkflow {
 	return &ActorWorkflow{
-		store:               store,
-		workerCache:         workerCache,
-		dialer:              dialer,
-		actorTemplateLister: actorTemplateLister,
-		workerPoolLister:    workerPoolLister,
-		sandboxConfigLister: sandboxConfigLister,
-		kubeClient:          kubeClient,
-		secretCache:         newEnvSecretCache(envSecretCacheTTL),
+		store:       store,
+		workerCache: workerCache,
+		dialer:      dialer,
+		kubeClient:  kubeClient,
+		secretCache: newEnvSecretCache(envSecretCacheTTL),
 	}
 }
 
@@ -165,9 +159,9 @@ func (w *ActorWorkflow) ResumeActor(ctx context.Context, atespace, id string, bo
 	defer releaseLock()
 
 	steps := []WorkflowStep[*ResumeInput, *ResumeState]{
-		&LoadActorForResumeStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
-		&AssignWorkerStep{store: w.store, workerCache: w.workerCache, workerPoolLister: w.workerPoolLister},
-		&CallAteletRestoreStep{dialer: w.dialer, kubeClient: w.kubeClient, secretCache: w.secretCache, workerPoolLister: w.workerPoolLister, sandboxConfigLister: w.sandboxConfigLister},
+		&LoadActorForResumeStep{store: w.store},
+		&AssignWorkerStep{store: w.store, workerCache: w.workerCache},
+		&CallAteletRestoreStep{dialer: w.dialer, kubeClient: w.kubeClient, secretCache: w.secretCache, store: w.store},
 		&FinalizeRunningStep{store: w.store},
 	}
 
@@ -195,7 +189,7 @@ func (w *ActorWorkflow) SuspendActor(ctx context.Context, atespace, id string) (
 	defer releaseLock()
 
 	steps := []WorkflowStep[*SuspendInput, *SuspendState]{
-		&LoadActorForSuspendStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
+		&LoadActorForSuspendStep{store: w.store},
 		&MarkSuspendingStep{store: w.store},
 		&CallAteletSuspendStep{dialer: w.dialer},
 		&FinalizeSuspendedStep{store: w.store},
@@ -225,7 +219,7 @@ func (w *ActorWorkflow) PauseActor(ctx context.Context, atespace, id string) (*a
 	defer releaseLock()
 
 	steps := []WorkflowStep[*PauseInput, *PauseState]{
-		&LoadActorForPauseStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
+		&LoadActorForPauseStep{store: w.store},
 		&MarkPausingStep{store: w.store},
 		&CallAteletPauseStep{dialer: w.dialer},
 		&FinalizePausedStep{store: w.store},

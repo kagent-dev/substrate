@@ -65,6 +65,16 @@ type workerPubSubMsg struct {
 	Worker string `json:"w"` // protojson-encoded Worker
 }
 
+type actorTemplatePubSubMsg struct {
+	Type          int    `json:"t"`
+	ActorTemplate string `json:"at"`
+}
+
+type workerPoolPubSubMsg struct {
+	Type       int    `json:"t"`
+	WorkerPool string `json:"wp"`
+}
+
 type redisClient interface {
 	redis.Cmdable
 	ForEachMaster(ctx context.Context, fn func(ctx context.Context, client *redis.Client) error) error
@@ -102,6 +112,36 @@ func actorScanPattern(atespace string) string {
 
 func atespaceDBKey(name string) string {
 	return "atespace:" + name
+}
+
+func actorTemplateDBKey(atespace, name string) string {
+	return "actortemplate:" + atespace + ":" + name
+}
+
+func actorTemplateScanPattern(atespace string) string {
+	if atespace == "" {
+		return "actortemplate:*"
+	}
+	return "actortemplate:" + atespace + ":*"
+}
+
+func workerPoolDBKey(namespace, name string) string {
+	return "workerpool:" + namespace + ":" + name
+}
+
+func sandboxConfigDBKey(name string) string {
+	return "sandboxconfig:" + name
+}
+
+func workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName string) string {
+	return "workerpoolgrant:" + atespace + ":" + workerPoolNamespace + ":" + workerPoolName
+}
+
+func workerPoolGrantScanPattern(atespace string) string {
+	if atespace == "" {
+		return "workerpoolgrant:*"
+	}
+	return "workerpoolgrant:" + atespace + ":*"
 }
 
 func (s *Persistence) CreateAtespace(ctx context.Context, atespace *ateapipb.Atespace) error {
@@ -180,9 +220,383 @@ func (s *Persistence) ListAtespaces(ctx context.Context) ([]*ateapipb.Atespace, 
 	return result, nil
 }
 
+func (s *Persistence) CreateActorTemplate(ctx context.Context, actorTemplate *ateapipb.ActorTemplate) error {
+	if err := s.createResource(ctx, actorTemplateDBKey(actorTemplate.GetAtespace(), actorTemplate.GetName()), actorTemplate); err != nil {
+		return err
+	}
+	stored, err := s.GetActorTemplate(ctx, actorTemplate.GetAtespace(), actorTemplate.GetName())
+	if err == nil {
+		s.publishActorTemplateEvent(ctx, store.ResourceEventCreated, stored)
+	}
+	return err
+}
+
+func (s *Persistence) GetActorTemplate(ctx context.Context, atespace, name string) (*ateapipb.ActorTemplate, error) {
+	out := &ateapipb.ActorTemplate{}
+	if err := s.getResource(ctx, actorTemplateDBKey(atespace, name), out); err != nil {
+		return nil, err
+	}
+	if out.GetAtespace() != atespace || out.GetName() != name {
+		return nil, fmt.Errorf("(impossible) mismatch between stored ActorTemplate and key")
+	}
+	return out, nil
+}
+
+func (s *Persistence) ListActorTemplates(ctx context.Context, atespace string) ([]*ateapipb.ActorTemplate, error) {
+	var result []*ateapipb.ActorTemplate
+	err := s.scanResources(ctx, actorTemplateScanPattern(atespace), func() proto.Message {
+		return &ateapipb.ActorTemplate{}
+	}, func(msg proto.Message) {
+		result = append(result, msg.(*ateapipb.ActorTemplate))
+	})
+	return result, err
+}
+
+func (s *Persistence) UpdateActorTemplate(ctx context.Context, actorTemplate *ateapipb.ActorTemplate, expectedVersion int64) error {
+	if err := s.updateResource(ctx, actorTemplateDBKey(actorTemplate.GetAtespace(), actorTemplate.GetName()), actorTemplate, expectedVersion); err != nil {
+		return err
+	}
+	s.publishActorTemplateEvent(ctx, store.ResourceEventUpdated, actorTemplate)
+	return nil
+}
+
+func (s *Persistence) DeleteActorTemplate(ctx context.Context, atespace, name string) error {
+	if err := s.deleteResource(ctx, actorTemplateDBKey(atespace, name)); err != nil {
+		return err
+	}
+	s.publishActorTemplateEvent(ctx, store.ResourceEventDeleted, &ateapipb.ActorTemplate{Atespace: atespace, Name: name})
+	return nil
+}
+
+func (s *Persistence) CreateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool) error {
+	if err := s.createResource(ctx, workerPoolDBKey(workerPool.GetNamespace(), workerPool.GetName()), workerPool); err != nil {
+		return err
+	}
+	stored, err := s.GetWorkerPool(ctx, workerPool.GetNamespace(), workerPool.GetName())
+	if err == nil {
+		s.publishWorkerPoolEvent(ctx, store.ResourceEventCreated, stored)
+	}
+	return err
+}
+
+func (s *Persistence) GetWorkerPool(ctx context.Context, namespace, name string) (*ateapipb.WorkerPool, error) {
+	out := &ateapipb.WorkerPool{}
+	if err := s.getResource(ctx, workerPoolDBKey(namespace, name), out); err != nil {
+		return nil, err
+	}
+	if out.GetNamespace() != namespace || out.GetName() != name {
+		return nil, fmt.Errorf("(impossible) mismatch between stored WorkerPool and key")
+	}
+	return out, nil
+}
+
+func (s *Persistence) ListWorkerPools(ctx context.Context) ([]*ateapipb.WorkerPool, error) {
+	var result []*ateapipb.WorkerPool
+	err := s.scanResources(ctx, "workerpool:*", func() proto.Message {
+		return &ateapipb.WorkerPool{}
+	}, func(msg proto.Message) {
+		result = append(result, msg.(*ateapipb.WorkerPool))
+	})
+	return result, err
+}
+
+func (s *Persistence) UpdateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool, expectedVersion int64) error {
+	if err := s.updateResource(ctx, workerPoolDBKey(workerPool.GetNamespace(), workerPool.GetName()), workerPool, expectedVersion); err != nil {
+		return err
+	}
+	s.publishWorkerPoolEvent(ctx, store.ResourceEventUpdated, workerPool)
+	return nil
+}
+
+func (s *Persistence) DeleteWorkerPool(ctx context.Context, namespace, name string) error {
+	if err := s.deleteResource(ctx, workerPoolDBKey(namespace, name)); err != nil {
+		return err
+	}
+	s.publishWorkerPoolEvent(ctx, store.ResourceEventDeleted, &ateapipb.WorkerPool{Namespace: namespace, Name: name})
+	return nil
+}
+
+func (s *Persistence) CreateSandboxConfig(ctx context.Context, sandboxConfig *ateapipb.SandboxConfig) error {
+	return s.createResource(ctx, sandboxConfigDBKey(sandboxConfig.GetName()), sandboxConfig)
+}
+
+func (s *Persistence) GetSandboxConfig(ctx context.Context, name string) (*ateapipb.SandboxConfig, error) {
+	out := &ateapipb.SandboxConfig{}
+	if err := s.getResource(ctx, sandboxConfigDBKey(name), out); err != nil {
+		return nil, err
+	}
+	if out.GetName() != name {
+		return nil, fmt.Errorf("(impossible) mismatch between stored SandboxConfig and key")
+	}
+	return out, nil
+}
+
+func (s *Persistence) ListSandboxConfigs(ctx context.Context) ([]*ateapipb.SandboxConfig, error) {
+	var result []*ateapipb.SandboxConfig
+	err := s.scanResources(ctx, "sandboxconfig:*", func() proto.Message {
+		return &ateapipb.SandboxConfig{}
+	}, func(msg proto.Message) {
+		result = append(result, msg.(*ateapipb.SandboxConfig))
+	})
+	return result, err
+}
+
+func (s *Persistence) UpdateSandboxConfig(ctx context.Context, sandboxConfig *ateapipb.SandboxConfig, expectedVersion int64) error {
+	return s.updateResource(ctx, sandboxConfigDBKey(sandboxConfig.GetName()), sandboxConfig, expectedVersion)
+}
+
+func (s *Persistence) DeleteSandboxConfig(ctx context.Context, name string) error {
+	return s.deleteResource(ctx, sandboxConfigDBKey(name))
+}
+
+func (s *Persistence) createResource(ctx context.Context, dbKey string, msg proto.Message) error {
+	dbMsg := proto.Clone(msg)
+	setResourceVersion(dbMsg, 1)
+	dbBytes, err := protojson.Marshal(dbMsg)
+	if err != nil {
+		return fmt.Errorf("in protojson.Marshal: %w", err)
+	}
+	ok, err := s.rdb.SetNX(ctx, dbKey, dbBytes, 0).Result()
+	if err != nil {
+		return fmt.Errorf("while executing redis set: %w", err)
+	}
+	if !ok {
+		return store.ErrAlreadyExists
+	}
+	return nil
+}
+
+func (s *Persistence) getResource(ctx context.Context, dbKey string, out proto.Message) error {
+	dbBytes, err := s.rdb.Get(ctx, dbKey).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return store.ErrNotFound
+		}
+		return fmt.Errorf("while getting resource key %q: %w", dbKey, err)
+	}
+	if err := protojson.Unmarshal(dbBytes, out); err != nil {
+		return fmt.Errorf("while unmarshaling resource: %w", err)
+	}
+	return nil
+}
+
+func (s *Persistence) scanResources(ctx context.Context, pattern string, newFn func() proto.Message, appendFn func(proto.Message)) error {
+	var mu sync.Mutex
+	err := s.rdb.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+		iter := master.Scan(ctx, 0, pattern, 0).Iterator()
+		for iter.Next(ctx) {
+			key := iter.Val()
+			getCmd := master.Get(ctx, key)
+			if getCmd.Err() != nil {
+				return fmt.Errorf("while getting resource %q: %w", key, getCmd.Err())
+			}
+			msg := newFn()
+			if err := protojson.Unmarshal([]byte(getCmd.Val()), msg); err != nil {
+				return fmt.Errorf("in protojson.Unmarshal: %w", err)
+			}
+			mu.Lock()
+			appendFn(msg)
+			mu.Unlock()
+		}
+		if err := iter.Err(); err != nil {
+			return fmt.Errorf("error from iterator: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("while iterating all redis master: %w", err)
+	}
+	return nil
+}
+
+func (s *Persistence) updateResource(ctx context.Context, dbKey string, msg proto.Message, expectedVersion int64) error {
+	dbMsg := proto.Clone(msg)
+	err := s.rdb.Watch(ctx, func(tx *redis.Tx) error {
+		currentVal, err := tx.Get(ctx, dbKey).Bytes()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				return store.ErrNotFound
+			}
+			return fmt.Errorf("while getting resource: %w", err)
+		}
+
+		current := msg.ProtoReflect().New().Interface()
+		if err := protojson.Unmarshal(currentVal, current); err != nil {
+			return fmt.Errorf("in protojson.Unmarshal: %w", err)
+		}
+		if resourceVersion(current) != expectedVersion {
+			return store.ErrPersistenceRetry
+		}
+		if err := checkResourceIdentity(current, dbMsg); err != nil {
+			return err
+		}
+		setResourceVersion(dbMsg, resourceVersion(current)+1)
+
+		newVal, err := protojson.Marshal(dbMsg)
+		if err != nil {
+			return fmt.Errorf("in protojson.Marshal: %w", err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, dbKey, newVal, 0)
+			return nil
+		})
+		return err
+	}, dbKey)
+	if err != nil {
+		if errors.Is(err, store.ErrPersistenceRetry) || errors.Is(err, redis.TxFailedErr) {
+			return store.ErrPersistenceRetry
+		}
+		return fmt.Errorf("while executing update resource transaction: %w", err)
+	}
+	setResourceVersion(msg, resourceVersion(dbMsg))
+	return nil
+}
+
+func (s *Persistence) deleteResource(ctx context.Context, dbKey string) error {
+	n, err := s.rdb.Del(ctx, dbKey).Result()
+	if err != nil {
+		return fmt.Errorf("while deleting resource key %q: %w", dbKey, err)
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func resourceVersion(msg proto.Message) int64 {
+	switch x := msg.(type) {
+	case *ateapipb.ActorTemplate:
+		return x.GetVersion()
+	case *ateapipb.WorkerPool:
+		return x.GetVersion()
+	case *ateapipb.SandboxConfig:
+		return x.GetVersion()
+	default:
+		return 0
+	}
+}
+
+func setResourceVersion(msg proto.Message, version int64) {
+	switch x := msg.(type) {
+	case *ateapipb.ActorTemplate:
+		x.Version = version
+	case *ateapipb.WorkerPool:
+		x.Version = version
+	case *ateapipb.SandboxConfig:
+		x.Version = version
+	}
+}
+
+func checkResourceIdentity(current, next proto.Message) error {
+	switch cur := current.(type) {
+	case *ateapipb.ActorTemplate:
+		n := next.(*ateapipb.ActorTemplate)
+		if cur.GetAtespace() != n.GetAtespace() || cur.GetName() != n.GetName() {
+			return fmt.Errorf("ActorTemplate identity is immutable")
+		}
+	case *ateapipb.WorkerPool:
+		n := next.(*ateapipb.WorkerPool)
+		if cur.GetNamespace() != n.GetNamespace() || cur.GetName() != n.GetName() {
+			return fmt.Errorf("WorkerPool identity is immutable")
+		}
+	case *ateapipb.SandboxConfig:
+		n := next.(*ateapipb.SandboxConfig)
+		if cur.GetName() != n.GetName() {
+			return fmt.Errorf("SandboxConfig identity is immutable")
+		}
+	}
+	return nil
+}
+
+func (s *Persistence) CreateWorkerPoolGrant(ctx context.Context, grant *ateapipb.WorkerPoolGrant) error {
+	dbKey := workerPoolGrantDBKey(grant.GetAtespace(), grant.GetWorkerPool().GetNamespace(), grant.GetWorkerPool().GetName())
+	dbBytes, err := protojson.Marshal(grant)
+	if err != nil {
+		return fmt.Errorf("in protojson.Marshal: %w", err)
+	}
+	ok, err := s.rdb.SetNX(ctx, dbKey, dbBytes, 0).Result()
+	if err != nil {
+		return fmt.Errorf("while executing redis set: %w", err)
+	}
+	if !ok {
+		return store.ErrAlreadyExists
+	}
+	return nil
+}
+
+func (s *Persistence) GetWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (*ateapipb.WorkerPoolGrant, error) {
+	dbKey := workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)
+	dbBytes, err := s.rdb.Get(ctx, dbKey).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, store.ErrNotFound
+		}
+		return nil, fmt.Errorf("while getting worker pool grant key %q: %w", dbKey, err)
+	}
+	grant := &ateapipb.WorkerPoolGrant{}
+	if err := protojson.Unmarshal(dbBytes, grant); err != nil {
+		return nil, fmt.Errorf("while unmarshaling worker pool grant: %w", err)
+	}
+	if grant.GetAtespace() != atespace || grant.GetWorkerPool().GetNamespace() != workerPoolNamespace || grant.GetWorkerPool().GetName() != workerPoolName {
+		return nil, fmt.Errorf("(impossible) mismatch between stored worker pool grant and key %q", dbKey)
+	}
+	return grant, nil
+}
+
+func (s *Persistence) ListWorkerPoolGrants(ctx context.Context, atespace string) ([]*ateapipb.WorkerPoolGrant, error) {
+	var result []*ateapipb.WorkerPoolGrant
+	var mu sync.Mutex
+
+	err := s.rdb.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+		iter := master.Scan(ctx, 0, workerPoolGrantScanPattern(atespace), 0).Iterator()
+		for iter.Next(ctx) {
+			key := iter.Val()
+			getCmd := master.Get(ctx, key)
+			if getCmd.Err() != nil {
+				return fmt.Errorf("while getting worker pool grant %q: %w", key, getCmd.Err())
+			}
+			grant := &ateapipb.WorkerPoolGrant{}
+			if err := protojson.Unmarshal([]byte(getCmd.Val()), grant); err != nil {
+				return fmt.Errorf("in protojson.Unmarshal: %w", err)
+			}
+			mu.Lock()
+			result = append(result, grant)
+			mu.Unlock()
+		}
+		if err := iter.Err(); err != nil {
+			return fmt.Errorf("error from iterator: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("while iterating all redis master: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Persistence) WorkerPoolGranted(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)).Result()
+	if err != nil {
+		return false, fmt.Errorf("while checking worker pool grant existence: %w", err)
+	}
+	return n > 0, nil
+}
+
+func (s *Persistence) DeleteWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) error {
+	dbKey := workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)
+	n, err := s.rdb.Del(ctx, dbKey).Result()
+	if err != nil {
+		return fmt.Errorf("while deleting worker pool grant key %q: %w", dbKey, err)
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 // DeleteAtespace deletes an empty atespace. Returns store.ErrNotFound if the
-// atespace does not exist, or store.ErrFailedPrecondition if any actor still
-// lives in it.
+// atespace does not exist, or store.ErrFailedPrecondition if any actor or
+// worker pool grant still lives in it.
 func (s *Persistence) DeleteAtespace(ctx context.Context, name string) error {
 	dbKey := atespaceDBKey(name)
 
@@ -201,6 +615,20 @@ func (s *Persistence) DeleteAtespace(ctx context.Context, name string) error {
 		return fmt.Errorf("while checking atespace emptiness: %w", err)
 	}
 	if len(actors) > 0 {
+		return store.ErrFailedPrecondition
+	}
+	grants, err := s.ListWorkerPoolGrants(ctx, name)
+	if err != nil {
+		return fmt.Errorf("while checking atespace worker pool grants: %w", err)
+	}
+	if len(grants) > 0 {
+		return store.ErrFailedPrecondition
+	}
+	actorTemplates, err := s.ListActorTemplates(ctx, name)
+	if err != nil {
+		return fmt.Errorf("while checking atespace actor templates: %w", err)
+	}
+	if len(actorTemplates) > 0 {
 		return store.ErrFailedPrecondition
 	}
 
@@ -239,6 +667,8 @@ func unmarshalWorkerEvent(payload string) (store.WorkerEvent, error) {
 }
 
 const workerPubSubChannel = "worker-changes"
+const actorTemplatePubSubChannel = "actortemplate-changes"
+const workerPoolPubSubChannel = "workerpool-changes"
 
 func (s *Persistence) publishWorkerEvent(ctx context.Context, eventType store.WorkerEventType, worker *ateapipb.Worker) {
 	payload, err := marshalWorkerEvent(eventType, worker)
@@ -283,6 +713,140 @@ func (s *Persistence) WatchWorkers(ctx context.Context) (*store.WorkerWatch, err
 		}
 	}()
 	return store.NewWorkerWatch(ch, cancel), nil
+}
+
+func (s *Persistence) publishActorTemplateEvent(ctx context.Context, eventType store.ResourceEventType, actorTemplate *ateapipb.ActorTemplate) {
+	payload, err := marshalActorTemplateEvent(eventType, actorTemplate)
+	if err != nil {
+		slog.ErrorContext(ctx, "ActorTemplate event marshal failed", slog.Any("err", err))
+		return
+	}
+	if err := s.rdb.Publish(ctx, actorTemplatePubSubChannel, payload).Err(); err != nil {
+		slog.ErrorContext(ctx, "ActorTemplate event publish failed", slog.Any("err", err))
+	}
+}
+
+func marshalActorTemplateEvent(eventType store.ResourceEventType, actorTemplate *ateapipb.ActorTemplate) (string, error) {
+	resourceJSON, err := protojson.Marshal(actorTemplate)
+	if err != nil {
+		return "", fmt.Errorf("in protojson.Marshal: %w", err)
+	}
+	msg, err := json.Marshal(actorTemplatePubSubMsg{Type: int(eventType), ActorTemplate: string(resourceJSON)})
+	if err != nil {
+		return "", fmt.Errorf("in json.Marshal: %w", err)
+	}
+	return string(msg), nil
+}
+
+func unmarshalActorTemplateEvent(payload string) (store.ActorTemplateEvent, error) {
+	var msg actorTemplatePubSubMsg
+	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+		return store.ActorTemplateEvent{}, fmt.Errorf("in json.Unmarshal: %w", err)
+	}
+	actorTemplate := &ateapipb.ActorTemplate{}
+	if err := protojson.Unmarshal([]byte(msg.ActorTemplate), actorTemplate); err != nil {
+		return store.ActorTemplateEvent{}, fmt.Errorf("in protojson.Unmarshal: %w", err)
+	}
+	return store.ActorTemplateEvent{Type: store.ResourceEventType(msg.Type), ActorTemplate: actorTemplate}, nil
+}
+
+func (s *Persistence) WatchActorTemplates(ctx context.Context) (*store.ActorTemplateWatch, error) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	pubsub := s.rdb.Subscribe(watchCtx, actorTemplatePubSubChannel)
+	ch := make(chan store.ActorTemplateEvent, 128)
+	go func() {
+		defer close(ch)
+		defer pubsub.Close()
+		msgCh := pubsub.Channel()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case msg, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				event, err := unmarshalActorTemplateEvent(msg.Payload)
+				if err != nil {
+					slog.ErrorContext(ctx, "ActorTemplate event unmarshal failed", slog.Any("err", err))
+					continue
+				}
+				select {
+				case ch <- event:
+				case <-watchCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return store.NewActorTemplateWatch(ch, cancel), nil
+}
+
+func (s *Persistence) publishWorkerPoolEvent(ctx context.Context, eventType store.ResourceEventType, workerPool *ateapipb.WorkerPool) {
+	payload, err := marshalWorkerPoolEvent(eventType, workerPool)
+	if err != nil {
+		slog.ErrorContext(ctx, "WorkerPool event marshal failed", slog.Any("err", err))
+		return
+	}
+	if err := s.rdb.Publish(ctx, workerPoolPubSubChannel, payload).Err(); err != nil {
+		slog.ErrorContext(ctx, "WorkerPool event publish failed", slog.Any("err", err))
+	}
+}
+
+func marshalWorkerPoolEvent(eventType store.ResourceEventType, workerPool *ateapipb.WorkerPool) (string, error) {
+	resourceJSON, err := protojson.Marshal(workerPool)
+	if err != nil {
+		return "", fmt.Errorf("in protojson.Marshal: %w", err)
+	}
+	msg, err := json.Marshal(workerPoolPubSubMsg{Type: int(eventType), WorkerPool: string(resourceJSON)})
+	if err != nil {
+		return "", fmt.Errorf("in json.Marshal: %w", err)
+	}
+	return string(msg), nil
+}
+
+func unmarshalWorkerPoolEvent(payload string) (store.WorkerPoolEvent, error) {
+	var msg workerPoolPubSubMsg
+	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+		return store.WorkerPoolEvent{}, fmt.Errorf("in json.Unmarshal: %w", err)
+	}
+	workerPool := &ateapipb.WorkerPool{}
+	if err := protojson.Unmarshal([]byte(msg.WorkerPool), workerPool); err != nil {
+		return store.WorkerPoolEvent{}, fmt.Errorf("in protojson.Unmarshal: %w", err)
+	}
+	return store.WorkerPoolEvent{Type: store.ResourceEventType(msg.Type), WorkerPool: workerPool}, nil
+}
+
+func (s *Persistence) WatchWorkerPools(ctx context.Context) (*store.WorkerPoolWatch, error) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	pubsub := s.rdb.Subscribe(watchCtx, workerPoolPubSubChannel)
+	ch := make(chan store.WorkerPoolEvent, 128)
+	go func() {
+		defer close(ch)
+		defer pubsub.Close()
+		msgCh := pubsub.Channel()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case msg, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				event, err := unmarshalWorkerPoolEvent(msg.Payload)
+				if err != nil {
+					slog.ErrorContext(ctx, "WorkerPool event unmarshal failed", slog.Any("err", err))
+					continue
+				}
+				select {
+				case ch <- event:
+				case <-watchCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return store.NewWorkerPoolWatch(ch, cancel), nil
 }
 
 // DebugClearAll flushes all data from Redis.

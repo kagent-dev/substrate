@@ -15,12 +15,12 @@
 package controlapi
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 // resolveSandboxAssets determines the sandbox binaries an actor should boot with
@@ -28,13 +28,17 @@ import (
 // SandboxClass (default gvisor) of a given worker pool, then picks the SandboxConfig
 // named by the pool — or, if none is named, the cluster default SandboxConfig for that class.
 func resolveSandboxAssets(
-	workerPoolLister listersv1alpha1.WorkerPoolLister,
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister,
+	ctx context.Context,
+	st store.Interface,
 	poolNamespace, poolName string,
 ) (*ateletpb.SandboxAssets, error) {
-	wp, err := workerPoolLister.WorkerPools(poolNamespace).Get(poolName)
+	protoWP, err := st.GetWorkerPool(ctx, poolNamespace, poolName)
 	if err != nil {
 		return nil, fmt.Errorf("while getting WorkerPool %s/%s: %w", poolNamespace, poolName, err)
+	}
+	wp, err := protoWorkerPoolToAPI(protoWP)
+	if err != nil {
+		return nil, fmt.Errorf("while converting WorkerPool %s/%s: %w", poolNamespace, poolName, err)
 	}
 
 	class := wp.Spec.SandboxClass
@@ -44,16 +48,17 @@ func resolveSandboxAssets(
 
 	var sc *atev1alpha1.SandboxConfig
 	if name := wp.Spec.SandboxConfigName; name != "" {
-		sc, err = sandboxConfigLister.Get(name)
+		protoSC, err := st.GetSandboxConfig(ctx, name)
 		if err != nil {
 			return nil, fmt.Errorf("while getting SandboxConfig %q: %w", name, err)
 		}
+		sc = protoSandboxConfigToAPI(protoSC)
 		if sc.Spec.SandboxClass != class {
 			return nil, fmt.Errorf("SandboxConfig %q has class %q but WorkerPool %s/%s is class %q",
 				name, sc.Spec.SandboxClass, poolNamespace, poolName, class)
 		}
 	} else {
-		sc, err = defaultSandboxConfig(sandboxConfigLister, class)
+		sc, err = defaultSandboxConfig(ctx, st, class)
 		if err != nil {
 			return nil, err
 		}
@@ -64,13 +69,14 @@ func resolveSandboxAssets(
 
 // defaultSandboxConfig returns the single SandboxConfig marked Default for the
 // given class, erroring if there are zero or more than one.
-func defaultSandboxConfig(lister listersv1alpha1.SandboxConfigLister, class atev1alpha1.SandboxClass) (*atev1alpha1.SandboxConfig, error) {
-	all, err := lister.List(labels.Everything())
+func defaultSandboxConfig(ctx context.Context, st store.Interface, class atev1alpha1.SandboxClass) (*atev1alpha1.SandboxConfig, error) {
+	all, err := st.ListSandboxConfigs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("while listing SandboxConfigs: %w", err)
 	}
 	var match *atev1alpha1.SandboxConfig
-	for _, sc := range all {
+	for _, protoSC := range all {
+		sc := protoSandboxConfigToAPI(protoSC)
 		if sc.Spec.SandboxClass == class && sc.Spec.Default {
 			if match != nil {
 				return nil, fmt.Errorf("multiple default SandboxConfigs for class %q (%q and %q)", class, match.Name, sc.Name)

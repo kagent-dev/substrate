@@ -39,8 +39,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -49,18 +47,8 @@ import (
 
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/serverboot"
-	v1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
-
-var (
-	scheme = runtime.NewScheme()
-)
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
-}
 
 // RouterConfig holds deployment setup and endpoint options for the router node instance.
 type RouterConfig struct {
@@ -122,7 +110,7 @@ func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
 		slog.Info("Connecting to Kubernetes API server", slog.String("host", k8sCfg.Host))
 
 		k8sClient, err = client.New(k8sCfg, client.Options{
-			Scheme: scheme,
+			Scheme: clientgoscheme.Scheme,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize cluster client: %w", err)
@@ -134,18 +122,10 @@ func NewRouterServer(cfg RouterConfig) (*RouterServer, error) {
 		}
 	}
 
-	var store atStore
-	if cfg.TemplatesFile != "" {
-		store = newFileATStore(cfg.TemplatesFile)
-	} else {
-		store = newk8sATStore(k8sClient)
-	}
-
 	return &RouterServer{
 		cfg:       cfg,
 		k8sClient: k8sClient,
 		clientset: clientset,
-		atStore:   store,
 	}, nil
 }
 
@@ -245,7 +225,13 @@ func (s *RouterServer) Run(ctx context.Context) error {
 		}
 		s.extprocSrv = NewExtProcServer(s.cfg.ExtprocPort, s.apiClient, routeDuration)
 	}
-	ctrl := NewController(s.k8sClient, s.clientset, s.cfg, xdsSrv, s.extprocSrv)
+	if s.cfg.TemplatesFile != "" {
+		s.atStore = newFileATStore(s.cfg.TemplatesFile)
+	} else {
+		s.atStore = newAPIATStore(s.apiClient)
+	}
+
+	ctrl := NewController(s.k8sClient, s.clientset, s.cfg, s.apiClient, xdsSrv, s.extprocSrv)
 
 	s.health = newRouterHealth(s.cfg.HealthInterval, s.clientset, s.apiClient, s.cfg)
 

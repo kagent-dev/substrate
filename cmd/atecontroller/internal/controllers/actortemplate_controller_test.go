@@ -17,17 +17,17 @@ package controllers
 import (
 	"testing"
 
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
 
 func TestGoldenSnapshotWarmupFor(t *testing.T) {
-	probe := &atev1alpha1.ContainerReadyz{
-		HTTPGet: &atev1alpha1.HTTPGetAction{Port: 80},
+	probe := &ateapipb.ContainerReadyz{
+		HttpGet: &ateapipb.HTTPGetAction{Port: 80},
 	}
 
 	tests := []struct {
 		name       string
-		containers []atev1alpha1.Container
+		containers []*ateapipb.Container
 		wantZero   bool
 	}{
 		{
@@ -37,7 +37,7 @@ func TestGoldenSnapshotWarmupFor(t *testing.T) {
 		},
 		{
 			name: "all containers have readyz skips warmup",
-			containers: []atev1alpha1.Container{
+			containers: []*ateapipb.Container{
 				{Name: "a", Readyz: probe},
 				{Name: "b", Readyz: probe},
 			},
@@ -45,14 +45,14 @@ func TestGoldenSnapshotWarmupFor(t *testing.T) {
 		},
 		{
 			name: "single container with readyz skips warmup",
-			containers: []atev1alpha1.Container{
+			containers: []*ateapipb.Container{
 				{Name: "a", Readyz: probe},
 			},
 			wantZero: true,
 		},
 		{
 			name: "mixed containers keep warmup",
-			containers: []atev1alpha1.Container{
+			containers: []*ateapipb.Container{
 				{Name: "a", Readyz: probe},
 				{Name: "b"},
 			},
@@ -60,7 +60,7 @@ func TestGoldenSnapshotWarmupFor(t *testing.T) {
 		},
 		{
 			name: "no readyz anywhere keeps warmup",
-			containers: []atev1alpha1.Container{
+			containers: []*ateapipb.Container{
 				{Name: "a"},
 				{Name: "b"},
 			},
@@ -69,10 +69,10 @@ func TestGoldenSnapshotWarmupFor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			at := &atev1alpha1.ActorTemplate{
-				Spec: atev1alpha1.ActorTemplateSpec{Containers: tt.containers},
+			at := &ateapipb.ActorTemplate{
+				Spec: &ateapipb.ActorTemplateSpec{Containers: tt.containers},
 			}
-			got := goldenSnapshotWarmupFor(at)
+			got := goldenSnapshotWarmupForProto(at)
 			if tt.wantZero && got != 0 {
 				t.Errorf("goldenSnapshotWarmupFor = %v, want 0", got)
 			}

@@ -24,6 +24,8 @@ import (
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
+const workerPoolFieldOwner = "workerpool-controller"
+
 // buildDeploymentApplyConfig constructs the SSA apply configuration for the
 // Deployment managed by a WorkerPool. Only fields owned by this controller
 // are declared here.
@@ -241,4 +243,8 @@ func nodeSelectorRequirementToApply(req *corev1.NodeSelectorRequirement) *corev1
 		ac.WithValues(req.Values...)
 	}
 	return ac
+}
+
+func deploymentName(wpName string) string {
+	return wpName + "-deployment"
 }

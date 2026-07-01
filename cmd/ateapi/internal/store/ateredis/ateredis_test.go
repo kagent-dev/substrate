@@ -907,6 +907,16 @@ func newTestAtespace(name string) *ateapipb.Atespace {
 	return &ateapipb.Atespace{Name: name}
 }
 
+func newTestWorkerPoolGrant(atespace, namespace, name string) *ateapipb.WorkerPoolGrant {
+	return &ateapipb.WorkerPoolGrant{
+		Atespace: atespace,
+		WorkerPool: &ateapipb.WorkerPoolRef{
+			Namespace: namespace,
+			Name:      name,
+		},
+	}
+}
+
 func TestCreateAtespace_Success(t *testing.T) {
 	mr, s, ctx := setupTest(t)
 	defer mr.Close()
@@ -957,6 +967,70 @@ func TestAtespaceExists(t *testing.T) {
 	}
 	if ok, err := s.AtespaceExists(ctx, "team-a"); err != nil || !ok {
 		t.Fatalf("AtespaceExists after create = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+func TestWorkerPoolGrantLifecycle(t *testing.T) {
+	mr, s, ctx := setupTest(t)
+	defer mr.Close()
+
+	grant := newTestWorkerPoolGrant("team-a", "workers", "pool-a")
+	if err := s.CreateWorkerPoolGrant(ctx, grant); err != nil {
+		t.Fatalf("CreateWorkerPoolGrant failed: %v", err)
+	}
+	if err := s.CreateWorkerPoolGrant(ctx, grant); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Errorf("second CreateWorkerPoolGrant = %v, want ErrAlreadyExists", err)
+	}
+
+	got, err := s.GetWorkerPoolGrant(ctx, "team-a", "workers", "pool-a")
+	if err != nil {
+		t.Fatalf("GetWorkerPoolGrant failed: %v", err)
+	}
+	if diff := cmp.Diff(grant, got, protocmp.Transform()); diff != "" {
+		t.Errorf("GetWorkerPoolGrant mismatch (-want +got):\n%s", diff)
+	}
+	granted, err := s.WorkerPoolGranted(ctx, "team-a", "workers", "pool-a")
+	if err != nil {
+		t.Fatalf("WorkerPoolGranted failed: %v", err)
+	}
+	if !granted {
+		t.Errorf("WorkerPoolGranted = false, want true")
+	}
+
+	list, err := s.ListWorkerPoolGrants(ctx, "team-a")
+	if err != nil {
+		t.Fatalf("ListWorkerPoolGrants(team-a) failed: %v", err)
+	}
+	if diff := cmp.Diff([]*ateapipb.WorkerPoolGrant{grant}, list, protocmp.Transform()); diff != "" {
+		t.Errorf("ListWorkerPoolGrants(team-a) mismatch (-want +got):\n%s", diff)
+	}
+
+	if err := s.CreateWorkerPoolGrant(ctx, newTestWorkerPoolGrant("team-b", "workers", "pool-a")); err != nil {
+		t.Fatalf("CreateWorkerPoolGrant(team-b) failed: %v", err)
+	}
+	all, err := s.ListWorkerPoolGrants(ctx, "")
+	if err != nil {
+		t.Fatalf("ListWorkerPoolGrants(all) failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("ListWorkerPoolGrants(all) returned %d grants, want 2", len(all))
+	}
+
+	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); err != nil {
+		t.Fatalf("DeleteWorkerPoolGrant failed: %v", err)
+	}
+	if _, err := s.GetWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetWorkerPoolGrant after delete = %v, want ErrNotFound", err)
+	}
+	granted, err = s.WorkerPoolGranted(ctx, "team-a", "workers", "pool-a")
+	if err != nil {
+		t.Fatalf("WorkerPoolGranted after delete failed: %v", err)
+	}
+	if granted {
+		t.Errorf("WorkerPoolGranted after delete = true, want false")
+	}
+	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("second DeleteWorkerPoolGrant = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1039,6 +1113,24 @@ func TestDeleteAtespace_NonEmpty_Rejected(t *testing.T) {
 		t.Errorf("DeleteAtespace on non-empty = %v, want ErrFailedPrecondition", err)
 	}
 	// The atespace must survive a rejected delete.
+	if _, err := s.GetAtespace(ctx, "team-a"); err != nil {
+		t.Errorf("atespace should still exist after rejected delete, got %v", err)
+	}
+}
+
+func TestDeleteAtespace_WithWorkerPoolGrant_Rejected(t *testing.T) {
+	mr, s, ctx := setupTest(t)
+	defer mr.Close()
+
+	if err := s.CreateAtespace(ctx, newTestAtespace("team-a")); err != nil {
+		t.Fatalf("CreateAtespace failed: %v", err)
+	}
+	if err := s.CreateWorkerPoolGrant(ctx, newTestWorkerPoolGrant("team-a", "workers", "pool-a")); err != nil {
+		t.Fatalf("CreateWorkerPoolGrant failed: %v", err)
+	}
+	if err := s.DeleteAtespace(ctx, "team-a"); !errors.Is(err, store.ErrFailedPrecondition) {
+		t.Errorf("DeleteAtespace with grant = %v, want ErrFailedPrecondition", err)
+	}
 	if _, err := s.GetAtespace(ctx, "team-a"); err != nil {
 		t.Errorf("atespace should still exist after rejected delete, got %v", err)
 	}
