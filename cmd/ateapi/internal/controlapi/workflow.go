@@ -22,7 +22,6 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -127,9 +126,6 @@ func NewActorWorkflow(
 	store store.Interface,
 	workerCache *workercache.Cache,
 	dialer *AteletDialer,
-	actorTemplateLister listersv1alpha1.ActorTemplateLister,
-	workerPoolLister listersv1alpha1.WorkerPoolLister,
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister,
 	kubeClient kubernetes.Interface,
 ) *ActorWorkflow {
 	return &ActorWorkflow{

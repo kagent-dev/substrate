@@ -17,7 +17,6 @@ package controlapi
 import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/client-go/kubernetes"
 )
@@ -25,11 +24,9 @@ import (
 // Service implements ateapipb.Control
 type Service struct {
 	ateapipb.UnimplementedControlServer
-	persistence         store.Interface
-	dialer              *AteletDialer
-	actorTemplateLister listersv1alpha1.ActorTemplateLister
-	workerPoolLister    listersv1alpha1.WorkerPoolLister
-	actorWorkflow       *ActorWorkflow
+	persistence   store.Interface
+	dialer        *AteletDialer
+	actorWorkflow *ActorWorkflow
 }
 
 var _ ateapipb.ControlServer = (*Service)(nil)
@@ -38,18 +35,13 @@ var _ ateapipb.ControlServer = (*Service)(nil)
 func NewService(
 	persistence store.Interface,
 	workerCache *workercache.Cache,
-	actorTemplateLister listersv1alpha1.ActorTemplateLister,
-	workerPoolLister listersv1alpha1.WorkerPoolLister,
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister,
 	dialer *AteletDialer,
 	kubeClient kubernetes.Interface,
 ) *Service {
 	s := &Service{
-		persistence:         persistence,
-		actorTemplateLister: actorTemplateLister,
-		workerPoolLister:    workerPoolLister,
-		dialer:              dialer,
-		actorWorkflow:       NewActorWorkflow(persistence, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, kubeClient),
+		persistence:   persistence,
+		dialer:        dialer,
+		actorWorkflow: NewActorWorkflow(persistence, workerCache, dialer, kubeClient),
 	}
 
 	return s

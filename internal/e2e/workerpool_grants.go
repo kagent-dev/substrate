@@ -19,24 +19,19 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 )
 
-func GrantAtespaceToTemplateWorkerPools(t testing.TB, ctx context.Context, clients *Clients, atespace string, at *v1alpha1.ActorTemplate) {
+func GrantAtespaceToTemplateWorkerPools(t testing.TB, ctx context.Context, clients *Clients, atespace string, at *ateapipb.ActorTemplate) {
 	t.Helper()
 
-	selector := labels.Everything()
-	if at.Spec.WorkerSelector != nil {
-		sel, err := metav1.LabelSelectorAsSelector(at.Spec.WorkerSelector)
-		if err != nil {
-			t.Fatalf("invalid WorkerSelector on ActorTemplate %s/%s: %v", at.Namespace, at.Name, err)
-		}
-		selector = sel
+	selector, err := labelSelector(at.GetSpec().GetWorkerSelector())
+	if err != nil {
+		t.Fatalf("invalid WorkerSelector on ActorTemplate %s/%s: %v", at.GetAtespace(), at.GetName(), err)
 	}
 
 	pools, err := clients.SubstrateAPI.ListWorkerPools(ctx, &ateapipb.ListWorkerPoolsRequest{})
@@ -46,7 +41,7 @@ func GrantAtespaceToTemplateWorkerPools(t testing.TB, ctx context.Context, clien
 
 	granted := 0
 	for _, pool := range pools.GetWorkerPools() {
-		if pool.GetSpec().GetSandboxClass() != string(at.Spec.SandboxClass) || !selector.Matches(labels.Set(pool.GetLabels())) {
+		if pool.GetSpec().GetSandboxClass() != at.GetSpec().GetSandboxClass() || !selector.Matches(labels.Set(pool.GetLabels())) {
 			continue
 		}
 		_, err := clients.SubstrateAPI.CreateWorkerPoolGrant(ctx, &ateapipb.CreateWorkerPoolGrantRequest{
@@ -62,13 +57,47 @@ func GrantAtespaceToTemplateWorkerPools(t testing.TB, ctx context.Context, clien
 		granted++
 	}
 	if granted == 0 {
-		t.Fatalf("no WorkerPool matched ActorTemplate %s/%s for atespace %s: %s", at.Namespace, at.Name, atespace, describeTemplateWorkerPoolMatch(at))
+		t.Fatalf("no WorkerPool matched ActorTemplate %s/%s for atespace %s: %s", at.GetAtespace(), at.GetName(), atespace, describeTemplateWorkerPoolMatch(at))
 	}
 }
 
-func describeTemplateWorkerPoolMatch(at *v1alpha1.ActorTemplate) string {
-	if at.Spec.WorkerSelector == nil {
-		return fmt.Sprintf("sandboxClass=%q selector=<none>", at.Spec.SandboxClass)
+func describeTemplateWorkerPoolMatch(at *ateapipb.ActorTemplate) string {
+	if at.GetSpec().GetWorkerSelector() == nil {
+		return fmt.Sprintf("sandboxClass=%q selector=<none>", at.GetSpec().GetSandboxClass())
 	}
-	return fmt.Sprintf("sandboxClass=%q selector=%v", at.Spec.SandboxClass, at.Spec.WorkerSelector.MatchLabels)
+	return fmt.Sprintf("sandboxClass=%q selector=%v", at.GetSpec().GetSandboxClass(), at.GetSpec().GetWorkerSelector().GetMatchLabels())
+}
+
+func labelSelector(in *ateapipb.LabelSelector) (labels.Selector, error) {
+	if in == nil {
+		return labels.Everything(), nil
+	}
+	selector := labels.SelectorFromSet(labels.Set(in.GetMatchLabels()))
+	for _, expr := range in.GetMatchExpressions() {
+		op, err := selectionOperator(expr.GetOperator())
+		if err != nil {
+			return nil, err
+		}
+		req, err := labels.NewRequirement(expr.GetKey(), op, expr.GetValues())
+		if err != nil {
+			return nil, err
+		}
+		selector = selector.Add(*req)
+	}
+	return selector, nil
+}
+
+func selectionOperator(op string) (selection.Operator, error) {
+	switch op {
+	case "In":
+		return selection.In, nil
+	case "NotIn":
+		return selection.NotIn, nil
+	case "Exists":
+		return selection.Exists, nil
+	case "DoesNotExist":
+		return selection.DoesNotExist, nil
+	default:
+		return "", fmt.Errorf("unsupported selector operator %q", op)
+	}
 }

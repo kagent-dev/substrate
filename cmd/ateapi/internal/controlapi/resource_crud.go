@@ -22,7 +22,6 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/resources"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,7 +42,7 @@ func (s *Service) CreateActorTemplate(ctx context.Context, req *ateapipb.CreateA
 		at.Status = &ateapipb.ActorTemplateStatus{}
 	}
 	if at.Status.Phase == "" {
-		at.Status.Phase = string(atev1alpha1.PhaseInitial)
+		at.Status.Phase = actorTemplatePhaseInitial
 	}
 	if err := s.persistence.CreateActorTemplate(ctx, at); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {

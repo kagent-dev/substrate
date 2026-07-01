@@ -18,23 +18,22 @@ import (
 	"testing"
 
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
 func TestToAteletSnapshotScope(t *testing.T) {
 	tests := []struct {
 		name     string
-		in       atev1alpha1.SnapshotScope
+		in       string
 		expected ateletpb.SnapshotScope
 	}{
 		{
 			name:     "Full scope",
-			in:       atev1alpha1.SnapshotScopeFull,
+			in:       snapshotScopeFull,
 			expected: ateletpb.SnapshotScope_SNAPSHOT_SCOPE_FULL,
 		},
 		{
 			name:     "Data scope",
-			in:       atev1alpha1.SnapshotScopeData,
+			in:       snapshotScopeData,
 			expected: ateletpb.SnapshotScope_SNAPSHOT_SCOPE_DATA,
 		},
 		{

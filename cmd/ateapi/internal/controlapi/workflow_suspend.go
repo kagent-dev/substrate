@@ -25,7 +25,6 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -39,7 +38,7 @@ type SuspendInput struct {
 // SuspendState holds the mutable state loaded and modified during execution.
 type SuspendState struct {
 	Actor         *ateapipb.Actor
-	ActorTemplate *atev1alpha1.ActorTemplate
+	ActorTemplate *ateapipb.ActorTemplate
 }
 
 type LoadActorForSuspendStep struct {
@@ -62,7 +61,7 @@ func (s *LoadActorForSuspendStep) Execute(ctx context.Context, input *SuspendInp
 	if err != nil {
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	state.ActorTemplate = protoActorTemplateToAPI(actorTemplate)
+	state.ActorTemplate = actorTemplate
 
 	return nil
 }
@@ -85,7 +84,7 @@ func (s *MarkSuspendingStep) Execute(ctx context.Context, input *SuspendInput, s
 
 	state.Actor.Status = ateapipb.Actor_STATUS_SUSPENDING
 	snapshotID := time.Now().Format(time.RFC3339) + "-" + rand.Text()
-	state.Actor.InProgressSnapshot = strings.TrimSuffix(state.ActorTemplate.Spec.SnapshotsConfig.Location, "/") + "/" + input.ActorID + "/" + snapshotID
+	state.Actor.InProgressSnapshot = strings.TrimSuffix(state.ActorTemplate.GetSpec().GetSnapshotsConfig().GetLocation(), "/") + "/" + input.ActorID + "/" + snapshotID
 	return s.store.UpdateActor(ctx, state.Actor, state.Actor.GetVersion())
 }
 
@@ -132,7 +131,7 @@ func (s *CallAteletSuspendStep) Execute(ctx context.Context, input *SuspendInput
 				SnapshotUriPrefix: state.Actor.GetInProgressSnapshot(),
 			},
 		},
-		Scope: toAteletSnapshotScope(state.ActorTemplate.Spec.SnapshotsConfig.OnCommit),
+		Scope: toAteletSnapshotScope(state.ActorTemplate.GetSpec().GetSnapshotsConfig().GetOnCommit()),
 	}
 
 	_, err = client.Checkpoint(ctx, req)

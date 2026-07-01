@@ -23,13 +23,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 const PauseImage = "registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4"
+
+const (
+	SandboxClassGvisor  = "gvisor"
+	SandboxClassMicroVM = "microvm"
+)
 
 func KoBuild(t testing.TB, importPath string) string {
 	t.Helper()
@@ -75,7 +79,7 @@ func EnsureGvisorSandboxConfig(t testing.TB, ctx context.Context, clients *Clien
 		SandboxConfig: &ateapipb.SandboxConfig{
 			Name: "gvisor-default",
 			Spec: &ateapipb.SandboxConfigSpec{
-				SandboxClass: string(v1alpha1.SandboxClassGvisor),
+				SandboxClass: SandboxClassGvisor,
 				Default:      true,
 				Assets: map[string]*ateapipb.SandboxAssetFiles{
 					"amd64": {Files: map[string]*ateapipb.AssetFile{
@@ -114,7 +118,7 @@ func EnsureMicroVMSandboxConfig(t testing.TB, ctx context.Context, clients *Clie
 		SandboxConfig: &ateapipb.SandboxConfig{
 			Name: name,
 			Spec: &ateapipb.SandboxConfigSpec{
-				SandboxClass: string(v1alpha1.SandboxClassMicroVM),
+				SandboxClass: SandboxClassMicroVM,
 				Assets: map[string]*ateapipb.SandboxAssetFiles{
 					"arm64": {Files: microVMAssetFiles(bucket, virtiofsdSHA256, map[string]string{
 						"cloud-hypervisor": "bf004ddc1a148f47caa87ac49a783b8dbd6bf9bc27abe522ed197df7b982d3b1",

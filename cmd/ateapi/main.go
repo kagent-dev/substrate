@@ -37,8 +37,6 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
-	"github.com/agent-substrate/substrate/pkg/client/clientset/versioned"
-	"github.com/agent-substrate/substrate/pkg/client/informers/externalversions"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/pflag"
@@ -112,7 +110,7 @@ func main() {
 		serverboot.Fatal(ctx, "Failed to set up Redis/Valkey", err)
 	}
 
-	clientset, ateClient, err := newKubeClients()
+	clientset, err := newKubeClients()
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to create Kubernetes clients", err)
 	}
@@ -129,11 +127,6 @@ func main() {
 		serverboot.Fatal(ctx, "Failed to seed worker cache", err)
 	}
 
-	ateFactory := externalversions.NewSharedInformerFactory(ateClient, 0)
-	actorTemplateLister := ateFactory.Api().V1alpha1().ActorTemplates().Lister()
-	workerPoolLister := ateFactory.Api().V1alpha1().WorkerPools().Lister()
-	sandboxConfigLister := ateFactory.Api().V1alpha1().SandboxConfigs().Lister()
-
 	workerPodInformerFactory, workerPodInformer := controlapi.WorkerPodInformer(clientset)
 	ateletPodInformerFactory, ateletPodInformer := controlapi.AteletInformer(clientset)
 
@@ -144,14 +137,12 @@ func main() {
 	defer close(stopCh)
 	workerPodInformerFactory.Start(stopCh)
 	ateletPodInformerFactory.Start(stopCh)
-	ateFactory.Start(stopCh)
 
 	workerPodInformerFactory.WaitForCacheSync(stopCh)
 	ateletPodInformerFactory.WaitForCacheSync(stopCh)
-	ateFactory.WaitForCacheSync(stopCh)
 
 	dialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer())
-	sm := controlapi.NewService(redisPersistence, workerCache, actorTemplateLister, workerPoolLister, sandboxConfigLister, dialer, clientset)
+	sm := controlapi.NewService(redisPersistence, workerCache, dialer, clientset)
 
 	jwtIssuerDiscoveryClient := buildK8sServiceAccountIssuerDiscoveryClient(ctx, *clientJWTCAFile, *clientJWTIssuer)
 	if authModeParsed == ateapiauth.ModeJWT && jwtIssuerDiscoveryClient == nil {
@@ -327,22 +318,17 @@ func pingRedisWithRetries(ctx context.Context, client *redis.ClusterClient) erro
 	return fmt.Errorf("ping Redis/Valkey after 30 retries: %w", pingErr)
 }
 
-// newKubeClients builds the standard Kubernetes clientset and the ate
-// (substrate CRD) clientset from in-cluster config.
-func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
+// newKubeClients builds the standard Kubernetes clientset from in-cluster config.
+func newKubeClients() (*kubernetes.Clientset, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, nil, fmt.Errorf("get cluster config: %w", err)
+		return nil, fmt.Errorf("get cluster config: %w", err)
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create clientset: %w", err)
+		return nil, fmt.Errorf("create clientset: %w", err)
 	}
-	ateClient, err := versioned.NewForConfig(config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create ate clientset: %w", err)
-	}
-	return clientset, ateClient, nil
+	return clientset, nil
 }
 
 // buildServerCreds loads the workerpool CA pool (if configured) and

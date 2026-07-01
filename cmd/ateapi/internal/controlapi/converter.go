@@ -18,18 +18,29 @@ import (
 	"log/slog"
 
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
-// convert atev1alpha1.SnapshotScope to ateletpb.SnapshotScope
-func toAteletSnapshotScope(in atev1alpha1.SnapshotScope) ateletpb.SnapshotScope {
+const (
+	sandboxClassGvisor  = "gvisor"
+	sandboxClassMicroVM = "microvm"
+
+	snapshotScopeFull = "Full"
+	snapshotScopeData = "Data"
+
+	actorTemplatePhaseInitial           = ""
+	actorTemplatePhaseResumeGoldenActor = "ResumeGoldenActor"
+	actorTemplatePhaseWaitGoldenActor   = "WaitGoldenActor"
+	actorTemplatePhaseReady             = "Ready"
+)
+
+func toAteletSnapshotScope(in string) ateletpb.SnapshotScope {
 	switch in {
-	case atev1alpha1.SnapshotScopeFull:
+	case snapshotScopeFull:
 		return ateletpb.SnapshotScope_SNAPSHOT_SCOPE_FULL
-	case atev1alpha1.SnapshotScopeData:
+	case snapshotScopeData:
 		return ateletpb.SnapshotScope_SNAPSHOT_SCOPE_DATA
 	default:
-		slog.Warn("unknown SnapshotScope; falling back to Full", "scope", string(in))
+		slog.Warn("unknown SnapshotScope; falling back to Full", "scope", in)
 		return ateletpb.SnapshotScope_SNAPSHOT_SCOPE_FULL
 	}
 }

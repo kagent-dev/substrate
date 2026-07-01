@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/internal/resources"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -28,13 +27,18 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
 	GoldenSnapshotCreationReason = "GoldenSnapshotCreation"
+	conditionTrue                = "True"
+	actorTemplatePhaseInitial    = ""
+	actorTemplatePhaseResume     = "ResumeGoldenActor"
+	actorTemplatePhaseWait       = "WaitGoldenActor"
+	actorTemplatePhaseReady      = "Ready"
 
 	// goldenSnapshotWarmup is the default wall-clock delay between resuming
 	// the golden actor and taking its snapshot, used as a coarse "give the
@@ -83,13 +87,13 @@ func (p *APIActorTemplateProjector) Start(ctx context.Context) error {
 
 func (p *APIActorTemplateProjector) reconcile(ctx context.Context, at *ateapipb.ActorTemplate) error {
 	switch at.GetStatus().GetPhase() {
-	case string(atev1alpha1.PhaseInitial):
+	case actorTemplatePhaseInitial:
 		return p.reconcileInitial(ctx, at)
-	case string(atev1alpha1.PhaseResumeGoldenActor):
+	case actorTemplatePhaseResume:
 		return p.reconcileResumeGolden(ctx, at)
-	case string(atev1alpha1.PhaseWaitGoldenActor):
+	case actorTemplatePhaseWait:
 		return p.reconcileWaitGolden(ctx, at)
-	case string(atev1alpha1.PhaseReady):
+	case actorTemplatePhaseReady:
 		return nil
 	default:
 		return fmt.Errorf("unrecognized phase %q", at.GetStatus().GetPhase())
@@ -116,7 +120,7 @@ func (p *APIActorTemplateProjector) reconcileInitial(ctx context.Context, at *at
 	}
 	next := proto.Clone(at).(*ateapipb.ActorTemplate)
 	ensureActorTemplateStatus(next)
-	next.Status.Phase = string(atev1alpha1.PhaseResumeGoldenActor)
+	next.Status.Phase = actorTemplatePhaseResume
 	next.Status.GoldenActorId = actorID
 	_, err = p.AteClient.UpdateActorTemplate(ctx, actorTemplateStatusUpdate(next))
 	return err
@@ -139,7 +143,7 @@ func (p *APIActorTemplateProjector) reconcileResumeGolden(ctx context.Context, a
 	}
 	next := proto.Clone(at).(*ateapipb.ActorTemplate)
 	ensureActorTemplateStatus(next)
-	next.Status.Phase = string(atev1alpha1.PhaseWaitGoldenActor)
+	next.Status.Phase = actorTemplatePhaseWait
 	next.Status.TakeGoldenSnapshotAt = timestamppb.New(time.Now().Add(goldenSnapshotWarmupForProto(at)))
 	_, err = p.AteClient.UpdateActorTemplate(ctx, actorTemplateStatusUpdate(next))
 	return err
@@ -168,10 +172,10 @@ func (p *APIActorTemplateProjector) reconcileWaitGolden(ctx context.Context, at 
 	next := proto.Clone(at).(*ateapipb.ActorTemplate)
 	ensureActorTemplateStatus(next)
 	next.Status.GoldenSnapshot = resp.GetActor().GetLatestSnapshotInfo().GetExternal().GetSnapshotUriPrefix()
-	next.Status.Phase = string(atev1alpha1.PhaseReady)
+	next.Status.Phase = actorTemplatePhaseReady
 	next.Status.Conditions = []*ateapipb.Condition{{
 		Type:               "Ready",
-		Status:             string(metav1.ConditionTrue),
+		Status:             conditionTrue,
 		LastTransitionTime: timestamppb.Now(),
 		Reason:             "Ready",
 		Message:            "Actor template is ready for use",
@@ -194,16 +198,9 @@ func ensureActorTemplateStatus(at *ateapipb.ActorTemplate) {
 }
 
 func (p *APIActorTemplateProjector) grantGoldenActorAccess(ctx context.Context, at *ateapipb.ActorTemplate) error {
-	selector := labels.Everything()
-	if at.GetSpec().GetWorkerSelector() != nil {
-		sel, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
-			MatchLabels:      copyStringMap(at.GetSpec().GetWorkerSelector().GetMatchLabels()),
-			MatchExpressions: protoLabelSelectorRequirementsToAPI(at.GetSpec().GetWorkerSelector().GetMatchExpressions()),
-		})
-		if err != nil {
-			return fmt.Errorf("invalid WorkerSelector: %w", err)
-		}
-		selector = sel
+	selector, err := labelSelector(at.GetSpec().GetWorkerSelector())
+	if err != nil {
+		return fmt.Errorf("invalid WorkerSelector: %w", err)
 	}
 	pools, err := p.AteClient.ListWorkerPools(ctx, &ateapipb.ListWorkerPoolsRequest{})
 	if err != nil {
@@ -227,16 +224,38 @@ func (p *APIActorTemplateProjector) grantGoldenActorAccess(ctx context.Context, 
 	return nil
 }
 
-func protoLabelSelectorRequirementsToAPI(in []*ateapipb.LabelSelectorRequirement) []metav1.LabelSelectorRequirement {
-	out := make([]metav1.LabelSelectorRequirement, 0, len(in))
-	for _, req := range in {
-		out = append(out, metav1.LabelSelectorRequirement{
-			Key:      req.GetKey(),
-			Operator: metav1.LabelSelectorOperator(req.GetOperator()),
-			Values:   append([]string(nil), req.GetValues()...),
-		})
+func labelSelector(in *ateapipb.LabelSelector) (labels.Selector, error) {
+	if in == nil {
+		return labels.Everything(), nil
 	}
-	return out
+	selector := labels.SelectorFromSet(labels.Set(in.GetMatchLabels()))
+	for _, expr := range in.GetMatchExpressions() {
+		op, err := selectionOperator(expr.GetOperator())
+		if err != nil {
+			return nil, err
+		}
+		req, err := labels.NewRequirement(expr.GetKey(), op, expr.GetValues())
+		if err != nil {
+			return nil, err
+		}
+		selector = selector.Add(*req)
+	}
+	return selector, nil
+}
+
+func selectionOperator(op string) (selection.Operator, error) {
+	switch op {
+	case "In":
+		return selection.In, nil
+	case "NotIn":
+		return selection.NotIn, nil
+	case "Exists":
+		return selection.Exists, nil
+	case "DoesNotExist":
+		return selection.DoesNotExist, nil
+	default:
+		return "", fmt.Errorf("unsupported selector operator %q", op)
+	}
 }
 
 func goldenSnapshotWarmupForProto(at *ateapipb.ActorTemplate) time.Duration {

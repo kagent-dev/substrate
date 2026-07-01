@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/internal/e2e"
-	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,6 +32,8 @@ import (
 const (
 	probeNamespace = "ate-e2e-probe"
 	probeTemplate  = "probe"
+	phaseReady     = "Ready"
+	phaseFailed    = "Failed"
 )
 
 type whoamiResponse struct {
@@ -115,7 +116,7 @@ func deployProbe(t *testing.T, ctx context.Context, clients *e2e.Clients, bucket
 			Spec: &ateapipb.WorkerPoolSpec{
 				Replicas:           3,
 				AteomImage:         ateomImage,
-				SandboxClass:       string(v1alpha1.SandboxClassGvisor),
+				SandboxClass:       e2e.SandboxClassGvisor,
 				DeploymentAtespace: probeNamespace,
 			},
 		},
@@ -139,7 +140,7 @@ func deployProbe(t *testing.T, ctx context.Context, clients *e2e.Clients, bucket
 				SnapshotsConfig: &ateapipb.SnapshotsConfig{
 					Location: "gs://" + bucket + "/ate-e2e-probe/",
 				},
-				SandboxClass: string(v1alpha1.SandboxClassGvisor),
+				SandboxClass: e2e.SandboxClassGvisor,
 			},
 		},
 	})
@@ -148,20 +149,19 @@ func deployProbe(t *testing.T, ctx context.Context, clients *e2e.Clients, bucket
 	}
 }
 
-func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) (string, *v1alpha1.ActorTemplate) {
+func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) (string, *ateapipb.ActorTemplate) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		resp, err := clients.SubstrateAPI.GetActorTemplate(ctx, &ateapipb.GetActorTemplateRequest{
+		at, err := clients.SubstrateAPI.GetActorTemplate(ctx, &ateapipb.GetActorTemplateRequest{
 			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: probeNamespace, Name: probeTemplate},
 		})
 		if err == nil {
-			at := actorTemplateAPI(resp)
-			switch at.Status.Phase {
-			case v1alpha1.PhaseReady:
-				t.Logf("probe ActorTemplate ready, golden=%s", at.Status.GoldenActorID)
-				return at.Status.GoldenActorID, at
-			case v1alpha1.PhaseFailed:
+			switch at.GetStatus().GetPhase() {
+			case phaseReady:
+				t.Logf("probe ActorTemplate ready, golden=%s", at.GetStatus().GetGoldenActorId())
+				return at.GetStatus().GetGoldenActorId(), at
+			case phaseFailed:
 				t.Fatalf("probe ActorTemplate entered PhaseFailed")
 			}
 		}
@@ -169,26 +169,6 @@ func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) (str
 	}
 	t.Fatalf("timed out waiting for probe ActorTemplate to be Ready")
 	return "", nil
-}
-
-func actorTemplateAPI(at *ateapipb.ActorTemplate) *v1alpha1.ActorTemplate {
-	out := &v1alpha1.ActorTemplate{
-		ObjectMeta: metav1.ObjectMeta{Namespace: at.GetAtespace(), Name: at.GetName()},
-		Spec: v1alpha1.ActorTemplateSpec{
-			SandboxClass: v1alpha1.SandboxClass(at.GetSpec().GetSandboxClass()),
-		},
-		Status: v1alpha1.ActorTemplateStatus{
-			Phase:          v1alpha1.PhaseType(at.GetStatus().GetPhase()),
-			GoldenActorID:  at.GetStatus().GetGoldenActorId(),
-			GoldenSnapshot: at.GetStatus().GetGoldenSnapshot(),
-		},
-	}
-	if at.GetSpec().GetWorkerSelector() != nil {
-		out.Spec.WorkerSelector = &metav1.LabelSelector{
-			MatchLabels: at.GetSpec().GetWorkerSelector().GetMatchLabels(),
-		}
-	}
-	return out
 }
 
 func createAndResumeActor(t *testing.T, ctx context.Context, clients *e2e.Clients, id string) {

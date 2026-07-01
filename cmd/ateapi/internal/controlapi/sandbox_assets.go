@@ -20,7 +20,7 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
 
 // resolveSandboxAssets determines the sandbox binaries an actor should boot with
@@ -36,26 +36,22 @@ func resolveSandboxAssets(
 	if err != nil {
 		return nil, fmt.Errorf("while getting WorkerPool %s: %w", poolName, err)
 	}
-	wp, err := protoWorkerPoolToAPI(protoWP)
-	if err != nil {
-		return nil, fmt.Errorf("while converting WorkerPool %s: %w", poolName, err)
-	}
 
-	class := wp.Spec.SandboxClass
+	class := protoWP.GetSpec().GetSandboxClass()
 	if class == "" {
-		class = atev1alpha1.SandboxClassGvisor
+		class = sandboxClassGvisor
 	}
 
-	var sc *atev1alpha1.SandboxConfig
-	if name := wp.Spec.SandboxConfigName; name != "" {
+	var sc *ateapipb.SandboxConfig
+	if name := protoWP.GetSpec().GetSandboxConfigName(); name != "" {
 		protoSC, err := st.GetSandboxConfig(ctx, name)
 		if err != nil {
 			return nil, fmt.Errorf("while getting SandboxConfig %q: %w", name, err)
 		}
-		sc = protoSandboxConfigToAPI(protoSC)
-		if sc.Spec.SandboxClass != class {
+		sc = protoSC
+		if sc.GetSpec().GetSandboxClass() != class {
 			return nil, fmt.Errorf("SandboxConfig %q has class %q but WorkerPool %s/%s is class %q",
-				name, sc.Spec.SandboxClass, poolNamespace, poolName, class)
+				name, sc.GetSpec().GetSandboxClass(), poolNamespace, poolName, class)
 		}
 	} else {
 		sc, err = defaultSandboxConfig(ctx, st, class)
@@ -69,17 +65,16 @@ func resolveSandboxAssets(
 
 // defaultSandboxConfig returns the single SandboxConfig marked Default for the
 // given class, erroring if there are zero or more than one.
-func defaultSandboxConfig(ctx context.Context, st store.Interface, class atev1alpha1.SandboxClass) (*atev1alpha1.SandboxConfig, error) {
+func defaultSandboxConfig(ctx context.Context, st store.Interface, class string) (*ateapipb.SandboxConfig, error) {
 	all, err := st.ListSandboxConfigs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("while listing SandboxConfigs: %w", err)
 	}
-	var match *atev1alpha1.SandboxConfig
-	for _, protoSC := range all {
-		sc := protoSandboxConfigToAPI(protoSC)
-		if sc.Spec.SandboxClass == class && sc.Spec.Default {
+	var match *ateapipb.SandboxConfig
+	for _, sc := range all {
+		if sc.GetSpec().GetSandboxClass() == class && sc.GetSpec().GetDefault() {
 			if match != nil {
-				return nil, fmt.Errorf("multiple default SandboxConfigs for class %q (%q and %q)", class, match.Name, sc.Name)
+				return nil, fmt.Errorf("multiple default SandboxConfigs for class %q (%q and %q)", class, match.GetName(), sc.GetName())
 			}
 			match = sc
 		}
@@ -92,15 +87,15 @@ func defaultSandboxConfig(ctx context.Context, st store.Interface, class atev1al
 
 // sandboxAssetsProto converts a resolved SandboxConfig into the proto atelet
 // consumes.
-func sandboxAssetsProto(class atev1alpha1.SandboxClass, sc *atev1alpha1.SandboxConfig) *ateletpb.SandboxAssets {
+func sandboxAssetsProto(class string, sc *ateapipb.SandboxConfig) *ateletpb.SandboxAssets {
 	out := &ateletpb.SandboxAssets{
-		SandboxClass: string(class),
-		Assets:       make(map[string]*ateletpb.ArchAssets, len(sc.Spec.Assets)),
+		SandboxClass: class,
+		Assets:       make(map[string]*ateletpb.ArchAssets, len(sc.GetSpec().GetAssets())),
 	}
-	for arch, files := range sc.Spec.Assets {
-		archAssets := &ateletpb.ArchAssets{Files: make(map[string]*ateletpb.AssetFile, len(files))}
-		for name, f := range files {
-			archAssets.Files[name] = &ateletpb.AssetFile{Url: f.URL, Sha256: f.SHA256}
+	for arch, files := range sc.GetSpec().GetAssets() {
+		archAssets := &ateletpb.ArchAssets{Files: make(map[string]*ateletpb.AssetFile, len(files.GetFiles()))}
+		for name, f := range files.GetFiles() {
+			archAssets.Files[name] = &ateletpb.AssetFile{Url: f.GetUrl(), Sha256: f.GetSha256()}
 		}
 		out.Assets[arch] = archAssets
 	}

@@ -31,10 +31,6 @@ import (
 	"github.com/agent-substrate/substrate/internal/envtestbins"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/resources"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
-	"github.com/agent-substrate/substrate/pkg/client/clientset/versioned"
-	"github.com/agent-substrate/substrate/pkg/client/informers/externalversions"
-	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/go-cmp/cmp"
@@ -231,17 +227,13 @@ func (f *FakeAteletServer) lastRestoreRequest() *ateletpb.RestoreRequest {
 }
 
 type testContext struct {
-	mr                  *miniredis.Miniredis
-	service             *Service
-	client              ateapipb.ControlClient
-	k8sClient           kubernetes.Interface
-	substrateClient     versioned.Interface
-	persistence         *ateredis.Persistence
-	fakeAtelet          *FakeAteletServer
-	cleanup             func()
-	actorTemplateLister listersv1alpha1.ActorTemplateLister
-	workerPoolLister    listersv1alpha1.WorkerPoolLister
-	sandboxConfigLister listersv1alpha1.SandboxConfigLister
+	mr          *miniredis.Miniredis
+	service     *Service
+	client      ateapipb.ControlClient
+	k8sClient   kubernetes.Interface
+	persistence *ateredis.Persistence
+	fakeAtelet  *FakeAteletServer
+	cleanup     func()
 }
 
 // setupTest sets up a fully isolated test environment.
@@ -265,20 +257,9 @@ func setupTest(t *testing.T, ns string) *testContext {
 		t.Fatalf("failed to create k8s clientset: %v", err)
 	}
 
-	substrateClient, err := versioned.NewForConfig(cfg)
-	if err != nil {
-		mr.Close()
-		t.Fatalf("failed to create substrate clientset: %v", err)
-	}
-
 	// 3. Initialize Informers
 	workerFactory, workerInformer := WorkerPodInformer(k8sClient)
 	ateletFactory, ateletInformer := AteletInformer(k8sClient)
-
-	substrateInformerFactory := externalversions.NewSharedInformerFactory(substrateClient, 0)
-	actorTemplateLister := substrateInformerFactory.Api().V1alpha1().ActorTemplates().Lister()
-	workerPoolLister := substrateInformerFactory.Api().V1alpha1().WorkerPools().Lister()
-	sandboxConfigLister := substrateInformerFactory.Api().V1alpha1().SandboxConfigs().Lister()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -287,11 +268,9 @@ func setupTest(t *testing.T, ns string) *testContext {
 
 	workerFactory.Start(ctx.Done())
 	ateletFactory.Start(ctx.Done())
-	substrateInformerFactory.Start(ctx.Done())
 
 	workerFactory.WaitForCacheSync(ctx.Done())
 	ateletFactory.WaitForCacheSync(ctx.Done())
-	substrateInformerFactory.WaitForCacheSync(ctx.Done())
 
 	// 4. Initialize Service
 	wc := workercache.New(persistence, 5*time.Minute)
@@ -302,7 +281,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 	}
 
 	dialer := NewAteletDialer(workerInformer.GetIndexer(), ateletInformer.GetIndexer())
-	service := NewService(persistence, wc, actorTemplateLister, workerPoolLister, sandboxConfigLister, dialer, k8sClient)
+	service := NewService(persistence, wc, dialer, k8sClient)
 
 	// 5. Start REAL gRPC Server for ATE API
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(ateinterceptors.ServerUnaryInterceptor))
@@ -370,17 +349,13 @@ func setupTest(t *testing.T, ns string) *testContext {
 	}
 
 	return &testContext{
-		mr:                  mr,
-		service:             service,
-		client:              client,
-		k8sClient:           k8sClient,
-		substrateClient:     substrateClient,
-		persistence:         persistence,
-		fakeAtelet:          fakeAtelet,
-		cleanup:             cleanup,
-		actorTemplateLister: actorTemplateLister,
-		workerPoolLister:    workerPoolLister,
-		sandboxConfigLister: sandboxConfigLister,
+		mr:          mr,
+		service:     service,
+		client:      client,
+		k8sClient:   k8sClient,
+		persistence: persistence,
+		fakeAtelet:  fakeAtelet,
+		cleanup:     cleanup,
 	}
 }
 
@@ -398,7 +373,7 @@ func selectorLabelsOfSize(n int) map[string]string {
 
 func createTemplate(t *testing.T, tc *testContext, ns string) {
 	t.Helper()
-	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
+	createTemplateWithContainers(t, tc, ns, []*ateapipb.Container{
 		{
 			Name:    "main",
 			Image:   "main@sha256:abc",
@@ -424,7 +399,7 @@ func ensureAtespace(t *testing.T, tc *testContext, name string) {
 
 const poolLabelKey = "pool"
 
-func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, containers []atev1alpha1.Container) {
+func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, containers []*ateapipb.Container) {
 	t.Helper()
 
 	// Sandbox binaries now live on a (cluster-scoped) SandboxConfig resolved via
@@ -434,28 +409,26 @@ func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, cont
 	ensureDefaultGvisorSandboxConfig(t, tc)
 	createWorkerPool(t, tc, ns, "pool1", map[string]string{poolLabelKey: ns})
 
-	actorTemplate := &atev1alpha1.ActorTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "tmpl1",
-			Namespace: ns,
-		},
-		Spec: atev1alpha1.ActorTemplateSpec{
+	actorTemplate := &ateapipb.ActorTemplate{
+		Atespace: ns,
+		Name:     "tmpl1",
+		Spec: &ateapipb.ActorTemplateSpec{
 			PauseImage: "pause@sha256:abc",
-			SnapshotsConfig: atev1alpha1.SnapshotsConfig{
+			SnapshotsConfig: &ateapipb.SnapshotsConfig{
 				Location: "gs://fake-fake-fake",
 			},
 			Containers: containers,
-			WorkerSelector: &metav1.LabelSelector{
+			WorkerSelector: &ateapipb.LabelSelector{
 				MatchLabels: map[string]string{poolLabelKey: ns},
 			},
 		},
-	}
-	actorTemplate.Status = atev1alpha1.ActorTemplateStatus{
-		GoldenSnapshot: "gs://my-bucket/my-folder",
+		Status: &ateapipb.ActorTemplateStatus{
+			GoldenSnapshot: "gs://my-bucket/my-folder",
+		},
 	}
 
 	_, err := tc.client.CreateActorTemplate(context.Background(), &ateapipb.CreateActorTemplateRequest{
-		ActorTemplate: apiActorTemplateToProto(actorTemplate),
+		ActorTemplate: actorTemplate,
 	})
 	if err != nil {
 		t.Fatalf("failed to create actor template: %v", err)
@@ -467,25 +440,33 @@ func createTemplateWithContainers(t *testing.T, tc *testContext, ns string, cont
 func ensureDefaultGvisorSandboxConfig(t *testing.T, tc *testContext) {
 	t.Helper()
 	const name = "gvisor-default"
-	sc := &atev1alpha1.SandboxConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: atev1alpha1.SandboxConfigSpec{
-			SandboxClass: atev1alpha1.SandboxClassGvisor,
+	sc := &ateapipb.SandboxConfig{
+		Name: name,
+		Spec: &ateapipb.SandboxConfigSpec{
+			SandboxClass: sandboxClassGvisor,
 			Default:      true,
-			Assets: map[string]map[string]atev1alpha1.AssetFile{
-				"amd64": {"runsc": {
-					URL:    "gs://gvisor/releases/nightly/2026-05-19/x86_64/runsc",
-					SHA256: "a397be1abc2420d26bce6c70e6e2ff96c73aaaab929756c56f5e2089ea842b63",
-				}},
-				"arm64": {"runsc": {
-					URL:    "gs://gvisor/releases/nightly/2026-05-19/aarch64/runsc",
-					SHA256: "1ba2366ae2efceba166046f51a4104f9261c9cb72c6db8f5b3fe2dc57dea86b9",
-				}},
+			Assets: map[string]*ateapipb.SandboxAssetFiles{
+				"amd64": {
+					Files: map[string]*ateapipb.AssetFile{
+						"runsc": {
+							Url:    "gs://gvisor/releases/nightly/2026-05-19/x86_64/runsc",
+							Sha256: "a397be1abc2420d26bce6c70e6e2ff96c73aaaab929756c56f5e2089ea842b63",
+						},
+					},
+				},
+				"arm64": {
+					Files: map[string]*ateapipb.AssetFile{
+						"runsc": {
+							Url:    "gs://gvisor/releases/nightly/2026-05-19/aarch64/runsc",
+							Sha256: "1ba2366ae2efceba166046f51a4104f9261c9cb72c6db8f5b3fe2dc57dea86b9",
+						},
+					},
+				},
 			},
 		},
 	}
 	if _, err := tc.client.CreateSandboxConfig(context.Background(), &ateapipb.CreateSandboxConfigRequest{
-		SandboxConfig: apiSandboxConfigToProto(sc),
+		SandboxConfig: sc,
 	}); err != nil && status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("failed to create default SandboxConfig: %v", err)
 	}
@@ -500,19 +481,17 @@ func createWorkerPool(t *testing.T, tc *testContext, ns string, name string, lab
 
 func createWorkerPoolWithoutGrant(t *testing.T, tc *testContext, ns string, name string, labels map[string]string) {
 	t.Helper()
-	wp := &atev1alpha1.WorkerPool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-			Labels:    labels,
-		},
-		Spec: atev1alpha1.WorkerPoolSpec{
-			Replicas:   1,
-			AteomImage: "ateom@sha256:abc",
+	wp := &ateapipb.WorkerPool{
+		Name:   name,
+		Labels: labels,
+		Spec: &ateapipb.WorkerPoolSpec{
+			Replicas:           1,
+			AteomImage:         "ateom@sha256:abc",
+			DeploymentAtespace: ns,
 		},
 	}
 	_, err := tc.client.CreateWorkerPool(context.Background(), &ateapipb.CreateWorkerPoolRequest{
-		WorkerPool: apiWorkerPoolToProto(wp),
+		WorkerPool: wp,
 	})
 	if err != nil {
 		t.Fatalf("failed to create WorkerPool: %v", err)
@@ -533,28 +512,26 @@ func createWorkerPoolGrant(t *testing.T, tc *testContext, atespace string, ns st
 	}
 }
 
-func createTemplateWithSelector(t *testing.T, tc *testContext, ns string, name string, selector *metav1.LabelSelector) {
+func createTemplateWithSelector(t *testing.T, tc *testContext, ns string, name string, selector *ateapipb.LabelSelector) {
 	t.Helper()
 	ensureAtespace(t, tc, ns)
 	ensureDefaultGvisorSandboxConfig(t, tc)
-	actorTemplate := &atev1alpha1.ActorTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-		},
-		Spec: atev1alpha1.ActorTemplateSpec{
+	actorTemplate := &ateapipb.ActorTemplate{
+		Atespace: ns,
+		Name:     name,
+		Spec: &ateapipb.ActorTemplateSpec{
 			PauseImage: "pause@sha256:abc",
-			SnapshotsConfig: atev1alpha1.SnapshotsConfig{
+			SnapshotsConfig: &ateapipb.SnapshotsConfig{
 				Location: "gs://fake-fake-fake",
 			},
-			Containers: []atev1alpha1.Container{
+			Containers: []*ateapipb.Container{
 				{Name: "main", Image: "main@sha256:abc", Command: []string{"/main"}},
 			},
 			WorkerSelector: selector,
 		},
 	}
 	_, err := tc.client.CreateActorTemplate(context.Background(), &ateapipb.CreateActorTemplateRequest{
-		ActorTemplate: apiActorTemplateToProto(actorTemplate),
+		ActorTemplate: actorTemplate,
 	})
 	if err != nil {
 		t.Fatalf("failed to create actor template: %v", err)
@@ -1149,20 +1126,20 @@ func TestResumeActorResolvesValueFromEnv(t *testing.T) {
 		t.Fatalf("failed to create secret: %v", err)
 	}
 
-	createTemplateWithContainers(t, tc, ns, []atev1alpha1.Container{
+	createTemplateWithContainers(t, tc, ns, []*ateapipb.Container{
 		{
 			Name:    "main",
 			Image:   "main@sha256:abc",
 			Command: []string{"/main"},
-			Env: []atev1alpha1.EnvVar{
+			Env: []*ateapipb.EnvVar{
 				{
 					Name:  "LITERAL",
 					Value: ptr.To("plain"),
 				},
 				{
 					Name: "ANTHROPIC_API_KEY",
-					ValueFrom: &atev1alpha1.EnvVarSource{
-						SecretKeyRef: &atev1alpha1.SecretKeySelector{
+					ValueFrom: &ateapipb.EnvVarSource{
+						SecretKeyRef: &ateapipb.SecretKeySelector{
 							Name: "api-keys",
 							Key:  "anthropic",
 						},
@@ -1253,7 +1230,7 @@ func TestResumeActor_NoEligiblePool(t *testing.T) {
 	tc := setupTest(t, ns)
 	defer tc.cleanup()
 
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"nonexistent": ns},
 	})
 
@@ -1278,7 +1255,7 @@ func TestResumeActor_NoGrantedPool(t *testing.T) {
 	defer tc.cleanup()
 
 	createWorkerPoolWithoutGrant(t, tc, ns, "pool-a", map[string]string{"group": ns})
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"group": ns},
 	})
 	createWorkerPod(t, tc, ns, "worker-a", "node1", "pool-a")
@@ -1308,7 +1285,7 @@ func TestResumeActor_MultiPoolSelector(t *testing.T) {
 
 	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns, "tier": "a"})
 	createWorkerPool(t, tc, ns, "pool-b", map[string]string{"group": ns, "tier": "b"})
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"group": ns},
 	})
 
@@ -1358,7 +1335,7 @@ func TestResumeActor_RequiresBothSelectorsToMatch(t *testing.T) {
 	createWorkerPool(t, tc, ns, "pool-both", map[string]string{"group": ns, "tier": "b"})
 	createWorkerPool(t, tc, ns, "pool-template-only", map[string]string{"group": ns, "tier": "a"})
 	createWorkerPool(t, tc, ns, "pool-actor-only", map[string]string{"tier": "b"})
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"group": ns},
 	})
 
@@ -1723,7 +1700,7 @@ func TestResumeActor_ReleasesStaleWorkerWhenPoolBecomesIneligible(t *testing.T) 
 
 	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns, "tier": "a"})
 	createWorkerPool(t, tc, ns, "pool-b", map[string]string{"group": ns, "tier": "b"})
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"group": ns},
 	})
 	createWorkerPod(t, tc, ns, "worker-a", "node1", "pool-a")
@@ -1810,7 +1787,7 @@ func TestUpdateActor_ReassignsPoolAcrossSuspendResume(t *testing.T) {
 
 	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns, "tier": "a"})
 	createWorkerPool(t, tc, ns, "pool-b", map[string]string{"group": ns, "tier": "b"})
-	createTemplateWithSelector(t, tc, ns, "tmpl1", &metav1.LabelSelector{
+	createTemplateWithSelector(t, tc, ns, "tmpl1", &ateapipb.LabelSelector{
 		MatchLabels: map[string]string{"group": ns},
 	})
 

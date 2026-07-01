@@ -15,24 +15,30 @@
 package controllers
 
 import (
+	"fmt"
+
+	"github.com/agent-substrate/substrate/internal/ateompath"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	appsv1ac "k8s.io/client-go/applyconfigurations/apps/v1"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
-
-	"github.com/agent-substrate/substrate/internal/ateompath"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
-const workerPoolFieldOwner = "workerpool-controller"
+const (
+	workerPoolFieldOwner = "workerpool-controller"
+	sandboxClassGvisor   = "gvisor"
+	sandboxClassMicroVM  = "microvm"
+)
 
 // buildDeploymentApplyConfig constructs the SSA apply configuration for the
 // Deployment managed by a WorkerPool. Only fields owned by this controller
 // are declared here.
-func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool) *appsv1ac.DeploymentApplyConfiguration {
+func buildDeploymentApplyConfig(wp *ateapipb.WorkerPool) (*appsv1ac.DeploymentApplyConfiguration, error) {
 	containerAC := corev1ac.Container().
 		WithName("ateom").
-		WithImage(wp.Spec.AteomImage).
+		WithImage(wp.GetSpec().GetAteomImage()).
 		WithArgs(
 			"--pod-uid=$(POD_UID)",
 		).
@@ -61,27 +67,22 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool) *appsv1ac.Deployment
 				WithPath(ateompath.BasePath).
 				WithType(corev1.HostPathDirectoryOrCreate)))
 
-	applyWorkerPoolPodTemplate(podSpecAC, containerAC, wp.Spec.Template)
-	maybeApplyMicroVMPodShape(podSpecAC, containerAC, wp.Spec.SandboxClass)
+	if err := applyWorkerPoolPodTemplate(podSpecAC, containerAC, wp.GetSpec().GetTemplate()); err != nil {
+		return nil, err
+	}
+	maybeApplyMicroVMPodShape(podSpecAC, containerAC, wp.GetSpec().GetSandboxClass())
 	podSpecAC.WithContainers(containerAC)
 
-	return appsv1ac.Deployment(deploymentName(wp.Name), wp.Namespace).
-		WithOwnerReferences(metav1ac.OwnerReference().
-			WithAPIVersion(atev1alpha1.GroupVersion.String()).
-			WithKind("WorkerPool").
-			WithName(wp.Name).
-			WithUID(wp.UID).
-			WithController(true).
-			WithBlockOwnerDeletion(true)).
+	return appsv1ac.Deployment(deploymentName(wp.GetName()), wp.GetSpec().GetDeploymentAtespace()).
 		WithSpec(appsv1ac.DeploymentSpec().
-			WithReplicas(wp.Spec.Replicas).
+			WithReplicas(wp.GetSpec().GetReplicas()).
 			WithSelector(metav1ac.LabelSelector().
-				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
+				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.GetName()})).
 			WithTemplate(corev1ac.PodTemplateSpec().
 				WithLabels(map[string]string{
-					"ate.dev/worker-pool": wp.Name,
+					"ate.dev/worker-pool": wp.GetName(),
 				}).
-				WithSpec(podSpecAC)))
+				WithSpec(podSpecAC))), nil
 }
 
 // maybeApplyMicroVMPodShape adds the /dev/kvm device and node placement a
@@ -96,9 +97,9 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool) *appsv1ac.Deployment
 func maybeApplyMicroVMPodShape(
 	podSpecAC *corev1ac.PodSpecApplyConfiguration,
 	containerAC *corev1ac.ContainerApplyConfiguration,
-	sandboxClass atev1alpha1.SandboxClass,
+	sandboxClass string,
 ) {
-	if sandboxClass != atev1alpha1.SandboxClassMicroVM {
+	if sandboxClass != sandboxClassMicroVM {
 		return
 	}
 
@@ -123,19 +124,19 @@ func maybeApplyMicroVMPodShape(
 	if podSpecAC.NodeSelector == nil {
 		podSpecAC.NodeSelector = map[string]string{}
 	}
-	podSpecAC.NodeSelector["ate.dev/sandboxClass"] = string(atev1alpha1.SandboxClassMicroVM)
+	podSpecAC.NodeSelector["ate.dev/sandboxClass"] = sandboxClassMicroVM
 	podSpecAC.WithTolerations(corev1ac.Toleration().
 		WithKey("ate.dev/sandboxClass").
 		WithOperator(corev1.TolerationOpEqual).
-		WithValue(string(atev1alpha1.SandboxClassMicroVM)).
+		WithValue(sandboxClassMicroVM).
 		WithEffect(corev1.TaintEffectNoSchedule))
 }
 
 func applyWorkerPoolPodTemplate(
 	podSpecAC *corev1ac.PodSpecApplyConfiguration,
 	containerAC *corev1ac.ContainerApplyConfiguration,
-	tmpl *atev1alpha1.WorkerPoolPodTemplate,
-) {
+	tmpl *ateapipb.WorkerPoolPodTemplate,
+) error {
 	podSpecAC.NodeSelector = map[string]string{}
 	podSpecAC.Tolerations = []corev1ac.TolerationApplyConfiguration{}
 	podSpecAC.WithPriorityClassName("")
@@ -144,27 +145,36 @@ func applyWorkerPoolPodTemplate(
 	containerAC.WithResources(resourcesAC)
 
 	if tmpl == nil {
-		return
+		return nil
 	}
 
 	if tmpl.NodeSelector != nil {
-		podSpecAC.WithNodeSelector(tmpl.NodeSelector)
+		podSpecAC.WithNodeSelector(tmpl.GetNodeSelector())
 	}
-	podSpecAC.Tolerations = tolerationApplyValues(tolerationsToApply(tmpl.Tolerations))
-	podSpecAC.WithPriorityClassName(tmpl.PriorityClassName)
+	podSpecAC.Tolerations = tolerationApplyValues(tolerationsToApply(tmpl.GetTolerations()))
+	podSpecAC.WithPriorityClassName(tmpl.GetPriorityClassName())
 
-	if tmpl.NodeAffinity != nil {
-		podSpecAC.WithAffinity(corev1ac.Affinity().WithNodeAffinity(nodeAffinityToApply(tmpl.NodeAffinity)))
+	if tmpl.GetNodeAffinity() != nil {
+		podSpecAC.WithAffinity(corev1ac.Affinity().WithNodeAffinity(nodeAffinityToApply(tmpl.GetNodeAffinity())))
 	}
 
-	if tmpl.Resources != nil {
-		if tmpl.Resources.Requests != nil {
-			resourcesAC.WithRequests(tmpl.Resources.Requests)
+	if tmpl.GetResources() != nil {
+		requests, err := resourceList(tmpl.GetResources().GetRequests())
+		if err != nil {
+			return err
 		}
-		if tmpl.Resources.Limits != nil {
-			resourcesAC.WithLimits(tmpl.Resources.Limits)
+		limits, err := resourceList(tmpl.GetResources().GetLimits())
+		if err != nil {
+			return err
+		}
+		if requests != nil {
+			resourcesAC.WithRequests(requests)
+		}
+		if limits != nil {
+			resourcesAC.WithLimits(limits)
 		}
 	}
+	return nil
 }
 
 func tolerationApplyValues(tolerations []*corev1ac.TolerationApplyConfiguration) []corev1ac.TolerationApplyConfiguration {
@@ -175,74 +185,89 @@ func tolerationApplyValues(tolerations []*corev1ac.TolerationApplyConfiguration)
 	return out
 }
 
-func tolerationsToApply(tolerations []corev1.Toleration) []*corev1ac.TolerationApplyConfiguration {
+func tolerationsToApply(tolerations []*ateapipb.Toleration) []*corev1ac.TolerationApplyConfiguration {
 	out := make([]*corev1ac.TolerationApplyConfiguration, 0, len(tolerations))
 	for i := range tolerations {
-		t := &tolerations[i]
+		t := tolerations[i]
 		ac := corev1ac.Toleration()
-		if t.Key != "" {
-			ac.WithKey(t.Key)
+		if t.GetKey() != "" {
+			ac.WithKey(t.GetKey())
 		}
-		if t.Operator != "" {
-			ac.WithOperator(t.Operator)
+		if t.GetOperator() != "" {
+			ac.WithOperator(corev1.TolerationOperator(t.GetOperator()))
 		}
-		if t.Value != "" {
-			ac.WithValue(t.Value)
+		if t.GetValue() != "" {
+			ac.WithValue(t.GetValue())
 		}
-		if t.Effect != "" {
-			ac.WithEffect(t.Effect)
+		if t.GetEffect() != "" {
+			ac.WithEffect(corev1.TaintEffect(t.GetEffect()))
 		}
 		if t.TolerationSeconds != nil {
-			ac.WithTolerationSeconds(*t.TolerationSeconds)
+			ac.WithTolerationSeconds(t.GetTolerationSeconds())
 		}
 		out = append(out, ac)
 	}
 	return out
 }
 
-func nodeAffinityToApply(na *corev1.NodeAffinity) *corev1ac.NodeAffinityApplyConfiguration {
+func nodeAffinityToApply(na *ateapipb.NodeAffinity) *corev1ac.NodeAffinityApplyConfiguration {
 	ac := corev1ac.NodeAffinity()
-	if na.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-		ac.WithRequiredDuringSchedulingIgnoredDuringExecution(nodeSelectorToApply(na.RequiredDuringSchedulingIgnoredDuringExecution))
+	if na.GetRequiredDuringSchedulingIgnoredDuringExecution() != nil {
+		ac.WithRequiredDuringSchedulingIgnoredDuringExecution(nodeSelectorToApply(na.GetRequiredDuringSchedulingIgnoredDuringExecution()))
 	}
-	for i := range na.PreferredDuringSchedulingIgnoredDuringExecution {
-		term := &na.PreferredDuringSchedulingIgnoredDuringExecution[i]
+	for i := range na.GetPreferredDuringSchedulingIgnoredDuringExecution() {
+		term := na.GetPreferredDuringSchedulingIgnoredDuringExecution()[i]
 		ac.WithPreferredDuringSchedulingIgnoredDuringExecution(preferredSchedulingTermToApply(term))
 	}
 	return ac
 }
 
-func nodeSelectorToApply(ns *corev1.NodeSelector) *corev1ac.NodeSelectorApplyConfiguration {
+func nodeSelectorToApply(ns *ateapipb.NodeSelector) *corev1ac.NodeSelectorApplyConfiguration {
 	ac := corev1ac.NodeSelector()
-	for i := range ns.NodeSelectorTerms {
-		ac.WithNodeSelectorTerms(nodeSelectorTermToApply(&ns.NodeSelectorTerms[i]))
+	for i := range ns.GetNodeSelectorTerms() {
+		ac.WithNodeSelectorTerms(nodeSelectorTermToApply(ns.GetNodeSelectorTerms()[i]))
 	}
 	return ac
 }
 
-func preferredSchedulingTermToApply(term *corev1.PreferredSchedulingTerm) *corev1ac.PreferredSchedulingTermApplyConfiguration {
+func preferredSchedulingTermToApply(term *ateapipb.PreferredSchedulingTerm) *corev1ac.PreferredSchedulingTermApplyConfiguration {
 	return corev1ac.PreferredSchedulingTerm().
-		WithWeight(term.Weight).
-		WithPreference(nodeSelectorTermToApply(&term.Preference))
+		WithWeight(term.GetWeight()).
+		WithPreference(nodeSelectorTermToApply(term.GetPreference()))
 }
 
-func nodeSelectorTermToApply(term *corev1.NodeSelectorTerm) *corev1ac.NodeSelectorTermApplyConfiguration {
+func nodeSelectorTermToApply(term *ateapipb.NodeSelectorTerm) *corev1ac.NodeSelectorTermApplyConfiguration {
 	ac := corev1ac.NodeSelectorTerm()
-	for i := range term.MatchExpressions {
-		ac.WithMatchExpressions(nodeSelectorRequirementToApply(&term.MatchExpressions[i]))
+	for i := range term.GetMatchExpressions() {
+		ac.WithMatchExpressions(nodeSelectorRequirementToApply(term.GetMatchExpressions()[i]))
 	}
-	for i := range term.MatchFields {
-		ac.WithMatchFields(nodeSelectorRequirementToApply(&term.MatchFields[i]))
+	for i := range term.GetMatchFields() {
+		ac.WithMatchFields(nodeSelectorRequirementToApply(term.GetMatchFields()[i]))
 	}
 	return ac
 }
 
-func nodeSelectorRequirementToApply(req *corev1.NodeSelectorRequirement) *corev1ac.NodeSelectorRequirementApplyConfiguration {
-	ac := corev1ac.NodeSelectorRequirement().WithKey(req.Key).WithOperator(req.Operator)
-	if len(req.Values) > 0 {
-		ac.WithValues(req.Values...)
+func nodeSelectorRequirementToApply(req *ateapipb.NodeSelectorRequirement) *corev1ac.NodeSelectorRequirementApplyConfiguration {
+	ac := corev1ac.NodeSelectorRequirement().WithKey(req.GetKey()).WithOperator(corev1.NodeSelectorOperator(req.GetOperator()))
+	if len(req.GetValues()) > 0 {
+		ac.WithValues(req.GetValues()...)
 	}
 	return ac
+}
+
+func resourceList(in map[string]string) (corev1.ResourceList, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := corev1.ResourceList{}
+	for k, v := range in {
+		q, err := resource.ParseQuantity(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid resource quantity %s=%q: %w", k, v, err)
+		}
+		out[corev1.ResourceName(k)] = q
+	}
+	return out, nil
 }
 
 func deploymentName(wpName string) string {

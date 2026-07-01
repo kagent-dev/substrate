@@ -24,7 +24,6 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -38,7 +37,7 @@ type PauseInput struct {
 // PauseState holds the mutable state loaded and modified during execution.
 type PauseState struct {
 	Actor         *ateapipb.Actor
-	ActorTemplate *atev1alpha1.ActorTemplate
+	ActorTemplate *ateapipb.ActorTemplate
 }
 
 type LoadActorForPauseStep struct {
@@ -61,7 +60,7 @@ func (s *LoadActorForPauseStep) Execute(ctx context.Context, input *PauseInput, 
 	if err != nil {
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	state.ActorTemplate = protoActorTemplateToAPI(actorTemplate)
+	state.ActorTemplate = actorTemplate
 
 	return nil
 }

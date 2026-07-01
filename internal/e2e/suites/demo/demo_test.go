@@ -27,7 +27,6 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateclient"
 	"github.com/agent-substrate/substrate/internal/e2e"
 	"github.com/agent-substrate/substrate/internal/resources"
-	"github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -39,13 +38,20 @@ import (
 
 const demoAtespace = "demo"
 
+const (
+	snapshotScopeFull = "Full"
+	snapshotScopeData = "Data"
+	phaseReady        = "Ready"
+	phaseFailed       = "Failed"
+)
+
 type demoSeed struct {
 	ateomImage        string
 	counterImage      string
-	sandboxClass      v1alpha1.SandboxClass
+	sandboxClass      string
 	sandboxConfigName string
-	volumeMounts      []v1alpha1.VolumeMount
-	volumes           []v1alpha1.Volume
+	volumeMounts      []*ateapipb.VolumeMount
+	volumes           []*ateapipb.Volume
 }
 
 func TestActorLifecycle(t *testing.T) {
@@ -59,7 +65,7 @@ func TestActorLifecycle(t *testing.T) {
 	_, _ = clients.SubstrateAPI.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{Name: demoAtespace})
 
 	// Create actor template.
-	at, err := createActorTemplate(ctx, t, clients, nsObj, v1alpha1.SnapshotScopeFull, v1alpha1.SnapshotScopeFull)
+	at, err := createActorTemplate(ctx, t, clients, nsObj, snapshotScopeFull, snapshotScopeFull)
 	if err != nil {
 		t.Fatalf("failed to initialize ActorTemplate: %v", err)
 	}
@@ -67,7 +73,7 @@ func TestActorLifecycle(t *testing.T) {
 
 	tests := []struct {
 		name string
-		f    func(ctx context.Context, t *testing.T, clients *e2e.Clients, ns *e2e.Namespace, at *v1alpha1.ActorTemplate) error
+		f    func(ctx context.Context, t *testing.T, clients *e2e.Clients, ns *e2e.Namespace, at *ateapipb.ActorTemplate) error
 	}{
 		{
 			name: "CreateActor",
@@ -108,8 +114,8 @@ func TestDurableDirLifecycle(t *testing.T) {
 
 	tests := []struct {
 		name                   string
-		onCommit               v1alpha1.SnapshotScope
-		onPause                v1alpha1.SnapshotScope
+		onCommit               string
+		onPause                string
 		wantMemoryAfterPause   int
 		wantFileAfterPause     int
 		wantMemoryAfterSuspend int
@@ -117,8 +123,8 @@ func TestDurableDirLifecycle(t *testing.T) {
 	}{
 		{
 			name:                   "onCommit:Full, onPause:Full",
-			onCommit:               v1alpha1.SnapshotScopeFull,
-			onPause:                v1alpha1.SnapshotScopeFull,
+			onCommit:               snapshotScopeFull,
+			onPause:                snapshotScopeFull,
 			wantMemoryAfterPause:   2,
 			wantFileAfterPause:     2,
 			wantMemoryAfterSuspend: 3,
@@ -126,8 +132,8 @@ func TestDurableDirLifecycle(t *testing.T) {
 		},
 		{
 			name:                   "onCommit:Data, onPause:Full",
-			onCommit:               v1alpha1.SnapshotScopeData,
-			onPause:                v1alpha1.SnapshotScopeFull,
+			onCommit:               snapshotScopeData,
+			onPause:                snapshotScopeFull,
 			wantMemoryAfterPause:   2,
 			wantFileAfterPause:     2,
 			wantMemoryAfterSuspend: 1,
@@ -135,8 +141,8 @@ func TestDurableDirLifecycle(t *testing.T) {
 		},
 		{
 			name:                   "onCommit:Data, onPause:Data",
-			onCommit:               v1alpha1.SnapshotScopeData,
-			onPause:                v1alpha1.SnapshotScopeData,
+			onCommit:               snapshotScopeData,
+			onPause:                snapshotScopeData,
 			wantMemoryAfterPause:   1,
 			wantFileAfterPause:     2,
 			wantMemoryAfterSuspend: 1,
@@ -172,7 +178,7 @@ func TestDurableDirLifecycle(t *testing.T) {
 			createResp, err := clients.SubstrateAPI.CreateActor(ctx, &ateapipb.CreateActorRequest{
 				ActorRef:               &ateapipb.ActorRef{Atespace: demoAtespace, Name: actorID},
 				ActorTemplateNamespace: nsObj.Name,
-				ActorTemplateName:      at.Name,
+				ActorTemplateName:      at.GetName(),
 			})
 			if err != nil {
 				t.Fatalf("failed to create Actor: %v", err)
@@ -257,7 +263,7 @@ func validateCounterResponse(t *testing.T, resp string, stage string, wantMemory
 	}
 }
 
-func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *v1alpha1.ActorTemplate) error {
+func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *ateapipb.ActorTemplate) error {
 	// Create an Actor using the ATE API.
 	actorID := "demo-actor-1-" + nsObj.Name
 
@@ -265,7 +271,7 @@ func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj 
 	createResp, err := clients.SubstrateAPI.CreateActor(ctx, &ateapipb.CreateActorRequest{
 		ActorRef:               &ateapipb.ActorRef{Atespace: demoAtespace, Name: actorID},
 		ActorTemplateNamespace: nsObj.Name,
-		ActorTemplateName:      at.Name,
+		ActorTemplateName:      at.GetName(),
 	})
 	if err != nil {
 		t.Fatalf("failed to create Actor: %v", err)
@@ -298,8 +304,8 @@ func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj 
 	if actor.GetActorId() != actorID {
 		t.Errorf("expected actor ID %s, got %s", actorID, actor.GetActorId())
 	}
-	if actor.GetActorTemplateName() != at.Name {
-		t.Errorf("expected actor template name %s, got %s", at.Name, actor.GetActorTemplateName())
+	if actor.GetActorTemplateName() != at.GetName() {
+		t.Errorf("expected actor template name %s, got %s", at.GetName(), actor.GetActorTemplateName())
 	}
 	if actor.Status != ateapipb.Actor_STATUS_SUSPENDED {
 		t.Errorf("expected actor status to be SUSPENDED, got %v", actor.Status)
@@ -311,7 +317,7 @@ func createActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj 
 	return nil
 }
 
-func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *v1alpha1.ActorTemplate) error {
+func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *ateapipb.ActorTemplate) error {
 	actorID := "pause-actor-" + nsObj.Name
 
 	// Creating an actor
@@ -319,7 +325,7 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	if _, err := clients.SubstrateAPI.CreateActor(ctx, &ateapipb.CreateActorRequest{
 		ActorRef:               &ateapipb.ActorRef{Atespace: demoAtespace, Name: actorID},
 		ActorTemplateNamespace: nsObj.Name,
-		ActorTemplateName:      at.Name,
+		ActorTemplateName:      at.GetName(),
 	}); err != nil {
 		t.Fatalf("failed to create Actor: %v", err)
 	}
@@ -399,7 +405,7 @@ func pauseActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *
 	return nil
 }
 
-func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *v1alpha1.ActorTemplate) error {
+func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, at *ateapipb.ActorTemplate) error {
 	actorID := "suspend-actor-" + nsObj.Name
 
 	// Creating an actor
@@ -407,7 +413,7 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	if _, err := clients.SubstrateAPI.CreateActor(ctx, &ateapipb.CreateActorRequest{
 		ActorRef:               &ateapipb.ActorRef{Atespace: demoAtespace, Name: actorID},
 		ActorTemplateNamespace: nsObj.Name,
-		ActorTemplateName:      at.Name,
+		ActorTemplateName:      at.GetName(),
 	}); err != nil {
 		t.Fatalf("failed to create Actor: %v", err)
 	}
@@ -486,14 +492,14 @@ func suspendActor(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj
 	return nil
 }
 
-func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, onCommit, onPause v1alpha1.SnapshotScope) (*v1alpha1.ActorTemplate, error) {
+func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients, nsObj *e2e.Namespace, onCommit, onPause string) (*ateapipb.ActorTemplate, error) {
 	env, err := e2e.CheckEnv("BUCKET_NAME", "KO_DOCKER_REPO")
 	if err != nil {
 		t.Fatalf("CheckEnv failed: %v", err)
 	}
 
 	seed := demoSeedImages(t)
-	if seed.sandboxClass == v1alpha1.SandboxClassMicroVM {
+	if seed.sandboxClass == e2e.SandboxClassMicroVM {
 		e2e.EnsureMicroVMSandboxConfig(t, ctx, clients, seed.sandboxConfigName, env["BUCKET_NAME"], os.Getenv("VIRTIOFSD_SHA256"))
 	} else {
 		e2e.EnsureGvisorSandboxConfig(t, ctx, clients)
@@ -503,32 +509,28 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 	// cluster-wide scheduler doesn't make this pool's workers eligible for
 	// (or eligible to receive) any other namespace's actors.
 	_, _ = clients.SubstrateAPI.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{Name: nsObj.Name})
-	wp := &v1alpha1.WorkerPool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "counter",
-			Namespace: nsObj.Name,
-			Labels:    map[string]string{"demo": nsObj.Name},
-		},
-		Spec: v1alpha1.WorkerPoolSpec{
-			Replicas:          5,
-			AteomImage:        seed.ateomImage,
-			SandboxClass:      seed.sandboxClass,
-			SandboxConfigName: seed.sandboxConfigName,
+	wp := &ateapipb.WorkerPool{
+		Name:   "counter",
+		Labels: map[string]string{"demo": nsObj.Name},
+		Spec: &ateapipb.WorkerPoolSpec{
+			Replicas:           5,
+			AteomImage:         seed.ateomImage,
+			SandboxClass:       seed.sandboxClass,
+			SandboxConfigName:  seed.sandboxConfigName,
+			DeploymentAtespace: nsObj.Name,
 		},
 	}
-	_, err = clients.SubstrateAPI.CreateWorkerPool(ctx, &ateapipb.CreateWorkerPoolRequest{WorkerPool: workerPoolProto(wp)})
+	_, err = clients.SubstrateAPI.CreateWorkerPool(ctx, &ateapipb.CreateWorkerPoolRequest{WorkerPool: wp})
 	if err != nil {
 		t.Fatalf("failed to create WorkerPool: %v", err)
 	}
 
 	// Create ActorTemplate
-	at := &v1alpha1.ActorTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "counter",
-			Namespace: nsObj.Name,
-		},
-		Spec: v1alpha1.ActorTemplateSpec{
-			WorkerSelector: &metav1.LabelSelector{
+	at := &ateapipb.ActorTemplate{
+		Atespace: nsObj.Name,
+		Name:     "counter",
+		Spec: &ateapipb.ActorTemplateSpec{
+			WorkerSelector: &ateapipb.LabelSelector{
 				MatchLabels: map[string]string{"demo": nsObj.Name},
 			},
 			// SandboxClass must match the per-test WorkerPool's (copied above) so the
@@ -536,17 +538,17 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 			// "microvm"; the gVisor source leaves it "" — copying keeps both correct.
 			SandboxClass: seed.sandboxClass,
 			PauseImage:   e2e.PauseImage,
-			Containers: []v1alpha1.Container{{
+			Containers: []*ateapipb.Container{{
 				Name:    "counter",
 				Image:   seed.counterImage,
 				Command: []string{"/ko-app/counter"},
-				Readyz: &v1alpha1.ContainerReadyz{HTTPGet: &v1alpha1.HTTPGetAction{
+				Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{
 					Path: "/readyz",
 					Port: 80,
 				}},
 				VolumeMounts: seed.volumeMounts,
 			}},
-			SnapshotsConfig: v1alpha1.SnapshotsConfig{
+			SnapshotsConfig: &ateapipb.SnapshotsConfig{
 				Location: "gs://" + env["BUCKET_NAME"] + "/ate-demo-counter",
 				OnPause:  onPause,
 				OnCommit: onCommit,
@@ -554,7 +556,7 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 			Volumes: seed.volumes,
 		},
 	}
-	_, err = clients.SubstrateAPI.CreateActorTemplate(ctx, &ateapipb.CreateActorTemplateRequest{ActorTemplate: actorTemplateProto(at)})
+	_, err = clients.SubstrateAPI.CreateActorTemplate(ctx, &ateapipb.CreateActorTemplateRequest{ActorTemplate: at})
 	if err != nil {
 		t.Fatalf("failed to create ActorTemplate: %v", err)
 	}
@@ -562,7 +564,7 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 	// Wait for ActorTemplate to be Ready (golden snapshot created) before creating an actor.
 	// The micro-VM golden (CH boot + checkpoint on nested KVM) is slower than gVisor, so
 	// CI raises this via E2E_TEMPLATE_READY_TIMEOUT.
-	t.Logf("Waiting for ActorTemplate %s to be Ready...", at.Name)
+	t.Logf("Waiting for ActorTemplate %s to be Ready...", at.GetName())
 	tmplTimeout := 90 * time.Second
 	if v := os.Getenv("E2E_TEMPLATE_READY_TIMEOUT"); v != "" {
 		d, perr := time.ParseDuration(v)
@@ -573,27 +575,26 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 	}
 	tmplCtx, tmplCancel := context.WithTimeout(ctx, tmplTimeout)
 	defer tmplCancel()
-	var lastPhase v1alpha1.PhaseType
-	var readyAt *v1alpha1.ActorTemplate
+	var lastPhase string
+	var readyAt *ateapipb.ActorTemplate
 	for {
 		resp, err := clients.SubstrateAPI.GetActorTemplate(tmplCtx, &ateapipb.GetActorTemplateRequest{
-			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: nsObj.Name, Name: at.Name},
+			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: nsObj.Name, Name: at.GetName()},
 		})
 		if err == nil {
-			curAt := actorTemplateAPI(resp)
-			lastPhase = curAt.Status.Phase
-			if lastPhase == v1alpha1.PhaseReady {
-				t.Logf("ActorTemplate %s is Ready with golden snapshot %q", at.Name, curAt.Status.GoldenSnapshot)
-				readyAt = curAt
+			lastPhase = resp.GetStatus().GetPhase()
+			if lastPhase == phaseReady {
+				t.Logf("ActorTemplate %s is Ready with golden snapshot %q", at.GetName(), resp.GetStatus().GetGoldenSnapshot())
+				readyAt = resp
 				break
 			}
-			if lastPhase == v1alpha1.PhaseFailed {
-				t.Fatalf("ActorTemplate %s transitioned to PhaseFailed!", at.Name)
+			if lastPhase == phaseFailed {
+				t.Fatalf("ActorTemplate %s transitioned to PhaseFailed!", at.GetName())
 			}
 		}
 		select {
 		case <-tmplCtx.Done():
-			t.Fatalf("Timed out waiting for ActorTemplate %q to be Ready after %v (last phase: %s, err: %v)", at.Name, tmplTimeout, lastPhase, err)
+			t.Fatalf("Timed out waiting for ActorTemplate %q to be Ready after %v (last phase: %s, err: %v)", at.GetName(), tmplTimeout, lastPhase, err)
 		case <-time.After(1 * time.Second):
 			// Keep polling.
 		}
@@ -606,7 +607,7 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 	return readyAt, nil
 }
 
-func cleanupTemplateResources(ctx context.Context, t *testing.T, clients *e2e.Clients, at *v1alpha1.ActorTemplate) {
+func cleanupTemplateResources(ctx context.Context, t *testing.T, clients *e2e.Clients, at *ateapipb.ActorTemplate) {
 	t.Helper()
 	if at == nil {
 		return
@@ -617,41 +618,41 @@ func cleanupTemplateResources(ctx context.Context, t *testing.T, clients *e2e.Cl
 			t.Logf("cleanup %s: %v", label, err)
 		}
 	}
-	if at.Status.GoldenActorID != "" {
+	if at.GetStatus().GetGoldenActorId() != "" {
 		_, err := clients.SubstrateAPI.DeleteActor(ctx, &ateapipb.DeleteActorRequest{
-			ActorRef: &ateapipb.ActorRef{Atespace: resources.GoldenActorAtespace, Name: at.Status.GoldenActorID},
+			ActorRef: &ateapipb.ActorRef{Atespace: resources.GoldenActorAtespace, Name: at.GetStatus().GetGoldenActorId()},
 		})
 		ignoreMissing("golden actor", err)
 	}
 	_, err := clients.SubstrateAPI.DeleteActorTemplate(ctx, &ateapipb.DeleteActorTemplateRequest{
-		ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: at.Namespace, Name: at.Name},
+		ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: at.GetAtespace(), Name: at.GetName()},
 	})
 	ignoreMissing("ActorTemplate", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPoolGrant(ctx, &ateapipb.DeleteWorkerPoolGrantRequest{
-		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: demoAtespace, Name: at.Name},
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: demoAtespace, Name: at.GetName()},
 	})
 	ignoreMissing("demo WorkerPoolGrant", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPoolGrant(ctx, &ateapipb.DeleteWorkerPoolGrantRequest{
-		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: resources.GoldenActorAtespace, Name: at.Name},
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: resources.GoldenActorAtespace, Name: at.GetName()},
 	})
 	ignoreMissing("golden WorkerPoolGrant", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPool(ctx, &ateapipb.DeleteWorkerPoolRequest{
-		WorkerPool: &ateapipb.WorkerPoolRef{Name: at.Name},
+		WorkerPool: &ateapipb.WorkerPoolRef{Name: at.GetName()},
 	})
 	ignoreMissing("WorkerPool", err)
-	_, err = clients.SubstrateAPI.DeleteAtespace(ctx, &ateapipb.DeleteAtespaceRequest{Name: at.Namespace})
+	_, err = clients.SubstrateAPI.DeleteAtespace(ctx, &ateapipb.DeleteAtespaceRequest{Name: at.GetAtespace()})
 	ignoreMissing("template atespace", err)
 }
 
 func demoSeedImages(t *testing.T) demoSeed {
 	t.Helper()
-	sandboxClass := v1alpha1.SandboxClassGvisor
+	sandboxClass := e2e.SandboxClassGvisor
 	if v := os.Getenv("E2E_SANDBOX_CLASS"); v != "" {
-		sandboxClass = v1alpha1.SandboxClass(v)
+		sandboxClass = v
 	}
 	ateomImage := os.Getenv("E2E_ATEOM_IMAGE")
 	if ateomImage == "" {
-		if sandboxClass == v1alpha1.SandboxClassMicroVM {
+		if sandboxClass == e2e.SandboxClassMicroVM {
 			ateomImage = e2e.KoBuild(t, "./cmd/ateom-microvm")
 		} else {
 			ateomImage = e2e.KoBuild(t, "./cmd/ateom-gvisor")
@@ -667,16 +668,14 @@ func demoSeedImages(t *testing.T) demoSeed {
 		sandboxClass:      sandboxClass,
 		sandboxConfigName: os.Getenv("E2E_SANDBOX_CONFIG_NAME"),
 	}
-	if sandboxClass == v1alpha1.SandboxClassMicroVM && seed.sandboxConfigName == "" {
+	if sandboxClass == e2e.SandboxClassMicroVM && seed.sandboxConfigName == "" {
 		seed.sandboxConfigName = "counter-microvm"
 	}
-	if sandboxClass != v1alpha1.SandboxClassMicroVM {
-		seed.volumeMounts = []v1alpha1.VolumeMount{{Name: "data", MountPath: "/home/counter"}}
-		seed.volumes = []v1alpha1.Volume{{
-			Name: "data",
-			VolumeSource: v1alpha1.VolumeSource{
-				DurableDir: &v1alpha1.DurableDirVolumeSource{},
-			},
+	if sandboxClass != e2e.SandboxClassMicroVM {
+		seed.volumeMounts = []*ateapipb.VolumeMount{{Name: "data", MountPath: "/home/counter"}}
+		seed.volumes = []*ateapipb.Volume{{
+			Name:         "data",
+			VolumeSource: &ateapipb.VolumeSource{DurableDir: &ateapipb.DurableDirVolumeSource{}},
 		}}
 	}
 	return seed
@@ -700,126 +699,6 @@ func waitForActorStatus(ctx context.Context, t *testing.T, clients *e2e.Clients,
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("timed out waiting for actor %q to reach status %v", actorID, expectedStatus)
-}
-
-func workerPoolProto(wp *v1alpha1.WorkerPool) *ateapipb.WorkerPool {
-	return &ateapipb.WorkerPool{
-		Name:   wp.Name,
-		Labels: copyStringMap(wp.Labels),
-		Spec: &ateapipb.WorkerPoolSpec{
-			Replicas:           wp.Spec.Replicas,
-			AteomImage:         wp.Spec.AteomImage,
-			SandboxClass:       string(wp.Spec.SandboxClass),
-			SandboxConfigName:  wp.Spec.SandboxConfigName,
-			DeploymentAtespace: wp.Namespace,
-		},
-	}
-}
-
-func actorTemplateProto(at *v1alpha1.ActorTemplate) *ateapipb.ActorTemplate {
-	return &ateapipb.ActorTemplate{
-		Atespace: at.Namespace,
-		Name:     at.Name,
-		Spec: &ateapipb.ActorTemplateSpec{
-			PauseImage:      at.Spec.PauseImage,
-			Containers:      containersProto(at.Spec.Containers),
-			SnapshotsConfig: snapshotsConfigProto(at.Spec.SnapshotsConfig),
-			SandboxClass:    string(at.Spec.SandboxClass),
-			WorkerSelector:  labelSelectorProto(at.Spec.WorkerSelector),
-			Volumes:         volumesProto(at.Spec.Volumes),
-		},
-	}
-}
-
-func actorTemplateAPI(at *ateapipb.ActorTemplate) *v1alpha1.ActorTemplate {
-	out := &v1alpha1.ActorTemplate{
-		ObjectMeta: metav1.ObjectMeta{Namespace: at.GetAtespace(), Name: at.GetName()},
-		Spec: v1alpha1.ActorTemplateSpec{
-			SandboxClass:   v1alpha1.SandboxClass(at.GetSpec().GetSandboxClass()),
-			WorkerSelector: labelSelectorAPI(at.GetSpec().GetWorkerSelector()),
-		},
-		Status: v1alpha1.ActorTemplateStatus{
-			Phase:          v1alpha1.PhaseType(at.GetStatus().GetPhase()),
-			GoldenActorID:  at.GetStatus().GetGoldenActorId(),
-			GoldenSnapshot: at.GetStatus().GetGoldenSnapshot(),
-		},
-	}
-	return out
-}
-
-func containersProto(in []v1alpha1.Container) []*ateapipb.Container {
-	out := make([]*ateapipb.Container, 0, len(in))
-	for i := range in {
-		c := in[i]
-		out = append(out, &ateapipb.Container{
-			Name:         c.Name,
-			Image:        c.Image,
-			Command:      append([]string(nil), c.Command...),
-			Readyz:       readyzProto(c.Readyz),
-			VolumeMounts: volumeMountsProto(c.VolumeMounts),
-		})
-	}
-	return out
-}
-
-func readyzProto(in *v1alpha1.ContainerReadyz) *ateapipb.ContainerReadyz {
-	if in == nil {
-		return nil
-	}
-	out := &ateapipb.ContainerReadyz{}
-	if in.HTTPGet != nil {
-		out.HttpGet = &ateapipb.HTTPGetAction{Path: in.HTTPGet.Path, Port: in.HTTPGet.Port}
-	}
-	return out
-}
-
-func volumeMountsProto(in []v1alpha1.VolumeMount) []*ateapipb.VolumeMount {
-	out := make([]*ateapipb.VolumeMount, 0, len(in))
-	for i := range in {
-		out = append(out, &ateapipb.VolumeMount{Name: in[i].Name, MountPath: in[i].MountPath})
-	}
-	return out
-}
-
-func snapshotsConfigProto(in v1alpha1.SnapshotsConfig) *ateapipb.SnapshotsConfig {
-	return &ateapipb.SnapshotsConfig{Location: in.Location, OnPause: string(in.OnPause), OnCommit: string(in.OnCommit)}
-}
-
-func labelSelectorProto(in *metav1.LabelSelector) *ateapipb.LabelSelector {
-	if in == nil {
-		return nil
-	}
-	return &ateapipb.LabelSelector{MatchLabels: copyStringMap(in.MatchLabels)}
-}
-
-func labelSelectorAPI(in *ateapipb.LabelSelector) *metav1.LabelSelector {
-	if in == nil {
-		return nil
-	}
-	return &metav1.LabelSelector{MatchLabels: copyStringMap(in.GetMatchLabels())}
-}
-
-func volumesProto(in []v1alpha1.Volume) []*ateapipb.Volume {
-	out := make([]*ateapipb.Volume, 0, len(in))
-	for i := range in {
-		src := &ateapipb.VolumeSource{}
-		if in[i].VolumeSource.DurableDir != nil {
-			src.DurableDir = &ateapipb.DurableDirVolumeSource{}
-		}
-		out = append(out, &ateapipb.Volume{Name: in[i].Name, VolumeSource: src})
-	}
-	return out
-}
-
-func copyStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func callActorEventually(t *testing.T, atespace, actorID string) string {
@@ -950,5 +829,5 @@ func callActorOnce(t *testing.T, atespace, actorID string) (string, error) {
 
 func isMicroVMEnvironment() bool {
 	// TODO(BenTheElder) remove it once https://github.com/agent-substrate/substrate/pull/313 is merged.
-	return os.Getenv("E2E_SANDBOX_CLASS") == string(v1alpha1.SandboxClassMicroVM)
+	return os.Getenv("E2E_SANDBOX_CLASS") == e2e.SandboxClassMicroVM
 }

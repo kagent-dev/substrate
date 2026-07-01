@@ -26,12 +26,10 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -48,7 +46,7 @@ type ResumeInput struct {
 // ResumeState holds the mutable state loaded and modified during execution.
 type ResumeState struct {
 	Actor         *ateapipb.Actor
-	ActorTemplate *atev1alpha1.ActorTemplate
+	ActorTemplate *ateapipb.ActorTemplate
 }
 
 type LoadActorForResumeStep struct {
@@ -74,21 +72,17 @@ func (s *LoadActorForResumeStep) Execute(ctx context.Context, input *ResumeInput
 	if err != nil {
 		return fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	state.ActorTemplate = protoActorTemplateToAPI(actorTemplate)
+	state.ActorTemplate = actorTemplate
 
 	return nil
 }
 
 func (s *LoadActorForResumeStep) RetryBackoff() *wait.Backoff { return nil }
 
-func eligibleWorkerPools(pools []*atev1alpha1.WorkerPool, templateClass atev1alpha1.SandboxClass, templateSelector *metav1.LabelSelector, actorSelector *ateapipb.Selector) (map[types.NamespacedName]struct{}, error) {
-	templateSel := labels.Everything()
-	if templateSelector != nil {
-		sel, err := metav1.LabelSelectorAsSelector(templateSelector)
-		if err != nil {
-			return nil, fmt.Errorf("invalid template worker selector: %w", err)
-		}
-		templateSel = sel
+func eligibleWorkerPools(pools []*ateapipb.WorkerPool, templateClass string, templateSelector *ateapipb.LabelSelector, actorSelector *ateapipb.Selector) (map[types.NamespacedName]struct{}, error) {
+	templateSel, err := labelSelector(templateSelector)
+	if err != nil {
+		return nil, fmt.Errorf("invalid template worker selector: %w", err)
 	}
 
 	actorSel := labels.SelectorFromSet(labels.Set(actorSelector.GetMatchLabels()))
@@ -99,12 +93,12 @@ func eligibleWorkerPools(pools []*atev1alpha1.WorkerPool, templateClass atev1alp
 		// must match the template's. This is a hard gate AND'd with the label
 		// selectors below. Both classes are populated by the CRD default (gvisor),
 		// so we compare them directly.
-		if pool.Spec.SandboxClass != templateClass {
+		if pool.GetSpec().GetSandboxClass() != templateClass {
 			continue
 		}
 		set := labels.Set(pool.GetLabels())
 		if templateSel.Matches(set) && actorSel.Matches(set) {
-			eligible[types.NamespacedName{Namespace: pool.GetNamespace(), Name: pool.GetName()}] = struct{}{}
+			eligible[types.NamespacedName{Namespace: pool.GetSpec().GetDeploymentAtespace(), Name: pool.GetName()}] = struct{}{}
 		}
 	}
 	return eligible, nil
@@ -125,15 +119,7 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 	if err != nil {
 		return fmt.Errorf("while listing worker pools: %w", err)
 	}
-	pools := make([]*atev1alpha1.WorkerPool, 0, len(protoPools))
-	for _, protoPool := range protoPools {
-		pool, err := protoWorkerPoolToAPI(protoPool)
-		if err != nil {
-			return fmt.Errorf("while converting WorkerPool: %w", err)
-		}
-		pools = append(pools, pool)
-	}
-	eligible, err := eligibleWorkerPools(pools, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector())
+	eligible, err := eligibleWorkerPools(protoPools, state.ActorTemplate.GetSpec().GetSandboxClass(), state.ActorTemplate.GetSpec().GetWorkerSelector(), state.Actor.GetWorkerSelector())
 	if err != nil {
 		return fmt.Errorf("while computing eligible worker pools: %w", err)
 	}
@@ -300,7 +286,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 					SnapshotPrefix: state.Actor.GetLatestSnapshotInfo().GetLocal().SnapshotPrefix,
 				},
 			}
-			req.Scope = toAteletSnapshotScope(state.ActorTemplate.Spec.SnapshotsConfig.OnPause)
+			req.Scope = toAteletSnapshotScope(state.ActorTemplate.GetSpec().GetSnapshotsConfig().GetOnPause())
 		case ateapipb.SnapshotType_SNAPSHOT_TYPE_EXTERNAL:
 			req.Type = ateletpb.CheckpointType_CHECKPOINT_TYPE_EXTERNAL
 			req.Config = &ateletpb.RestoreRequest_ExternalConfig{
@@ -308,7 +294,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 					SnapshotUriPrefix: state.Actor.GetLatestSnapshotInfo().GetExternal().SnapshotUriPrefix,
 				},
 			}
-			req.Scope = toAteletSnapshotScope(state.ActorTemplate.Spec.SnapshotsConfig.OnCommit)
+			req.Scope = toAteletSnapshotScope(state.ActorTemplate.GetSpec().GetSnapshotsConfig().GetOnCommit())
 		default:
 			return fmt.Errorf("unsupported snapshot type: %v", state.Actor.GetLatestSnapshotInfo().GetType())
 		}
@@ -318,10 +304,10 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 			return fmt.Errorf("while restoring workload: %w", err)
 		}
 		return nil
-	} else if state.ActorTemplate.Status.GoldenSnapshot != "" && !input.Boot {
+	} else if state.ActorTemplate.GetStatus().GetGoldenSnapshot() != "" && !input.Boot {
 		slog.InfoContext(ctx, "Actor has no snapshot; ActorTemplate has golden snapshot; Restoring from golden snapshot")
 
-		snapshot := state.ActorTemplate.Status.GoldenSnapshot
+		snapshot := state.ActorTemplate.GetStatus().GetGoldenSnapshot()
 
 		req := &ateletpb.RestoreRequest{
 			TargetAteomUid:         state.Actor.GetAteomPodUid(),
@@ -335,7 +321,7 @@ func (s *CallAteletRestoreStep) Execute(ctx context.Context, input *ResumeInput,
 					SnapshotUriPrefix: snapshot,
 				},
 			},
-			Scope: toAteletSnapshotScope(state.ActorTemplate.Spec.SnapshotsConfig.OnCommit),
+			Scope: toAteletSnapshotScope(state.ActorTemplate.GetSpec().GetSnapshotsConfig().GetOnCommit()),
 		}
 		_, err = client.Restore(ctx, req)
 		if err != nil {

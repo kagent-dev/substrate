@@ -17,54 +17,53 @@ package controllers
 import (
 	"testing"
 
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	appsv1ac "k8s.io/client-go/applyconfigurations/apps/v1"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 
 	"github.com/agent-substrate/substrate/internal/ateompath"
-	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
 func TestBuildDeploymentApplyConfig(t *testing.T) {
-	requiredNodeAffinity := &corev1.NodeAffinity{
-		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-			NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-				MatchExpressions: []corev1.NodeSelectorRequirement{{
+	requiredNodeAffinity := &ateapipb.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &ateapipb.NodeSelector{
+			NodeSelectorTerms: []*ateapipb.NodeSelectorTerm{{
+				MatchExpressions: []*ateapipb.NodeSelectorRequirement{{
 					Key:      "workload",
-					Operator: corev1.NodeSelectorOpIn,
+					Operator: string(corev1.NodeSelectorOpIn),
 					Values:   []string{"substrate"},
 				}},
 			}},
 		},
 	}
-	preferredNodeAffinity := &corev1.NodeAffinity{
-		PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{
+	preferredNodeAffinity := &ateapipb.NodeAffinity{
+		PreferredDuringSchedulingIgnoredDuringExecution: []*ateapipb.PreferredSchedulingTerm{{
 			Weight: 50,
-			Preference: corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{{
+			Preference: &ateapipb.NodeSelectorTerm{
+				MatchExpressions: []*ateapipb.NodeSelectorRequirement{{
 					Key:      "disk",
-					Operator: corev1.NodeSelectorOpIn,
+					Operator: string(corev1.NodeSelectorOpIn),
 					Values:   []string{"ssd"},
 				}},
 			},
 		}},
 	}
 	tolerationSeconds := int64(300)
-	toleration := corev1.Toleration{
+	toleration := &ateapipb.Toleration{
 		Key:               "dedicated",
-		Operator:          corev1.TolerationOpEqual,
+		Operator:          string(corev1.TolerationOpEqual),
 		Value:             "workerpool",
-		Effect:            corev1.TaintEffectNoSchedule,
+		Effect:            string(corev1.TaintEffectNoSchedule),
 		TolerationSeconds: &tolerationSeconds,
 	}
 
 	tests := []struct {
 		name string
-		wp   *atev1alpha1.WorkerPool
+		wp   *ateapipb.WorkerPool
 		want *appsv1ac.DeploymentApplyConfiguration
 	}{
 		{
@@ -74,7 +73,7 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with node selector",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
 				NodeSelector: map[string]string{
 					"accelerator": "gpu",
 					"topology":    "high-mem",
@@ -89,8 +88,8 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with tolerations",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
-				Tolerations: []corev1.Toleration{toleration},
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
+				Tolerations: []*ateapipb.Toleration{toleration},
 			}),
 			want: expectedDeploymentApplyConfig(func(podSpecAC *corev1ac.PodSpecApplyConfiguration) {
 				podSpecAC.Tolerations = []corev1ac.TolerationApplyConfiguration{
@@ -105,7 +104,7 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with node affinity",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
 				NodeAffinity: requiredNodeAffinity,
 			}),
 			want: expectedDeploymentApplyConfig(func(podSpecAC *corev1ac.PodSpecApplyConfiguration) {
@@ -125,7 +124,7 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with priority class name",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
 				PriorityClassName: "interactive-workerpool",
 			}),
 			want: expectedDeploymentApplyConfig(func(podSpecAC *corev1ac.PodSpecApplyConfiguration) {
@@ -134,15 +133,15 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with resources",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
-				Resources: &corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("500m"),
-						corev1.ResourceMemory: resource.MustParse("1Gi"),
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
+				Resources: &ateapipb.ResourceRequirements{
+					Requests: map[string]string{
+						string(corev1.ResourceCPU):    "500m",
+						string(corev1.ResourceMemory): "1Gi",
 					},
-					Limits: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("1"),
-						corev1.ResourceMemory: resource.MustParse("2Gi"),
+					Limits: map[string]string{
+						string(corev1.ResourceCPU):    "1",
+						string(corev1.ResourceMemory): "2Gi",
 					},
 				},
 			}),
@@ -160,12 +159,12 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 		},
 		{
 			name: "with combined scheduling fields",
-			wp: testWorkerPoolApplyConfig(&atev1alpha1.WorkerPoolPodTemplate{
+			wp: testWorkerPoolApplyConfig(&ateapipb.WorkerPoolPodTemplate{
 				NodeSelector: map[string]string{
 					"accelerator": "gpu",
 					"topology":    "high-mem",
 				},
-				Tolerations:       []corev1.Toleration{toleration},
+				Tolerations:       []*ateapipb.Toleration{toleration},
 				PriorityClassName: "interactive-workerpool",
 				NodeAffinity:      preferredNodeAffinity,
 			}),
@@ -201,7 +200,10 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildDeploymentApplyConfig(tt.wp)
+			got, err := buildDeploymentApplyConfig(tt.wp)
+			if err != nil {
+				t.Fatalf("buildDeploymentApplyConfig() error: %v", err)
+			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Fatalf("buildDeploymentApplyConfig() mismatch (-want +got):\n%s", diff)
 			}
@@ -215,18 +217,22 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 func TestMicroVMPodShape(t *testing.T) {
 	tests := []struct {
 		name        string
-		class       atev1alpha1.SandboxClass
+		class       string
 		wantMicroVM bool
 	}{
 		{"gvisor default", "", false},
-		{"gvisor explicit", atev1alpha1.SandboxClassGvisor, false},
-		{"microvm", atev1alpha1.SandboxClassMicroVM, true},
+		{"gvisor explicit", sandboxClassGvisor, false},
+		{"microvm", sandboxClassMicroVM, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wp := testWorkerPoolApplyConfig(nil)
 			wp.Spec.SandboxClass = tt.class
-			ps := buildDeploymentApplyConfig(wp).Spec.Template.Spec
+			dep, err := buildDeploymentApplyConfig(wp)
+			if err != nil {
+				t.Fatalf("buildDeploymentApplyConfig() error: %v", err)
+			}
+			ps := dep.Spec.Template.Spec
 
 			hasVol := false
 			for _, v := range ps.Volumes {
@@ -261,13 +267,14 @@ func TestMicroVMPodShape(t *testing.T) {
 	}
 }
 
-func testWorkerPoolApplyConfig(tmpl *atev1alpha1.WorkerPoolPodTemplate) *atev1alpha1.WorkerPool {
-	return &atev1alpha1.WorkerPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default", UID: "uid"},
-		Spec: atev1alpha1.WorkerPoolSpec{
-			Replicas:   2,
-			AteomImage: "ateom:v1",
-			Template:   tmpl,
+func testWorkerPoolApplyConfig(tmpl *ateapipb.WorkerPoolPodTemplate) *ateapipb.WorkerPool {
+	return &ateapipb.WorkerPool{
+		Name: "pool",
+		Spec: &ateapipb.WorkerPoolSpec{
+			Replicas:           2,
+			AteomImage:         "ateom:v1",
+			Template:           tmpl,
+			DeploymentAtespace: "default",
 		},
 	}
 }
@@ -286,7 +293,7 @@ func expectedDeploymentApplyConfig(mutatePodSpec func(*corev1ac.PodSpecApplyConf
 				WithType(corev1.HostPathDirectoryOrCreate))).
 		WithContainers(corev1ac.Container().
 			WithName("ateom").
-			WithImage(wp.Spec.AteomImage).
+			WithImage(wp.GetSpec().GetAteomImage()).
 			WithArgs("--pod-uid=$(POD_UID)").
 			WithSecurityContext(corev1ac.SecurityContext().
 				WithPrivileged(true).
@@ -310,19 +317,12 @@ func expectedDeploymentApplyConfig(mutatePodSpec func(*corev1ac.PodSpecApplyConf
 		mutatePodSpec(podSpecAC)
 	}
 
-	return appsv1ac.Deployment(deploymentName(wp.Name), wp.Namespace).
-		WithOwnerReferences(metav1ac.OwnerReference().
-			WithAPIVersion(atev1alpha1.GroupVersion.String()).
-			WithKind("WorkerPool").
-			WithName(wp.Name).
-			WithUID(wp.UID).
-			WithController(true).
-			WithBlockOwnerDeletion(true)).
+	return appsv1ac.Deployment(deploymentName(wp.GetName()), wp.GetSpec().GetDeploymentAtespace()).
 		WithSpec(appsv1ac.DeploymentSpec().
-			WithReplicas(wp.Spec.Replicas).
+			WithReplicas(wp.GetSpec().GetReplicas()).
 			WithSelector(metav1ac.LabelSelector().
-				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
+				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.GetName()})).
 			WithTemplate(corev1ac.PodTemplateSpec().
-				WithLabels(map[string]string{"ate.dev/worker-pool": wp.Name}).
+				WithLabels(map[string]string{"ate.dev/worker-pool": wp.GetName()}).
 				WithSpec(podSpecAC)))
 }
