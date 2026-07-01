@@ -236,6 +236,7 @@ type testContext struct {
 	k8sClient           kubernetes.Interface
 	substrateClient     versioned.Interface
 	persistence         *ateredis.Persistence
+	workerCache         *workercache.Cache
 	fakeAtelet          *FakeAteletServer
 	cleanup             func()
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
@@ -368,6 +369,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 		k8sClient:           k8sClient,
 		substrateClient:     substrateClient,
 		persistence:         persistence,
+		workerCache:         wc,
 		fakeAtelet:          fakeAtelet,
 		cleanup:             cleanup,
 		actorTemplateLister: actorTemplateLister,
@@ -582,13 +584,13 @@ func createWorkerPod(t *testing.T, tc *testContext, ns string, name string, node
 		t.Fatalf("failed to update worker pod status: %v", err)
 	}
 
-	// Wait for worker to be registered via API
+	// Wait for worker to be visible to the scheduler.
 	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		resp, err := tc.client.ListWorkers(ctx, &ateapipb.ListWorkersRequest{})
+		workers, err := tc.workerCache.Workers()
 		if err != nil {
-			return false, nil // Retry on API error
+			return false, nil
 		}
-		for _, w := range resp.GetWorkers() {
+		for _, w := range workers {
 			if w.GetWorkerNamespace() == ns && w.GetWorkerPod() == name {
 				return true, nil
 			}
@@ -607,13 +609,13 @@ func deleteWorkerPod(t *testing.T, tc *testContext, ns string, name string) {
 		t.Fatalf("failed to delete worker pod %s: %v", name, err)
 	}
 
-	// Wait for worker to be removed from API
+	// Wait for worker to be removed from the scheduler.
 	err = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		resp, err := tc.client.ListWorkers(ctx, &ateapipb.ListWorkersRequest{})
+		workers, err := tc.workerCache.Workers()
 		if err != nil {
-			return false, nil // Retry on API error
+			return false, nil
 		}
-		for _, w := range resp.GetWorkers() {
+		for _, w := range workers {
 			if w.GetWorkerNamespace() == ns && w.GetWorkerPod() == name {
 				return false, nil // Still there
 			}
