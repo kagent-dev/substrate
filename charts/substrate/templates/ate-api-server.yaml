@@ -53,7 +53,7 @@ roleRef:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "substrate.fullname" (list "ate-api-server-deployment" .) }}
+  name: {{ include "substrate.fullname" (list "ate-api-server" .) }}
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: 2
@@ -100,8 +100,8 @@ spec:
         - "--redis-client-cert=@env"
         - "--client-jwt-issuer=@env"
         - "--client-jwt-audience={{ .Values.auth.jwt.audience }}"
-        - "--session-id-jwt-pool=/run/session-id-jwt-pool/pool.json"
-        - "--session-id-ca-pool=/run/session-id-ca-pool/pool.json"
+        - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
+        - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--atelet-client-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
         - "--pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem"
 {{- else }}
@@ -112,8 +112,8 @@ spec:
         - "--redis-use-iam-auth=@env"
         - "--client-jwt-issuer={{ .Values.auth.jwt.issuer }}"
         - "--client-jwt-audience={{ .Values.auth.jwt.audience }}"
-        - "--session-id-jwt-pool=/run/session-id-jwt-pool/pool.json"
-        - "--session-id-ca-pool=/run/session-id-ca-pool/pool.json"
+        - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
+        - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--client-jwt-ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 {{- end }}
         - "--drain-delay=13s"
@@ -144,14 +144,14 @@ spec:
         volumeMounts:
 {{- if eq .Values.auth.mode "mtls" }}
         - { name: servicedns,          mountPath: /run/servicedns.podcert.ate.dev }
-        - { name: session-id-jwt-pool, mountPath: /run/session-id-jwt-pool }
+        - { name: actor-id-jwt-pool,   mountPath: /run/actor-id-jwt-pool }
         - { name: valkey-ca-certs,     mountPath: /etc/valkey-ca, readOnly: true }
-        - { name: session-id-ca-pool,  mountPath: /run/session-id-ca-pool, readOnly: true }
+        - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
         - { name: podidentity,         mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
 {{- else }}
         - { name: ateapi-tls,          mountPath: /run/ateapi-tls, readOnly: true }
-        - { name: session-id-jwt-pool, mountPath: /run/session-id-jwt-pool }
-        - { name: session-id-ca-pool,  mountPath: /run/session-id-ca-pool, readOnly: true }
+        - { name: actor-id-jwt-pool,   mountPath: /run/actor-id-jwt-pool }
+        - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
 {{- end }}
         ports:
         - containerPort: 443
@@ -179,11 +179,11 @@ spec:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
               credentialBundlePath: credential-bundle.pem
-      - name: session-id-jwt-pool
+      - name: actor-id-jwt-pool
         projected:
           sources:
           - secret:
-              name: session-id-jwt-pool
+              name: actor-id-jwt-pool
               items:
               - { key: pool, path: pool.json }
       - name: valkey-ca-certs
@@ -193,11 +193,11 @@ spec:
               name: valkey-ca-certs
               items:
               - { key: ca.crt, path: ca.crt }
-      - name: session-id-ca-pool
+      - name: actor-id-ca-pool
         projected:
           sources:
           - secret:
-              name: session-id-ca-pool
+              name: actor-id-ca-pool
               items:
               - { key: pool, path: pool.json }
       - name: podidentity
@@ -219,18 +219,18 @@ spec:
           secretName: {{ .Values.auth.jwt.serverCertSecret }}
       - name: ateapi-tls
         emptyDir: {}
-      - name: session-id-jwt-pool
+      - name: actor-id-jwt-pool
         projected:
           sources:
           - secret:
-              name: session-id-jwt-pool
+              name: actor-id-jwt-pool
               items:
               - { key: pool, path: pool.json }
-      - name: session-id-ca-pool
+      - name: actor-id-ca-pool
         projected:
           sources:
           - secret:
-              name: session-id-ca-pool
+              name: actor-id-ca-pool
               items:
               - { key: pool, path: pool.json }
 {{- end }}

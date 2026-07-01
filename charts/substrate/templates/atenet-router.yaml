@@ -58,62 +58,64 @@ data:
   config.yaml: |
     # yaml-language-server: $schema=https://agentgateway.dev/schema/config
     config:
-      adminAddr: "127.0.0.1:15000"
-      readinessAddr: "0.0.0.0:15021"
-      statsAddr: "0.0.0.0:15020"
-    binds:
-    - port: 8080
-      listeners:
-      - name: http
+      # Actor sandboxes behind a worker IP are replaced between requests. Do
+      # not retain an idle connection that may belong to the previous actor.
+      backend:
+        poolMaxSize: 0
+
+{{- if .Values.otel.endpoint }}
+    frontendPolicies:
+      tracing:
+        host: $AGENTGATEWAY_OTLP_ADDRESS
+        protocol: grpc
+        randomSampling: 0.01
+{{- end }}
+
+    gateways:
+      http:
+        port: 8080
         protocol: HTTP
-        routes:
-        - name: substrate-http
-          matches:
-          - path:
-              pathPrefix: /
-          policies:
-            extProc:
-              host: "127.0.0.1:50051"
-              failureMode: failClosed
-              processingOptions:
-                requestBodyMode: none
-                responseBodyMode: none
-                requestHeaderMode: send
-                responseHeaderMode: skip
-                requestTrailerMode: skip
-                responseTrailerMode: skip
-          backends:
-          - dynamic: {}
-    - port: 8443
-      listeners:
-      - name: https
+      https:
+        port: 8443
         protocol: HTTPS
         tls:
-{{ if eq .Values.auth.mode "mtls" }}
-          cert: "/run/servicedns.podcert.ate.dev/cert.pem"
-          key: "/run/servicedns.podcert.ate.dev/key.pem"
-{{ else }}
-          cert: "/run/agentgateway-tls/tls.crt"
-          key: "/run/agentgateway-tls/tls.key"
-{{ end }}
-        routes:
-        - name: substrate-https
-          matches:
-          - path:
-              pathPrefix: /
-          policies:
-            extProc:
-              host: "127.0.0.1:50051"
-              failureMode: failClosed
-              processingOptions:
-                requestBodyMode: none
-                responseBodyMode: none
-                requestHeaderMode: send
-                responseHeaderMode: skip
-                requestTrailerMode: skip
-                responseTrailerMode: skip
-          backends:
-          - dynamic: {}
+{{- if eq .Values.auth.mode "mtls" }}
+          cert: /run/servicedns.podcert.ate.dev/credential-bundle.pem
+          key: /run/servicedns.podcert.ate.dev/credential-bundle.pem
+{{- else }}
+          cert: /run/agentgateway-tls/tls.crt
+          key: /run/agentgateway-tls/tls.key
+{{- end }}
+
+    routes:
+    - name: substrate-actors
+      gateways:
+      - http
+      - https
+      matches:
+      - path:
+          pathPrefix: /
+      policies:
+        extProc:
+          host: 127.0.0.1:50051
+          failureMode: failClosed
+          processingOptions:
+            requestHeaderMode: send
+            responseHeaderMode: skip
+            requestBodyMode: none
+            responseBodyMode: none
+            requestTrailerMode: skip
+            responseTrailerMode: skip
+      backends:
+      - dynamic: {}
+{{- if eq .Values.auth.mode "mtls" }}
+        policies:
+          backendTLS:
+            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+            root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
+            insecureHost: true
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -142,12 +144,12 @@ spec:
         args:
         - "router"
         - "--standalone"
-        - "--networking-mode=agentgateway"
+        - "--atenet-router=agentgateway"
         - "--namespace={{ .Release.Namespace }}"
         - "--port-http=8080"
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"
-        - "--ateapi-address={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
+        - "--ateapi-address=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
 {{- if eq .Values.auth.mode "mtls" }}
         - "--ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem"
         - "--ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
@@ -203,6 +205,11 @@ spec:
         args:
         - "-f"
         - "/etc/agentgateway/config.yaml"
+{{- if .Values.otel.endpoint }}
+        env:
+        - name: AGENTGATEWAY_OTLP_ADDRESS
+          value: {{ trimPrefix "http://" .Values.otel.endpoint | quote }}
+{{- end }}
         ports:
         - name: http
           containerPort: 8080
@@ -218,6 +225,9 @@ spec:
 {{- if eq .Values.auth.mode "mtls" }}
         - name: "servicedns"
           mountPath: "/run/servicedns.podcert.ate.dev"
+        - name: podidentity
+          mountPath: /run/podidentity.podcert.ate.dev
+          readOnly: true
 {{- else }}
         - name: agentgateway-tls
           mountPath: /run/agentgateway-tls
@@ -257,6 +267,14 @@ spec:
               signerName: podidentity.podcert.ate.dev/identity
               keyType: ECDSAP256
               credentialBundlePath: credential-bundle.pem
+              certificateChainPath: cert.pem
+              keyPath: key.pem
+          - clusterTrustBundle:
+              signerName: podidentity.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: trust-bundle.pem
 {{- else }}
       - name: agentgateway-tls
         secret:
@@ -290,4 +308,8 @@ spec:
   - name: https
     port: 443
     targetPort: 8443
+    protocol: TCP
+  - name: status
+    port: 4040
+    targetPort: status
     protocol: TCP

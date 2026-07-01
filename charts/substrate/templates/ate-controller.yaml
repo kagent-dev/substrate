@@ -71,6 +71,12 @@ spec:
       - name: ate-controller
         image: {{ include "substrate.componentImage" (list "atecontroller" .) }}
         args:
+        # The atecontroller binary defaults --ateapi-conn-spec to
+        # dns:///api.ate-system.svc:443, which is correct only for the
+        # canonical render (release name "substrate" in namespace
+        # "ate-system"). Pass the chart-resolved Service so the controller
+        # dials the right backend when substrate is installed as a subchart.
+        - "--ateapi-conn-spec=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
 {{- if eq .Values.auth.mode "mtls" }}
         - "--ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem"
         - "--ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
@@ -79,6 +85,11 @@ spec:
         - "--ateapi-ca-file=/run/ateapi-ca/ca.crt"
         - "--ateapi-server-name={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc"
         - "--ateapi-token-file=/var/run/secrets/tokens/ateapi/token"
+{{- end }}
+{{- if .Values.otel.endpoint }}
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
 {{- end }}
         ports:
         - name: metrics
