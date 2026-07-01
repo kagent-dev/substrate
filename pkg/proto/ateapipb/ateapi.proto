@@ -18,6 +18,8 @@ syntax = "proto3";
 
 package ateapi;
 
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
@@ -65,67 +67,67 @@ service Control {
   rpc DeleteAtespace(DeleteAtespaceRequest) returns (DeleteAtespaceResponse) {}
 
   // Create an atespace-scoped ActorTemplate.
-  rpc CreateActorTemplate(CreateActorTemplateRequest) returns (CreateActorTemplateResponse) {}
+  rpc CreateActorTemplate(CreateActorTemplateRequest) returns (ActorTemplate) {}
 
   // Get an ActorTemplate.
-  rpc GetActorTemplate(GetActorTemplateRequest) returns (GetActorTemplateResponse) {}
+  rpc GetActorTemplate(GetActorTemplateRequest) returns (ActorTemplate) {}
 
   // List ActorTemplates.
   rpc ListActorTemplates(ListActorTemplatesRequest) returns (ListActorTemplatesResponse) {}
 
   // Update an ActorTemplate.
-  rpc UpdateActorTemplate(UpdateActorTemplateRequest) returns (UpdateActorTemplateResponse) {}
+  rpc UpdateActorTemplate(UpdateActorTemplateRequest) returns (ActorTemplate) {}
 
   // Delete an ActorTemplate.
-  rpc DeleteActorTemplate(DeleteActorTemplateRequest) returns (DeleteActorTemplateResponse) {}
+  rpc DeleteActorTemplate(DeleteActorTemplateRequest) returns (google.protobuf.Empty) {}
 
   // Watch ActorTemplate changes after an initial snapshot.
   rpc WatchActorTemplates(WatchActorTemplatesRequest) returns (stream WatchActorTemplatesResponse) {}
 
   // Create a WorkerPool.
-  rpc CreateWorkerPool(CreateWorkerPoolRequest) returns (CreateWorkerPoolResponse) {}
+  rpc CreateWorkerPool(CreateWorkerPoolRequest) returns (WorkerPool) {}
 
   // Get a WorkerPool.
-  rpc GetWorkerPool(GetWorkerPoolRequest) returns (GetWorkerPoolResponse) {}
+  rpc GetWorkerPool(GetWorkerPoolRequest) returns (WorkerPool) {}
 
   // List WorkerPools.
   rpc ListWorkerPools(ListWorkerPoolsRequest) returns (ListWorkerPoolsResponse) {}
 
   // Update a WorkerPool.
-  rpc UpdateWorkerPool(UpdateWorkerPoolRequest) returns (UpdateWorkerPoolResponse) {}
+  rpc UpdateWorkerPool(UpdateWorkerPoolRequest) returns (WorkerPool) {}
 
   // Delete a WorkerPool.
-  rpc DeleteWorkerPool(DeleteWorkerPoolRequest) returns (DeleteWorkerPoolResponse) {}
+  rpc DeleteWorkerPool(DeleteWorkerPoolRequest) returns (google.protobuf.Empty) {}
 
   // Watch WorkerPool changes after an initial snapshot.
   rpc WatchWorkerPools(WatchWorkerPoolsRequest) returns (stream WatchWorkerPoolsResponse) {}
 
   // Create a SandboxConfig.
-  rpc CreateSandboxConfig(CreateSandboxConfigRequest) returns (CreateSandboxConfigResponse) {}
+  rpc CreateSandboxConfig(CreateSandboxConfigRequest) returns (SandboxConfig) {}
 
   // Get a SandboxConfig.
-  rpc GetSandboxConfig(GetSandboxConfigRequest) returns (GetSandboxConfigResponse) {}
+  rpc GetSandboxConfig(GetSandboxConfigRequest) returns (SandboxConfig) {}
 
   // List SandboxConfigs.
   rpc ListSandboxConfigs(ListSandboxConfigsRequest) returns (ListSandboxConfigsResponse) {}
 
   // Update a SandboxConfig.
-  rpc UpdateSandboxConfig(UpdateSandboxConfigRequest) returns (UpdateSandboxConfigResponse) {}
+  rpc UpdateSandboxConfig(UpdateSandboxConfigRequest) returns (SandboxConfig) {}
 
   // Delete a SandboxConfig.
-  rpc DeleteSandboxConfig(DeleteSandboxConfigRequest) returns (DeleteSandboxConfigResponse) {}
+  rpc DeleteSandboxConfig(DeleteSandboxConfigRequest) returns (google.protobuf.Empty) {}
 
   // Grant an atespace access to a worker pool.
-  rpc CreateWorkerPoolGrant(CreateWorkerPoolGrantRequest) returns (CreateWorkerPoolGrantResponse) {}
+  rpc CreateWorkerPoolGrant(CreateWorkerPoolGrantRequest) returns (WorkerPoolGrant) {}
 
   // Get a WorkerPoolGrant by atespace and worker pool.
-  rpc GetWorkerPoolGrant(GetWorkerPoolGrantRequest) returns (GetWorkerPoolGrantResponse) {}
+  rpc GetWorkerPoolGrant(GetWorkerPoolGrantRequest) returns (WorkerPoolGrant) {}
 
   // List WorkerPoolGrants, optionally scoped to one atespace.
   rpc ListWorkerPoolGrants(ListWorkerPoolGrantsRequest) returns (ListWorkerPoolGrantsResponse) {}
 
   // Delete a WorkerPoolGrant.
-  rpc DeleteWorkerPoolGrant(DeleteWorkerPoolGrantRequest) returns (DeleteWorkerPoolGrantResponse) {}
+  rpc DeleteWorkerPoolGrant(DeleteWorkerPoolGrantRequest) returns (google.protobuf.Empty) {}
 
   // Debugging: drop all data from the ate database.
   rpc DebugClear(DebugClearRequest) returns (DebugClearResponse) {}
@@ -251,9 +253,12 @@ message ActorTemplateRef {
 message ActorTemplate {
   string atespace = 1;
   string name     = 2;
-  int64  version  = 3;
-  ActorTemplateSpec spec = 4;
-  ActorTemplateStatus status = 5;
+  string uid = 3;
+  google.protobuf.Timestamp create_time = 4;
+  google.protobuf.Timestamp update_time = 5;
+  int64  version  = 6;
+  ActorTemplateSpec spec = 7;
+  ActorTemplateStatus status = 8;
 }
 
 message ActorTemplateSpec {
@@ -352,35 +357,30 @@ message LabelSelectorRequirement {
 message CreateActorTemplateRequest {
   ActorTemplate actor_template = 1;
 }
-message CreateActorTemplateResponse {
-  ActorTemplate actor_template = 1;
-}
 
 message GetActorTemplateRequest {
   ActorTemplateRef actor_template = 1;
 }
-message GetActorTemplateResponse {
-  ActorTemplate actor_template = 1;
-}
 
 message ListActorTemplatesRequest {
   string atespace = 1;
+  int32 page_size = 2;
+  string page_token = 3;
 }
 message ListActorTemplatesResponse {
   repeated ActorTemplate actor_templates = 1;
+  string next_page_token = 2;
 }
 
 message UpdateActorTemplateRequest {
   ActorTemplate actor_template = 1;
-}
-message UpdateActorTemplateResponse {
-  ActorTemplate actor_template = 1;
+  google.protobuf.FieldMask update_mask = 2;
 }
 
 message DeleteActorTemplateRequest {
   ActorTemplateRef actor_template = 1;
+  int64 version = 2;
 }
-message DeleteActorTemplateResponse {}
 
 enum ResourceEventType {
   RESOURCE_EVENT_TYPE_UNSPECIFIED = 0;
@@ -396,12 +396,14 @@ message WatchActorTemplatesResponse {
 }
 
 message WorkerPool {
-  string namespace = 1;
-  string name      = 2;
-  int64  version   = 3;
-  map<string, string> labels = 4;
-  WorkerPoolSpec spec = 5;
-  WorkerPoolStatus status = 6;
+  string name = 1;
+  string uid = 2;
+  google.protobuf.Timestamp create_time = 3;
+  google.protobuf.Timestamp update_time = 4;
+  int64  version = 5;
+  map<string, string> labels = 6;
+  WorkerPoolSpec spec = 7;
+  WorkerPoolStatus status = 8;
 }
 
 message WorkerPoolSpec {
@@ -410,6 +412,9 @@ message WorkerPoolSpec {
   WorkerPoolPodTemplate template = 3;
   string sandbox_class = 4;
   string sandbox_config_name = 5;
+  // deployment_atespace is where the projector materializes backing worker
+  // pods. It is an implementation placement field, not WorkerPool identity.
+  string deployment_atespace = 6;
 }
 
 message WorkerPoolStatus {
@@ -465,33 +470,29 @@ message ResourceRequirements {
 message CreateWorkerPoolRequest {
   WorkerPool worker_pool = 1;
 }
-message CreateWorkerPoolResponse {
-  WorkerPool worker_pool = 1;
-}
 
 message GetWorkerPoolRequest {
   WorkerPoolRef worker_pool = 1;
 }
-message GetWorkerPoolResponse {
-  WorkerPool worker_pool = 1;
-}
 
-message ListWorkerPoolsRequest {}
+message ListWorkerPoolsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
 message ListWorkerPoolsResponse {
   repeated WorkerPool worker_pools = 1;
+  string next_page_token = 2;
 }
 
 message UpdateWorkerPoolRequest {
   WorkerPool worker_pool = 1;
-}
-message UpdateWorkerPoolResponse {
-  WorkerPool worker_pool = 1;
+  google.protobuf.FieldMask update_mask = 2;
 }
 
 message DeleteWorkerPoolRequest {
   WorkerPoolRef worker_pool = 1;
+  int64 version = 2;
 }
-message DeleteWorkerPoolResponse {}
 
 message WatchWorkerPoolsRequest {}
 message WatchWorkerPoolsResponse {
@@ -500,9 +501,16 @@ message WatchWorkerPoolsResponse {
 }
 
 message SandboxConfig {
-  string name    = 1;
-  int64  version = 2;
-  SandboxConfigSpec spec = 3;
+  string name = 1;
+  string uid = 2;
+  google.protobuf.Timestamp create_time = 3;
+  google.protobuf.Timestamp update_time = 4;
+  int64  version = 5;
+  SandboxConfigSpec spec = 6;
+}
+
+message SandboxConfigRef {
+  string name = 1;
 }
 
 message SandboxConfigSpec {
@@ -523,76 +531,73 @@ message AssetFile {
 message CreateSandboxConfigRequest {
   SandboxConfig sandbox_config = 1;
 }
-message CreateSandboxConfigResponse {
-  SandboxConfig sandbox_config = 1;
-}
 
 message GetSandboxConfigRequest {
-  string name = 1;
-}
-message GetSandboxConfigResponse {
-  SandboxConfig sandbox_config = 1;
+  SandboxConfigRef sandbox_config = 1;
 }
 
-message ListSandboxConfigsRequest {}
+message ListSandboxConfigsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
 message ListSandboxConfigsResponse {
   repeated SandboxConfig sandbox_configs = 1;
+  string next_page_token = 2;
 }
 
 message UpdateSandboxConfigRequest {
   SandboxConfig sandbox_config = 1;
-}
-message UpdateSandboxConfigResponse {
-  SandboxConfig sandbox_config = 1;
+  google.protobuf.FieldMask update_mask = 2;
 }
 
 message DeleteSandboxConfigRequest {
-  string name = 1;
+  SandboxConfigRef sandbox_config = 1;
+  int64 version = 2;
 }
-message DeleteSandboxConfigResponse {}
 
-// WorkerPoolRef identifies a worker pool. This POC keeps the Kubernetes
-// namespace because WorkerPool is still a namespaced CRD. Once WorkerPool moves
-// fully behind ate-api-server, this can collapse to a global worker pool name.
 message WorkerPoolRef {
-  string namespace = 1;
-  string name      = 2;
+  string name = 1;
 }
 
 // WorkerPoolGrant allows one atespace to schedule actors onto one worker pool.
 message WorkerPoolGrant {
   string atespace = 1;
-  WorkerPoolRef worker_pool = 2;
+  string name = 2;
+  string uid = 3;
+  google.protobuf.Timestamp create_time = 4;
+  google.protobuf.Timestamp update_time = 5;
+  int64 version = 6;
+  WorkerPoolRef worker_pool = 7;
+}
+
+message WorkerPoolGrantRef {
+  string atespace = 1;
+  string name = 2;
 }
 
 message CreateWorkerPoolGrantRequest {
-  WorkerPoolGrant grant = 1;
-}
-message CreateWorkerPoolGrantResponse {
-  WorkerPoolGrant grant = 1;
+  WorkerPoolGrant worker_pool_grant = 1;
 }
 
 message GetWorkerPoolGrantRequest {
-  string atespace = 1;
-  WorkerPoolRef worker_pool = 2;
-}
-message GetWorkerPoolGrantResponse {
-  WorkerPoolGrant grant = 1;
+  WorkerPoolGrantRef worker_pool_grant = 1;
 }
 
 message ListWorkerPoolGrantsRequest {
   // If set, list only grants for this atespace. Empty lists all grants.
   string atespace = 1;
+  int32 page_size = 2;
+  string page_token = 3;
 }
 message ListWorkerPoolGrantsResponse {
-  repeated WorkerPoolGrant grants = 1;
+  repeated WorkerPoolGrant worker_pool_grants = 1;
+  string next_page_token = 2;
 }
 
 message DeleteWorkerPoolGrantRequest {
-  string atespace = 1;
-  WorkerPoolRef worker_pool = 2;
+  WorkerPoolGrantRef worker_pool_grant = 1;
+  int64 version = 2;
 }
-message DeleteWorkerPoolGrantResponse {}
 
 message GetActorRequest {
   ActorRef actor_ref = 1;

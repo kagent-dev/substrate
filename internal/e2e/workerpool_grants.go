@@ -50,16 +50,14 @@ func GrantAtespaceToTemplateWorkerPools(t testing.TB, ctx context.Context, clien
 			continue
 		}
 		_, err := clients.SubstrateAPI.CreateWorkerPoolGrant(ctx, &ateapipb.CreateWorkerPoolGrantRequest{
-			Grant: &ateapipb.WorkerPoolGrant{
-				Atespace: atespace,
-				WorkerPool: &ateapipb.WorkerPoolRef{
-					Namespace: pool.GetNamespace(),
-					Name:      pool.GetName(),
-				},
+			WorkerPoolGrant: &ateapipb.WorkerPoolGrant{
+				Atespace:   atespace,
+				Name:       pool.GetName(),
+				WorkerPool: &ateapipb.WorkerPoolRef{Name: pool.GetName()},
 			},
 		})
 		if err != nil && status.Code(err) != codes.AlreadyExists {
-			t.Fatalf("grant %s access to WorkerPool %s/%s: %v", atespace, pool.GetNamespace(), pool.GetName(), err)
+			t.Fatalf("grant %s access to WorkerPool %s: %v", atespace, pool.GetName(), err)
 		}
 		granted++
 	}

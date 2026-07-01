@@ -26,10 +26,12 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-func (s *Service) CreateActorTemplate(ctx context.Context, req *ateapipb.CreateActorTemplateRequest) (*ateapipb.CreateActorTemplateResponse, error) {
+func (s *Service) CreateActorTemplate(ctx context.Context, req *ateapipb.CreateActorTemplateRequest) (*ateapipb.ActorTemplate, error) {
 	at := req.GetActorTemplate()
 	if err := validateActorTemplate(at); err != nil {
 		return nil, err
@@ -53,10 +55,10 @@ func (s *Service) CreateActorTemplate(ctx context.Context, req *ateapipb.CreateA
 	if err != nil {
 		return nil, fmt.Errorf("while fetching recorded ActorTemplate: %w", err)
 	}
-	return &ateapipb.CreateActorTemplateResponse{ActorTemplate: stored}, nil
+	return stored, nil
 }
 
-func (s *Service) GetActorTemplate(ctx context.Context, req *ateapipb.GetActorTemplateRequest) (*ateapipb.GetActorTemplateResponse, error) {
+func (s *Service) GetActorTemplate(ctx context.Context, req *ateapipb.GetActorTemplateRequest) (*ateapipb.ActorTemplate, error) {
 	ref := req.GetActorTemplate()
 	if err := validateActorTemplateRef(ref); err != nil {
 		return nil, err
@@ -68,10 +70,13 @@ func (s *Service) GetActorTemplate(ctx context.Context, req *ateapipb.GetActorTe
 		}
 		return nil, fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
-	return &ateapipb.GetActorTemplateResponse{ActorTemplate: at}, nil
+	return at, nil
 }
 
 func (s *Service) ListActorTemplates(ctx context.Context, req *ateapipb.ListActorTemplatesRequest) (*ateapipb.ListActorTemplatesResponse, error) {
+	if err := validatePageSize(req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	if req.GetAtespace() != "" {
 		if err := resources.ValidateAtespace(req.GetAtespace()); err != nil {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -84,7 +89,10 @@ func (s *Service) ListActorTemplates(ctx context.Context, req *ateapipb.ListActo
 	return &ateapipb.ListActorTemplatesResponse{ActorTemplates: ats}, nil
 }
 
-func (s *Service) UpdateActorTemplate(ctx context.Context, req *ateapipb.UpdateActorTemplateRequest) (*ateapipb.UpdateActorTemplateResponse, error) {
+func (s *Service) UpdateActorTemplate(ctx context.Context, req *ateapipb.UpdateActorTemplateRequest) (*ateapipb.ActorTemplate, error) {
+	if err := validateUpdateMask(req.GetUpdateMask()); err != nil {
+		return nil, err
+	}
 	at := req.GetActorTemplate()
 	if err := validateActorTemplate(at); err != nil {
 		return nil, err
@@ -95,10 +103,10 @@ func (s *Service) UpdateActorTemplate(ctx context.Context, req *ateapipb.UpdateA
 	if err := s.persistence.UpdateActorTemplate(ctx, at, at.GetVersion()); err != nil {
 		return nil, resourceStoreErr("ActorTemplate", fmt.Sprintf("%s/%s", at.GetAtespace(), at.GetName()), err)
 	}
-	return &ateapipb.UpdateActorTemplateResponse{ActorTemplate: at}, nil
+	return at, nil
 }
 
-func (s *Service) DeleteActorTemplate(ctx context.Context, req *ateapipb.DeleteActorTemplateRequest) (*ateapipb.DeleteActorTemplateResponse, error) {
+func (s *Service) DeleteActorTemplate(ctx context.Context, req *ateapipb.DeleteActorTemplateRequest) (*emptypb.Empty, error) {
 	ref := req.GetActorTemplate()
 	if err := validateActorTemplateRef(ref); err != nil {
 		return nil, err
@@ -106,43 +114,46 @@ func (s *Service) DeleteActorTemplate(ctx context.Context, req *ateapipb.DeleteA
 	if err := s.persistence.DeleteActorTemplate(ctx, ref.GetAtespace(), ref.GetName()); err != nil {
 		return nil, resourceStoreErr("ActorTemplate", fmt.Sprintf("%s/%s", ref.GetAtespace(), ref.GetName()), err)
 	}
-	return &ateapipb.DeleteActorTemplateResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) CreateWorkerPool(ctx context.Context, req *ateapipb.CreateWorkerPoolRequest) (*ateapipb.CreateWorkerPoolResponse, error) {
+func (s *Service) CreateWorkerPool(ctx context.Context, req *ateapipb.CreateWorkerPoolRequest) (*ateapipb.WorkerPool, error) {
 	wp := req.GetWorkerPool()
 	if err := validateWorkerPool(wp); err != nil {
 		return nil, err
 	}
 	if err := s.persistence.CreateWorkerPool(ctx, wp); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "WorkerPool %s/%s already exists", wp.GetNamespace(), wp.GetName())
+			return nil, status.Errorf(codes.AlreadyExists, "WorkerPool %s already exists", wp.GetName())
 		}
 		return nil, fmt.Errorf("while recording WorkerPool: %w", err)
 	}
-	stored, err := s.persistence.GetWorkerPool(ctx, wp.GetNamespace(), wp.GetName())
+	stored, err := s.persistence.GetWorkerPool(ctx, wp.GetName())
 	if err != nil {
 		return nil, fmt.Errorf("while fetching recorded WorkerPool: %w", err)
 	}
-	return &ateapipb.CreateWorkerPoolResponse{WorkerPool: stored}, nil
+	return stored, nil
 }
 
-func (s *Service) GetWorkerPool(ctx context.Context, req *ateapipb.GetWorkerPoolRequest) (*ateapipb.GetWorkerPoolResponse, error) {
+func (s *Service) GetWorkerPool(ctx context.Context, req *ateapipb.GetWorkerPoolRequest) (*ateapipb.WorkerPool, error) {
 	ref := req.GetWorkerPool()
 	if err := validateWorkerPoolRef(ref); err != nil {
 		return nil, err
 	}
-	wp, err := s.persistence.GetWorkerPool(ctx, ref.GetNamespace(), ref.GetName())
+	wp, err := s.persistence.GetWorkerPool(ctx, ref.GetName())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "WorkerPool %s/%s not found", ref.GetNamespace(), ref.GetName())
+			return nil, status.Errorf(codes.NotFound, "WorkerPool %s not found", ref.GetName())
 		}
 		return nil, fmt.Errorf("while getting WorkerPool: %w", err)
 	}
-	return &ateapipb.GetWorkerPoolResponse{WorkerPool: wp}, nil
+	return wp, nil
 }
 
 func (s *Service) ListWorkerPools(ctx context.Context, req *ateapipb.ListWorkerPoolsRequest) (*ateapipb.ListWorkerPoolsResponse, error) {
+	if err := validatePageSize(req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	pools, err := s.persistence.ListWorkerPools(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("while listing WorkerPools: %w", err)
@@ -150,7 +161,10 @@ func (s *Service) ListWorkerPools(ctx context.Context, req *ateapipb.ListWorkerP
 	return &ateapipb.ListWorkerPoolsResponse{WorkerPools: pools}, nil
 }
 
-func (s *Service) UpdateWorkerPool(ctx context.Context, req *ateapipb.UpdateWorkerPoolRequest) (*ateapipb.UpdateWorkerPoolResponse, error) {
+func (s *Service) UpdateWorkerPool(ctx context.Context, req *ateapipb.UpdateWorkerPoolRequest) (*ateapipb.WorkerPool, error) {
+	if err := validateUpdateMask(req.GetUpdateMask()); err != nil {
+		return nil, err
+	}
 	wp := req.GetWorkerPool()
 	if err := validateWorkerPool(wp); err != nil {
 		return nil, err
@@ -159,23 +173,23 @@ func (s *Service) UpdateWorkerPool(ctx context.Context, req *ateapipb.UpdateWork
 		return nil, status.Error(codes.InvalidArgument, "worker_pool.version is required")
 	}
 	if err := s.persistence.UpdateWorkerPool(ctx, wp, wp.GetVersion()); err != nil {
-		return nil, resourceStoreErr("WorkerPool", fmt.Sprintf("%s/%s", wp.GetNamespace(), wp.GetName()), err)
+		return nil, resourceStoreErr("WorkerPool", wp.GetName(), err)
 	}
-	return &ateapipb.UpdateWorkerPoolResponse{WorkerPool: wp}, nil
+	return wp, nil
 }
 
-func (s *Service) DeleteWorkerPool(ctx context.Context, req *ateapipb.DeleteWorkerPoolRequest) (*ateapipb.DeleteWorkerPoolResponse, error) {
+func (s *Service) DeleteWorkerPool(ctx context.Context, req *ateapipb.DeleteWorkerPoolRequest) (*emptypb.Empty, error) {
 	ref := req.GetWorkerPool()
 	if err := validateWorkerPoolRef(ref); err != nil {
 		return nil, err
 	}
-	if err := s.persistence.DeleteWorkerPool(ctx, ref.GetNamespace(), ref.GetName()); err != nil {
-		return nil, resourceStoreErr("WorkerPool", fmt.Sprintf("%s/%s", ref.GetNamespace(), ref.GetName()), err)
+	if err := s.persistence.DeleteWorkerPool(ctx, ref.GetName()); err != nil {
+		return nil, resourceStoreErr("WorkerPool", ref.GetName(), err)
 	}
-	return &ateapipb.DeleteWorkerPoolResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (s *Service) CreateSandboxConfig(ctx context.Context, req *ateapipb.CreateSandboxConfigRequest) (*ateapipb.CreateSandboxConfigResponse, error) {
+func (s *Service) CreateSandboxConfig(ctx context.Context, req *ateapipb.CreateSandboxConfigRequest) (*ateapipb.SandboxConfig, error) {
 	sc := req.GetSandboxConfig()
 	if err := validateSandboxConfig(sc); err != nil {
 		return nil, err
@@ -193,24 +207,31 @@ func (s *Service) CreateSandboxConfig(ctx context.Context, req *ateapipb.CreateS
 	if err != nil {
 		return nil, fmt.Errorf("while fetching recorded SandboxConfig: %w", err)
 	}
-	return &ateapipb.CreateSandboxConfigResponse{SandboxConfig: stored}, nil
+	return stored, nil
 }
 
-func (s *Service) GetSandboxConfig(ctx context.Context, req *ateapipb.GetSandboxConfigRequest) (*ateapipb.GetSandboxConfigResponse, error) {
-	if err := validateResourceName("name", req.GetName()); err != nil {
+func (s *Service) GetSandboxConfig(ctx context.Context, req *ateapipb.GetSandboxConfigRequest) (*ateapipb.SandboxConfig, error) {
+	ref := req.GetSandboxConfig()
+	if ref == nil {
+		return nil, status.Error(codes.InvalidArgument, "sandbox_config is required")
+	}
+	if err := validateResourceName("sandbox_config.name", ref.GetName()); err != nil {
 		return nil, err
 	}
-	sc, err := s.persistence.GetSandboxConfig(ctx, req.GetName())
+	sc, err := s.persistence.GetSandboxConfig(ctx, ref.GetName())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "SandboxConfig %s not found", req.GetName())
+			return nil, status.Errorf(codes.NotFound, "SandboxConfig %s not found", ref.GetName())
 		}
 		return nil, fmt.Errorf("while getting SandboxConfig: %w", err)
 	}
-	return &ateapipb.GetSandboxConfigResponse{SandboxConfig: sc}, nil
+	return sc, nil
 }
 
 func (s *Service) ListSandboxConfigs(ctx context.Context, req *ateapipb.ListSandboxConfigsRequest) (*ateapipb.ListSandboxConfigsResponse, error) {
+	if err := validatePageSize(req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	configs, err := s.persistence.ListSandboxConfigs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("while listing SandboxConfigs: %w", err)
@@ -218,7 +239,10 @@ func (s *Service) ListSandboxConfigs(ctx context.Context, req *ateapipb.ListSand
 	return &ateapipb.ListSandboxConfigsResponse{SandboxConfigs: configs}, nil
 }
 
-func (s *Service) UpdateSandboxConfig(ctx context.Context, req *ateapipb.UpdateSandboxConfigRequest) (*ateapipb.UpdateSandboxConfigResponse, error) {
+func (s *Service) UpdateSandboxConfig(ctx context.Context, req *ateapipb.UpdateSandboxConfigRequest) (*ateapipb.SandboxConfig, error) {
+	if err := validateUpdateMask(req.GetUpdateMask()); err != nil {
+		return nil, err
+	}
 	sc := req.GetSandboxConfig()
 	if err := validateSandboxConfig(sc); err != nil {
 		return nil, err
@@ -232,17 +256,21 @@ func (s *Service) UpdateSandboxConfig(ctx context.Context, req *ateapipb.UpdateS
 	if err := s.persistence.UpdateSandboxConfig(ctx, sc, sc.GetVersion()); err != nil {
 		return nil, resourceStoreErr("SandboxConfig", sc.GetName(), err)
 	}
-	return &ateapipb.UpdateSandboxConfigResponse{SandboxConfig: sc}, nil
+	return sc, nil
 }
 
-func (s *Service) DeleteSandboxConfig(ctx context.Context, req *ateapipb.DeleteSandboxConfigRequest) (*ateapipb.DeleteSandboxConfigResponse, error) {
-	if err := validateResourceName("name", req.GetName()); err != nil {
+func (s *Service) DeleteSandboxConfig(ctx context.Context, req *ateapipb.DeleteSandboxConfigRequest) (*emptypb.Empty, error) {
+	ref := req.GetSandboxConfig()
+	if ref == nil {
+		return nil, status.Error(codes.InvalidArgument, "sandbox_config is required")
+	}
+	if err := validateResourceName("sandbox_config.name", ref.GetName()); err != nil {
 		return nil, err
 	}
-	if err := s.persistence.DeleteSandboxConfig(ctx, req.GetName()); err != nil {
-		return nil, resourceStoreErr("SandboxConfig", req.GetName(), err)
+	if err := s.persistence.DeleteSandboxConfig(ctx, ref.GetName()); err != nil {
+		return nil, resourceStoreErr("SandboxConfig", ref.GetName(), err)
 	}
-	return &ateapipb.DeleteSandboxConfigResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (s *Service) requireAtespace(ctx context.Context, name string) error {
@@ -315,7 +343,7 @@ func validateWorkerPool(wp *ateapipb.WorkerPool) error {
 	if wp == nil {
 		return status.Error(codes.InvalidArgument, "worker_pool is required")
 	}
-	if err := validateWorkerPoolRef(&ateapipb.WorkerPoolRef{Namespace: wp.GetNamespace(), Name: wp.GetName()}); err != nil {
+	if err := validateWorkerPoolRef(&ateapipb.WorkerPoolRef{Name: wp.GetName()}); err != nil {
 		return err
 	}
 	if wp.GetSpec().GetAteomImage() == "" {
@@ -330,12 +358,6 @@ func validateWorkerPool(wp *ateapipb.WorkerPool) error {
 func validateWorkerPoolRef(ref *ateapipb.WorkerPoolRef) error {
 	if ref == nil {
 		return status.Error(codes.InvalidArgument, "worker_pool is required")
-	}
-	if ref.GetNamespace() == "" {
-		return status.Error(codes.InvalidArgument, "worker_pool.namespace is required")
-	}
-	if errs := validation.IsDNS1123Label(ref.GetNamespace()); len(errs) > 0 {
-		return status.Errorf(codes.InvalidArgument, "invalid worker_pool.namespace %q: %s", ref.GetNamespace(), strings.Join(errs, "; "))
 	}
 	return validateResourceName("worker_pool.name", ref.GetName())
 }
@@ -371,6 +393,28 @@ func validateLabels(labels map[string]string) error {
 		if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
 			return fmt.Errorf("invalid label value %q for key %q: %s", v, k, strings.Join(errs, "; "))
 		}
+	}
+	return nil
+}
+
+func validateUpdateMask(mask *fieldmaskpb.FieldMask) error {
+	// TODO: Implement true field-mask patch semantics once upstream has a
+	// precedent to follow. This POC requires and validates update_mask for API
+	// shape compliance, but Update* still replaces the submitted resource body.
+	if mask == nil || len(mask.GetPaths()) == 0 {
+		return status.Error(codes.InvalidArgument, "update_mask is required")
+	}
+	for _, path := range mask.GetPaths() {
+		if path == "*" {
+			return status.Error(codes.InvalidArgument, "update_mask '*' is not supported")
+		}
+	}
+	return nil
+}
+
+func validatePageSize(pageSize int32) error {
+	if pageSize < 0 {
+		return status.Error(codes.InvalidArgument, "page_size must be non-negative")
 	}
 	return nil
 }

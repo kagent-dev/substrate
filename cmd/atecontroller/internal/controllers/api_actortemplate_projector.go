@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -97,7 +98,9 @@ func (p *APIActorTemplateProjector) reconcile(ctx context.Context, at *ateapipb.
 
 func (p *APIActorTemplateProjector) reconcileInitial(ctx context.Context, at *ateapipb.ActorTemplate) error {
 	actorID := uuid.NewString()
-	_, err := p.AteClient.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{Name: resources.GoldenActorAtespace})
+	_, err := p.AteClient.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{
+		Name: resources.GoldenActorAtespace,
+	})
 	if err != nil && status.Code(err) != codes.AlreadyExists {
 		return fmt.Errorf("while ensuring atespace %q: %w", resources.GoldenActorAtespace, err)
 	}
@@ -115,7 +118,7 @@ func (p *APIActorTemplateProjector) reconcileInitial(ctx context.Context, at *at
 	ensureActorTemplateStatus(next)
 	next.Status.Phase = string(atev1alpha1.PhaseResumeGoldenActor)
 	next.Status.GoldenActorId = actorID
-	_, err = p.AteClient.UpdateActorTemplate(ctx, &ateapipb.UpdateActorTemplateRequest{ActorTemplate: next})
+	_, err = p.AteClient.UpdateActorTemplate(ctx, actorTemplateStatusUpdate(next))
 	return err
 }
 
@@ -138,7 +141,7 @@ func (p *APIActorTemplateProjector) reconcileResumeGolden(ctx context.Context, a
 	ensureActorTemplateStatus(next)
 	next.Status.Phase = string(atev1alpha1.PhaseWaitGoldenActor)
 	next.Status.TakeGoldenSnapshotAt = timestamppb.New(time.Now().Add(goldenSnapshotWarmupForProto(at)))
-	_, err = p.AteClient.UpdateActorTemplate(ctx, &ateapipb.UpdateActorTemplateRequest{ActorTemplate: next})
+	_, err = p.AteClient.UpdateActorTemplate(ctx, actorTemplateStatusUpdate(next))
 	return err
 }
 
@@ -173,8 +176,15 @@ func (p *APIActorTemplateProjector) reconcileWaitGolden(ctx context.Context, at 
 		Reason:             "Ready",
 		Message:            "Actor template is ready for use",
 	}}
-	_, err = p.AteClient.UpdateActorTemplate(ctx, &ateapipb.UpdateActorTemplateRequest{ActorTemplate: next})
+	_, err = p.AteClient.UpdateActorTemplate(ctx, actorTemplateStatusUpdate(next))
 	return err
+}
+
+func actorTemplateStatusUpdate(at *ateapipb.ActorTemplate) *ateapipb.UpdateActorTemplateRequest {
+	return &ateapipb.UpdateActorTemplateRequest{
+		ActorTemplate: at,
+		UpdateMask:    &fieldmaskpb.FieldMask{Paths: []string{"status"}},
+	}
 }
 
 func ensureActorTemplateStatus(at *ateapipb.ActorTemplate) {
@@ -204,16 +214,14 @@ func (p *APIActorTemplateProjector) grantGoldenActorAccess(ctx context.Context, 
 			continue
 		}
 		_, err := p.AteClient.CreateWorkerPoolGrant(ctx, &ateapipb.CreateWorkerPoolGrantRequest{
-			Grant: &ateapipb.WorkerPoolGrant{
-				Atespace: resources.GoldenActorAtespace,
-				WorkerPool: &ateapipb.WorkerPoolRef{
-					Namespace: pool.GetNamespace(),
-					Name:      pool.GetName(),
-				},
+			WorkerPoolGrant: &ateapipb.WorkerPoolGrant{
+				Atespace:   resources.GoldenActorAtespace,
+				Name:       pool.GetName(),
+				WorkerPool: &ateapipb.WorkerPoolRef{Name: pool.GetName()},
 			},
 		})
 		if err != nil && status.Code(err) != codes.AlreadyExists {
-			return fmt.Errorf("while granting golden actor access to WorkerPool %s/%s: %w", pool.GetNamespace(), pool.GetName(), err)
+			return fmt.Errorf("while granting golden actor access to WorkerPool %s: %w", pool.GetName(), err)
 		}
 	}
 	return nil

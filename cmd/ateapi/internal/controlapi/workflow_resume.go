@@ -216,7 +216,7 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 
 func (s *AssignWorkerStep) filterUngrantedWorkerPools(ctx context.Context, atespace string, eligible map[types.NamespacedName]struct{}) error {
 	for pool := range eligible {
-		granted, err := s.store.WorkerPoolGranted(ctx, atespace, pool.Namespace, pool.Name)
+		granted, err := s.store.WorkerPoolGranted(ctx, atespace, pool.Name)
 		if err != nil {
 			return fmt.Errorf("while checking worker pool grant: %w", err)
 		}

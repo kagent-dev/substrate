@@ -338,7 +338,7 @@ func protoWorkerPoolToAPI(in *ateapipb.WorkerPool) (*atev1alpha1.WorkerPool, err
 	}
 	return &atev1alpha1.WorkerPool{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: in.GetNamespace(),
+			Namespace: in.GetSpec().GetDeploymentAtespace(),
 			Name:      in.GetName(),
 			Labels:    copyStringMap(in.GetLabels()),
 		},
@@ -352,11 +352,10 @@ func apiWorkerPoolToProto(in *atev1alpha1.WorkerPool) *ateapipb.WorkerPool {
 		return nil
 	}
 	return &ateapipb.WorkerPool{
-		Namespace: in.Namespace,
-		Name:      in.Name,
-		Labels:    copyStringMap(in.Labels),
-		Spec:      apiWorkerPoolSpecToProto(in.Spec),
-		Status:    &ateapipb.WorkerPoolStatus{Replicas: in.Status.Replicas},
+		Name:   in.Name,
+		Labels: copyStringMap(in.Labels),
+		Spec:   apiWorkerPoolSpecToProto(in.Spec, in.Namespace),
+		Status: &ateapipb.WorkerPoolStatus{Replicas: in.Status.Replicas},
 	}
 }
 
@@ -377,13 +376,14 @@ func protoWorkerPoolSpecToAPI(in *ateapipb.WorkerPoolSpec) (atev1alpha1.WorkerPo
 	}, nil
 }
 
-func apiWorkerPoolSpecToProto(in atev1alpha1.WorkerPoolSpec) *ateapipb.WorkerPoolSpec {
+func apiWorkerPoolSpecToProto(in atev1alpha1.WorkerPoolSpec, deploymentAtespace string) *ateapipb.WorkerPoolSpec {
 	return &ateapipb.WorkerPoolSpec{
-		Replicas:          in.Replicas,
-		AteomImage:        in.AteomImage,
-		Template:          apiWorkerPoolPodTemplateToProto(in.Template),
-		SandboxClass:      string(in.SandboxClass),
-		SandboxConfigName: in.SandboxConfigName,
+		Replicas:           in.Replicas,
+		AteomImage:         in.AteomImage,
+		Template:           apiWorkerPoolPodTemplateToProto(in.Template),
+		SandboxClass:       string(in.SandboxClass),
+		SandboxConfigName:  in.SandboxConfigName,
+		DeploymentAtespace: deploymentAtespace,
 	}
 }
 

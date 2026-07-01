@@ -27,6 +27,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -105,47 +106,47 @@ type ControlClient interface {
 	// Delete an empty Atespace. Rejects (FailedPrecondition) if any actors remain.
 	DeleteAtespace(ctx context.Context, in *DeleteAtespaceRequest, opts ...grpc.CallOption) (*DeleteAtespaceResponse, error)
 	// Create an atespace-scoped ActorTemplate.
-	CreateActorTemplate(ctx context.Context, in *CreateActorTemplateRequest, opts ...grpc.CallOption) (*CreateActorTemplateResponse, error)
+	CreateActorTemplate(ctx context.Context, in *CreateActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error)
 	// Get an ActorTemplate.
-	GetActorTemplate(ctx context.Context, in *GetActorTemplateRequest, opts ...grpc.CallOption) (*GetActorTemplateResponse, error)
+	GetActorTemplate(ctx context.Context, in *GetActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error)
 	// List ActorTemplates.
 	ListActorTemplates(ctx context.Context, in *ListActorTemplatesRequest, opts ...grpc.CallOption) (*ListActorTemplatesResponse, error)
 	// Update an ActorTemplate.
-	UpdateActorTemplate(ctx context.Context, in *UpdateActorTemplateRequest, opts ...grpc.CallOption) (*UpdateActorTemplateResponse, error)
+	UpdateActorTemplate(ctx context.Context, in *UpdateActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error)
 	// Delete an ActorTemplate.
-	DeleteActorTemplate(ctx context.Context, in *DeleteActorTemplateRequest, opts ...grpc.CallOption) (*DeleteActorTemplateResponse, error)
+	DeleteActorTemplate(ctx context.Context, in *DeleteActorTemplateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Watch ActorTemplate changes after an initial snapshot.
 	WatchActorTemplates(ctx context.Context, in *WatchActorTemplatesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchActorTemplatesResponse], error)
 	// Create a WorkerPool.
-	CreateWorkerPool(ctx context.Context, in *CreateWorkerPoolRequest, opts ...grpc.CallOption) (*CreateWorkerPoolResponse, error)
+	CreateWorkerPool(ctx context.Context, in *CreateWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error)
 	// Get a WorkerPool.
-	GetWorkerPool(ctx context.Context, in *GetWorkerPoolRequest, opts ...grpc.CallOption) (*GetWorkerPoolResponse, error)
+	GetWorkerPool(ctx context.Context, in *GetWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error)
 	// List WorkerPools.
 	ListWorkerPools(ctx context.Context, in *ListWorkerPoolsRequest, opts ...grpc.CallOption) (*ListWorkerPoolsResponse, error)
 	// Update a WorkerPool.
-	UpdateWorkerPool(ctx context.Context, in *UpdateWorkerPoolRequest, opts ...grpc.CallOption) (*UpdateWorkerPoolResponse, error)
+	UpdateWorkerPool(ctx context.Context, in *UpdateWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error)
 	// Delete a WorkerPool.
-	DeleteWorkerPool(ctx context.Context, in *DeleteWorkerPoolRequest, opts ...grpc.CallOption) (*DeleteWorkerPoolResponse, error)
+	DeleteWorkerPool(ctx context.Context, in *DeleteWorkerPoolRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Watch WorkerPool changes after an initial snapshot.
 	WatchWorkerPools(ctx context.Context, in *WatchWorkerPoolsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchWorkerPoolsResponse], error)
 	// Create a SandboxConfig.
-	CreateSandboxConfig(ctx context.Context, in *CreateSandboxConfigRequest, opts ...grpc.CallOption) (*CreateSandboxConfigResponse, error)
+	CreateSandboxConfig(ctx context.Context, in *CreateSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error)
 	// Get a SandboxConfig.
-	GetSandboxConfig(ctx context.Context, in *GetSandboxConfigRequest, opts ...grpc.CallOption) (*GetSandboxConfigResponse, error)
+	GetSandboxConfig(ctx context.Context, in *GetSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error)
 	// List SandboxConfigs.
 	ListSandboxConfigs(ctx context.Context, in *ListSandboxConfigsRequest, opts ...grpc.CallOption) (*ListSandboxConfigsResponse, error)
 	// Update a SandboxConfig.
-	UpdateSandboxConfig(ctx context.Context, in *UpdateSandboxConfigRequest, opts ...grpc.CallOption) (*UpdateSandboxConfigResponse, error)
+	UpdateSandboxConfig(ctx context.Context, in *UpdateSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error)
 	// Delete a SandboxConfig.
-	DeleteSandboxConfig(ctx context.Context, in *DeleteSandboxConfigRequest, opts ...grpc.CallOption) (*DeleteSandboxConfigResponse, error)
+	DeleteSandboxConfig(ctx context.Context, in *DeleteSandboxConfigRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Grant an atespace access to a worker pool.
-	CreateWorkerPoolGrant(ctx context.Context, in *CreateWorkerPoolGrantRequest, opts ...grpc.CallOption) (*CreateWorkerPoolGrantResponse, error)
+	CreateWorkerPoolGrant(ctx context.Context, in *CreateWorkerPoolGrantRequest, opts ...grpc.CallOption) (*WorkerPoolGrant, error)
 	// Get a WorkerPoolGrant by atespace and worker pool.
-	GetWorkerPoolGrant(ctx context.Context, in *GetWorkerPoolGrantRequest, opts ...grpc.CallOption) (*GetWorkerPoolGrantResponse, error)
+	GetWorkerPoolGrant(ctx context.Context, in *GetWorkerPoolGrantRequest, opts ...grpc.CallOption) (*WorkerPoolGrant, error)
 	// List WorkerPoolGrants, optionally scoped to one atespace.
 	ListWorkerPoolGrants(ctx context.Context, in *ListWorkerPoolGrantsRequest, opts ...grpc.CallOption) (*ListWorkerPoolGrantsResponse, error)
 	// Delete a WorkerPoolGrant.
-	DeleteWorkerPoolGrant(ctx context.Context, in *DeleteWorkerPoolGrantRequest, opts ...grpc.CallOption) (*DeleteWorkerPoolGrantResponse, error)
+	DeleteWorkerPoolGrant(ctx context.Context, in *DeleteWorkerPoolGrantRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Debugging: drop all data from the ate database.
 	DebugClear(ctx context.Context, in *DebugClearRequest, opts ...grpc.CallOption) (*DebugClearResponse, error)
 }
@@ -288,9 +289,9 @@ func (c *controlClient) DeleteAtespace(ctx context.Context, in *DeleteAtespaceRe
 	return out, nil
 }
 
-func (c *controlClient) CreateActorTemplate(ctx context.Context, in *CreateActorTemplateRequest, opts ...grpc.CallOption) (*CreateActorTemplateResponse, error) {
+func (c *controlClient) CreateActorTemplate(ctx context.Context, in *CreateActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateActorTemplateResponse)
+	out := new(ActorTemplate)
 	err := c.cc.Invoke(ctx, Control_CreateActorTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -298,9 +299,9 @@ func (c *controlClient) CreateActorTemplate(ctx context.Context, in *CreateActor
 	return out, nil
 }
 
-func (c *controlClient) GetActorTemplate(ctx context.Context, in *GetActorTemplateRequest, opts ...grpc.CallOption) (*GetActorTemplateResponse, error) {
+func (c *controlClient) GetActorTemplate(ctx context.Context, in *GetActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetActorTemplateResponse)
+	out := new(ActorTemplate)
 	err := c.cc.Invoke(ctx, Control_GetActorTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -318,9 +319,9 @@ func (c *controlClient) ListActorTemplates(ctx context.Context, in *ListActorTem
 	return out, nil
 }
 
-func (c *controlClient) UpdateActorTemplate(ctx context.Context, in *UpdateActorTemplateRequest, opts ...grpc.CallOption) (*UpdateActorTemplateResponse, error) {
+func (c *controlClient) UpdateActorTemplate(ctx context.Context, in *UpdateActorTemplateRequest, opts ...grpc.CallOption) (*ActorTemplate, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateActorTemplateResponse)
+	out := new(ActorTemplate)
 	err := c.cc.Invoke(ctx, Control_UpdateActorTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -328,9 +329,9 @@ func (c *controlClient) UpdateActorTemplate(ctx context.Context, in *UpdateActor
 	return out, nil
 }
 
-func (c *controlClient) DeleteActorTemplate(ctx context.Context, in *DeleteActorTemplateRequest, opts ...grpc.CallOption) (*DeleteActorTemplateResponse, error) {
+func (c *controlClient) DeleteActorTemplate(ctx context.Context, in *DeleteActorTemplateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteActorTemplateResponse)
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Control_DeleteActorTemplate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -357,9 +358,9 @@ func (c *controlClient) WatchActorTemplates(ctx context.Context, in *WatchActorT
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_WatchActorTemplatesClient = grpc.ServerStreamingClient[WatchActorTemplatesResponse]
 
-func (c *controlClient) CreateWorkerPool(ctx context.Context, in *CreateWorkerPoolRequest, opts ...grpc.CallOption) (*CreateWorkerPoolResponse, error) {
+func (c *controlClient) CreateWorkerPool(ctx context.Context, in *CreateWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateWorkerPoolResponse)
+	out := new(WorkerPool)
 	err := c.cc.Invoke(ctx, Control_CreateWorkerPool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -367,9 +368,9 @@ func (c *controlClient) CreateWorkerPool(ctx context.Context, in *CreateWorkerPo
 	return out, nil
 }
 
-func (c *controlClient) GetWorkerPool(ctx context.Context, in *GetWorkerPoolRequest, opts ...grpc.CallOption) (*GetWorkerPoolResponse, error) {
+func (c *controlClient) GetWorkerPool(ctx context.Context, in *GetWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetWorkerPoolResponse)
+	out := new(WorkerPool)
 	err := c.cc.Invoke(ctx, Control_GetWorkerPool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -387,9 +388,9 @@ func (c *controlClient) ListWorkerPools(ctx context.Context, in *ListWorkerPools
 	return out, nil
 }
 
-func (c *controlClient) UpdateWorkerPool(ctx context.Context, in *UpdateWorkerPoolRequest, opts ...grpc.CallOption) (*UpdateWorkerPoolResponse, error) {
+func (c *controlClient) UpdateWorkerPool(ctx context.Context, in *UpdateWorkerPoolRequest, opts ...grpc.CallOption) (*WorkerPool, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateWorkerPoolResponse)
+	out := new(WorkerPool)
 	err := c.cc.Invoke(ctx, Control_UpdateWorkerPool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -397,9 +398,9 @@ func (c *controlClient) UpdateWorkerPool(ctx context.Context, in *UpdateWorkerPo
 	return out, nil
 }
 
-func (c *controlClient) DeleteWorkerPool(ctx context.Context, in *DeleteWorkerPoolRequest, opts ...grpc.CallOption) (*DeleteWorkerPoolResponse, error) {
+func (c *controlClient) DeleteWorkerPool(ctx context.Context, in *DeleteWorkerPoolRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteWorkerPoolResponse)
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Control_DeleteWorkerPool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -426,9 +427,9 @@ func (c *controlClient) WatchWorkerPools(ctx context.Context, in *WatchWorkerPoo
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_WatchWorkerPoolsClient = grpc.ServerStreamingClient[WatchWorkerPoolsResponse]
 
-func (c *controlClient) CreateSandboxConfig(ctx context.Context, in *CreateSandboxConfigRequest, opts ...grpc.CallOption) (*CreateSandboxConfigResponse, error) {
+func (c *controlClient) CreateSandboxConfig(ctx context.Context, in *CreateSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateSandboxConfigResponse)
+	out := new(SandboxConfig)
 	err := c.cc.Invoke(ctx, Control_CreateSandboxConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -436,9 +437,9 @@ func (c *controlClient) CreateSandboxConfig(ctx context.Context, in *CreateSandb
 	return out, nil
 }
 
-func (c *controlClient) GetSandboxConfig(ctx context.Context, in *GetSandboxConfigRequest, opts ...grpc.CallOption) (*GetSandboxConfigResponse, error) {
+func (c *controlClient) GetSandboxConfig(ctx context.Context, in *GetSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetSandboxConfigResponse)
+	out := new(SandboxConfig)
 	err := c.cc.Invoke(ctx, Control_GetSandboxConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -456,9 +457,9 @@ func (c *controlClient) ListSandboxConfigs(ctx context.Context, in *ListSandboxC
 	return out, nil
 }
 
-func (c *controlClient) UpdateSandboxConfig(ctx context.Context, in *UpdateSandboxConfigRequest, opts ...grpc.CallOption) (*UpdateSandboxConfigResponse, error) {
+func (c *controlClient) UpdateSandboxConfig(ctx context.Context, in *UpdateSandboxConfigRequest, opts ...grpc.CallOption) (*SandboxConfig, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateSandboxConfigResponse)
+	out := new(SandboxConfig)
 	err := c.cc.Invoke(ctx, Control_UpdateSandboxConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -466,9 +467,9 @@ func (c *controlClient) UpdateSandboxConfig(ctx context.Context, in *UpdateSandb
 	return out, nil
 }
 
-func (c *controlClient) DeleteSandboxConfig(ctx context.Context, in *DeleteSandboxConfigRequest, opts ...grpc.CallOption) (*DeleteSandboxConfigResponse, error) {
+func (c *controlClient) DeleteSandboxConfig(ctx context.Context, in *DeleteSandboxConfigRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteSandboxConfigResponse)
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Control_DeleteSandboxConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -476,9 +477,9 @@ func (c *controlClient) DeleteSandboxConfig(ctx context.Context, in *DeleteSandb
 	return out, nil
 }
 
-func (c *controlClient) CreateWorkerPoolGrant(ctx context.Context, in *CreateWorkerPoolGrantRequest, opts ...grpc.CallOption) (*CreateWorkerPoolGrantResponse, error) {
+func (c *controlClient) CreateWorkerPoolGrant(ctx context.Context, in *CreateWorkerPoolGrantRequest, opts ...grpc.CallOption) (*WorkerPoolGrant, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateWorkerPoolGrantResponse)
+	out := new(WorkerPoolGrant)
 	err := c.cc.Invoke(ctx, Control_CreateWorkerPoolGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -486,9 +487,9 @@ func (c *controlClient) CreateWorkerPoolGrant(ctx context.Context, in *CreateWor
 	return out, nil
 }
 
-func (c *controlClient) GetWorkerPoolGrant(ctx context.Context, in *GetWorkerPoolGrantRequest, opts ...grpc.CallOption) (*GetWorkerPoolGrantResponse, error) {
+func (c *controlClient) GetWorkerPoolGrant(ctx context.Context, in *GetWorkerPoolGrantRequest, opts ...grpc.CallOption) (*WorkerPoolGrant, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetWorkerPoolGrantResponse)
+	out := new(WorkerPoolGrant)
 	err := c.cc.Invoke(ctx, Control_GetWorkerPoolGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -506,9 +507,9 @@ func (c *controlClient) ListWorkerPoolGrants(ctx context.Context, in *ListWorker
 	return out, nil
 }
 
-func (c *controlClient) DeleteWorkerPoolGrant(ctx context.Context, in *DeleteWorkerPoolGrantRequest, opts ...grpc.CallOption) (*DeleteWorkerPoolGrantResponse, error) {
+func (c *controlClient) DeleteWorkerPoolGrant(ctx context.Context, in *DeleteWorkerPoolGrantRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteWorkerPoolGrantResponse)
+	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Control_DeleteWorkerPoolGrant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -559,47 +560,47 @@ type ControlServer interface {
 	// Delete an empty Atespace. Rejects (FailedPrecondition) if any actors remain.
 	DeleteAtespace(context.Context, *DeleteAtespaceRequest) (*DeleteAtespaceResponse, error)
 	// Create an atespace-scoped ActorTemplate.
-	CreateActorTemplate(context.Context, *CreateActorTemplateRequest) (*CreateActorTemplateResponse, error)
+	CreateActorTemplate(context.Context, *CreateActorTemplateRequest) (*ActorTemplate, error)
 	// Get an ActorTemplate.
-	GetActorTemplate(context.Context, *GetActorTemplateRequest) (*GetActorTemplateResponse, error)
+	GetActorTemplate(context.Context, *GetActorTemplateRequest) (*ActorTemplate, error)
 	// List ActorTemplates.
 	ListActorTemplates(context.Context, *ListActorTemplatesRequest) (*ListActorTemplatesResponse, error)
 	// Update an ActorTemplate.
-	UpdateActorTemplate(context.Context, *UpdateActorTemplateRequest) (*UpdateActorTemplateResponse, error)
+	UpdateActorTemplate(context.Context, *UpdateActorTemplateRequest) (*ActorTemplate, error)
 	// Delete an ActorTemplate.
-	DeleteActorTemplate(context.Context, *DeleteActorTemplateRequest) (*DeleteActorTemplateResponse, error)
+	DeleteActorTemplate(context.Context, *DeleteActorTemplateRequest) (*emptypb.Empty, error)
 	// Watch ActorTemplate changes after an initial snapshot.
 	WatchActorTemplates(*WatchActorTemplatesRequest, grpc.ServerStreamingServer[WatchActorTemplatesResponse]) error
 	// Create a WorkerPool.
-	CreateWorkerPool(context.Context, *CreateWorkerPoolRequest) (*CreateWorkerPoolResponse, error)
+	CreateWorkerPool(context.Context, *CreateWorkerPoolRequest) (*WorkerPool, error)
 	// Get a WorkerPool.
-	GetWorkerPool(context.Context, *GetWorkerPoolRequest) (*GetWorkerPoolResponse, error)
+	GetWorkerPool(context.Context, *GetWorkerPoolRequest) (*WorkerPool, error)
 	// List WorkerPools.
 	ListWorkerPools(context.Context, *ListWorkerPoolsRequest) (*ListWorkerPoolsResponse, error)
 	// Update a WorkerPool.
-	UpdateWorkerPool(context.Context, *UpdateWorkerPoolRequest) (*UpdateWorkerPoolResponse, error)
+	UpdateWorkerPool(context.Context, *UpdateWorkerPoolRequest) (*WorkerPool, error)
 	// Delete a WorkerPool.
-	DeleteWorkerPool(context.Context, *DeleteWorkerPoolRequest) (*DeleteWorkerPoolResponse, error)
+	DeleteWorkerPool(context.Context, *DeleteWorkerPoolRequest) (*emptypb.Empty, error)
 	// Watch WorkerPool changes after an initial snapshot.
 	WatchWorkerPools(*WatchWorkerPoolsRequest, grpc.ServerStreamingServer[WatchWorkerPoolsResponse]) error
 	// Create a SandboxConfig.
-	CreateSandboxConfig(context.Context, *CreateSandboxConfigRequest) (*CreateSandboxConfigResponse, error)
+	CreateSandboxConfig(context.Context, *CreateSandboxConfigRequest) (*SandboxConfig, error)
 	// Get a SandboxConfig.
-	GetSandboxConfig(context.Context, *GetSandboxConfigRequest) (*GetSandboxConfigResponse, error)
+	GetSandboxConfig(context.Context, *GetSandboxConfigRequest) (*SandboxConfig, error)
 	// List SandboxConfigs.
 	ListSandboxConfigs(context.Context, *ListSandboxConfigsRequest) (*ListSandboxConfigsResponse, error)
 	// Update a SandboxConfig.
-	UpdateSandboxConfig(context.Context, *UpdateSandboxConfigRequest) (*UpdateSandboxConfigResponse, error)
+	UpdateSandboxConfig(context.Context, *UpdateSandboxConfigRequest) (*SandboxConfig, error)
 	// Delete a SandboxConfig.
-	DeleteSandboxConfig(context.Context, *DeleteSandboxConfigRequest) (*DeleteSandboxConfigResponse, error)
+	DeleteSandboxConfig(context.Context, *DeleteSandboxConfigRequest) (*emptypb.Empty, error)
 	// Grant an atespace access to a worker pool.
-	CreateWorkerPoolGrant(context.Context, *CreateWorkerPoolGrantRequest) (*CreateWorkerPoolGrantResponse, error)
+	CreateWorkerPoolGrant(context.Context, *CreateWorkerPoolGrantRequest) (*WorkerPoolGrant, error)
 	// Get a WorkerPoolGrant by atespace and worker pool.
-	GetWorkerPoolGrant(context.Context, *GetWorkerPoolGrantRequest) (*GetWorkerPoolGrantResponse, error)
+	GetWorkerPoolGrant(context.Context, *GetWorkerPoolGrantRequest) (*WorkerPoolGrant, error)
 	// List WorkerPoolGrants, optionally scoped to one atespace.
 	ListWorkerPoolGrants(context.Context, *ListWorkerPoolGrantsRequest) (*ListWorkerPoolGrantsResponse, error)
 	// Delete a WorkerPoolGrant.
-	DeleteWorkerPoolGrant(context.Context, *DeleteWorkerPoolGrantRequest) (*DeleteWorkerPoolGrantResponse, error)
+	DeleteWorkerPoolGrant(context.Context, *DeleteWorkerPoolGrantRequest) (*emptypb.Empty, error)
 	// Debugging: drop all data from the ate database.
 	DebugClear(context.Context, *DebugClearRequest) (*DebugClearResponse, error)
 	mustEmbedUnimplementedControlServer()
@@ -651,67 +652,67 @@ func (UnimplementedControlServer) ListAtespaces(context.Context, *ListAtespacesR
 func (UnimplementedControlServer) DeleteAtespace(context.Context, *DeleteAtespaceRequest) (*DeleteAtespaceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAtespace not implemented")
 }
-func (UnimplementedControlServer) CreateActorTemplate(context.Context, *CreateActorTemplateRequest) (*CreateActorTemplateResponse, error) {
+func (UnimplementedControlServer) CreateActorTemplate(context.Context, *CreateActorTemplateRequest) (*ActorTemplate, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateActorTemplate not implemented")
 }
-func (UnimplementedControlServer) GetActorTemplate(context.Context, *GetActorTemplateRequest) (*GetActorTemplateResponse, error) {
+func (UnimplementedControlServer) GetActorTemplate(context.Context, *GetActorTemplateRequest) (*ActorTemplate, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetActorTemplate not implemented")
 }
 func (UnimplementedControlServer) ListActorTemplates(context.Context, *ListActorTemplatesRequest) (*ListActorTemplatesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListActorTemplates not implemented")
 }
-func (UnimplementedControlServer) UpdateActorTemplate(context.Context, *UpdateActorTemplateRequest) (*UpdateActorTemplateResponse, error) {
+func (UnimplementedControlServer) UpdateActorTemplate(context.Context, *UpdateActorTemplateRequest) (*ActorTemplate, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateActorTemplate not implemented")
 }
-func (UnimplementedControlServer) DeleteActorTemplate(context.Context, *DeleteActorTemplateRequest) (*DeleteActorTemplateResponse, error) {
+func (UnimplementedControlServer) DeleteActorTemplate(context.Context, *DeleteActorTemplateRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteActorTemplate not implemented")
 }
 func (UnimplementedControlServer) WatchActorTemplates(*WatchActorTemplatesRequest, grpc.ServerStreamingServer[WatchActorTemplatesResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchActorTemplates not implemented")
 }
-func (UnimplementedControlServer) CreateWorkerPool(context.Context, *CreateWorkerPoolRequest) (*CreateWorkerPoolResponse, error) {
+func (UnimplementedControlServer) CreateWorkerPool(context.Context, *CreateWorkerPoolRequest) (*WorkerPool, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateWorkerPool not implemented")
 }
-func (UnimplementedControlServer) GetWorkerPool(context.Context, *GetWorkerPoolRequest) (*GetWorkerPoolResponse, error) {
+func (UnimplementedControlServer) GetWorkerPool(context.Context, *GetWorkerPoolRequest) (*WorkerPool, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkerPool not implemented")
 }
 func (UnimplementedControlServer) ListWorkerPools(context.Context, *ListWorkerPoolsRequest) (*ListWorkerPoolsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkerPools not implemented")
 }
-func (UnimplementedControlServer) UpdateWorkerPool(context.Context, *UpdateWorkerPoolRequest) (*UpdateWorkerPoolResponse, error) {
+func (UnimplementedControlServer) UpdateWorkerPool(context.Context, *UpdateWorkerPoolRequest) (*WorkerPool, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateWorkerPool not implemented")
 }
-func (UnimplementedControlServer) DeleteWorkerPool(context.Context, *DeleteWorkerPoolRequest) (*DeleteWorkerPoolResponse, error) {
+func (UnimplementedControlServer) DeleteWorkerPool(context.Context, *DeleteWorkerPoolRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteWorkerPool not implemented")
 }
 func (UnimplementedControlServer) WatchWorkerPools(*WatchWorkerPoolsRequest, grpc.ServerStreamingServer[WatchWorkerPoolsResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchWorkerPools not implemented")
 }
-func (UnimplementedControlServer) CreateSandboxConfig(context.Context, *CreateSandboxConfigRequest) (*CreateSandboxConfigResponse, error) {
+func (UnimplementedControlServer) CreateSandboxConfig(context.Context, *CreateSandboxConfigRequest) (*SandboxConfig, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateSandboxConfig not implemented")
 }
-func (UnimplementedControlServer) GetSandboxConfig(context.Context, *GetSandboxConfigRequest) (*GetSandboxConfigResponse, error) {
+func (UnimplementedControlServer) GetSandboxConfig(context.Context, *GetSandboxConfigRequest) (*SandboxConfig, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSandboxConfig not implemented")
 }
 func (UnimplementedControlServer) ListSandboxConfigs(context.Context, *ListSandboxConfigsRequest) (*ListSandboxConfigsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSandboxConfigs not implemented")
 }
-func (UnimplementedControlServer) UpdateSandboxConfig(context.Context, *UpdateSandboxConfigRequest) (*UpdateSandboxConfigResponse, error) {
+func (UnimplementedControlServer) UpdateSandboxConfig(context.Context, *UpdateSandboxConfigRequest) (*SandboxConfig, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateSandboxConfig not implemented")
 }
-func (UnimplementedControlServer) DeleteSandboxConfig(context.Context, *DeleteSandboxConfigRequest) (*DeleteSandboxConfigResponse, error) {
+func (UnimplementedControlServer) DeleteSandboxConfig(context.Context, *DeleteSandboxConfigRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSandboxConfig not implemented")
 }
-func (UnimplementedControlServer) CreateWorkerPoolGrant(context.Context, *CreateWorkerPoolGrantRequest) (*CreateWorkerPoolGrantResponse, error) {
+func (UnimplementedControlServer) CreateWorkerPoolGrant(context.Context, *CreateWorkerPoolGrantRequest) (*WorkerPoolGrant, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateWorkerPoolGrant not implemented")
 }
-func (UnimplementedControlServer) GetWorkerPoolGrant(context.Context, *GetWorkerPoolGrantRequest) (*GetWorkerPoolGrantResponse, error) {
+func (UnimplementedControlServer) GetWorkerPoolGrant(context.Context, *GetWorkerPoolGrantRequest) (*WorkerPoolGrant, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkerPoolGrant not implemented")
 }
 func (UnimplementedControlServer) ListWorkerPoolGrants(context.Context, *ListWorkerPoolGrantsRequest) (*ListWorkerPoolGrantsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListWorkerPoolGrants not implemented")
 }
-func (UnimplementedControlServer) DeleteWorkerPoolGrant(context.Context, *DeleteWorkerPoolGrantRequest) (*DeleteWorkerPoolGrantResponse, error) {
+func (UnimplementedControlServer) DeleteWorkerPoolGrant(context.Context, *DeleteWorkerPoolGrantRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteWorkerPoolGrant not implemented")
 }
 func (UnimplementedControlServer) DebugClear(context.Context, *DebugClearRequest) (*DebugClearResponse, error) {

@@ -55,9 +55,11 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type workerPubSubMsg struct {
@@ -125,16 +127,16 @@ func actorTemplateScanPattern(atespace string) string {
 	return "actortemplate:" + atespace + ":*"
 }
 
-func workerPoolDBKey(namespace, name string) string {
-	return "workerpool:" + namespace + ":" + name
+func workerPoolDBKey(name string) string {
+	return "workerpool:" + name
 }
 
 func sandboxConfigDBKey(name string) string {
 	return "sandboxconfig:" + name
 }
 
-func workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName string) string {
-	return "workerpoolgrant:" + atespace + ":" + workerPoolNamespace + ":" + workerPoolName
+func workerPoolGrantDBKey(atespace, name string) string {
+	return "workerpoolgrant:" + atespace + ":" + name
 }
 
 func workerPoolGrantScanPattern(atespace string) string {
@@ -269,22 +271,22 @@ func (s *Persistence) DeleteActorTemplate(ctx context.Context, atespace, name st
 }
 
 func (s *Persistence) CreateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool) error {
-	if err := s.createResource(ctx, workerPoolDBKey(workerPool.GetNamespace(), workerPool.GetName()), workerPool); err != nil {
+	if err := s.createResource(ctx, workerPoolDBKey(workerPool.GetName()), workerPool); err != nil {
 		return err
 	}
-	stored, err := s.GetWorkerPool(ctx, workerPool.GetNamespace(), workerPool.GetName())
+	stored, err := s.GetWorkerPool(ctx, workerPool.GetName())
 	if err == nil {
 		s.publishWorkerPoolEvent(ctx, store.ResourceEventCreated, stored)
 	}
 	return err
 }
 
-func (s *Persistence) GetWorkerPool(ctx context.Context, namespace, name string) (*ateapipb.WorkerPool, error) {
+func (s *Persistence) GetWorkerPool(ctx context.Context, name string) (*ateapipb.WorkerPool, error) {
 	out := &ateapipb.WorkerPool{}
-	if err := s.getResource(ctx, workerPoolDBKey(namespace, name), out); err != nil {
+	if err := s.getResource(ctx, workerPoolDBKey(name), out); err != nil {
 		return nil, err
 	}
-	if out.GetNamespace() != namespace || out.GetName() != name {
+	if out.GetName() != name {
 		return nil, fmt.Errorf("(impossible) mismatch between stored WorkerPool and key")
 	}
 	return out, nil
@@ -301,18 +303,18 @@ func (s *Persistence) ListWorkerPools(ctx context.Context) ([]*ateapipb.WorkerPo
 }
 
 func (s *Persistence) UpdateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool, expectedVersion int64) error {
-	if err := s.updateResource(ctx, workerPoolDBKey(workerPool.GetNamespace(), workerPool.GetName()), workerPool, expectedVersion); err != nil {
+	if err := s.updateResource(ctx, workerPoolDBKey(workerPool.GetName()), workerPool, expectedVersion); err != nil {
 		return err
 	}
 	s.publishWorkerPoolEvent(ctx, store.ResourceEventUpdated, workerPool)
 	return nil
 }
 
-func (s *Persistence) DeleteWorkerPool(ctx context.Context, namespace, name string) error {
-	if err := s.deleteResource(ctx, workerPoolDBKey(namespace, name)); err != nil {
+func (s *Persistence) DeleteWorkerPool(ctx context.Context, name string) error {
+	if err := s.deleteResource(ctx, workerPoolDBKey(name)); err != nil {
 		return err
 	}
-	s.publishWorkerPoolEvent(ctx, store.ResourceEventDeleted, &ateapipb.WorkerPool{Namespace: namespace, Name: name})
+	s.publishWorkerPoolEvent(ctx, store.ResourceEventDeleted, &ateapipb.WorkerPool{Name: name})
 	return nil
 }
 
@@ -351,6 +353,7 @@ func (s *Persistence) DeleteSandboxConfig(ctx context.Context, name string) erro
 
 func (s *Persistence) createResource(ctx context.Context, dbKey string, msg proto.Message) error {
 	dbMsg := proto.Clone(msg)
+	setResourceMeta(dbMsg, "", nil)
 	setResourceVersion(dbMsg, 1)
 	dbBytes, err := protojson.Marshal(dbMsg)
 	if err != nil {
@@ -430,6 +433,7 @@ func (s *Persistence) updateResource(ctx context.Context, dbKey string, msg prot
 		if err := checkResourceIdentity(current, dbMsg); err != nil {
 			return err
 		}
+		setResourceMeta(dbMsg, resourceUID(current), resourceCreateTime(current))
 		setResourceVersion(dbMsg, resourceVersion(current)+1)
 
 		newVal, err := protojson.Marshal(dbMsg)
@@ -487,6 +491,56 @@ func setResourceVersion(msg proto.Message, version int64) {
 	}
 }
 
+func resourceUID(msg proto.Message) string {
+	switch x := msg.(type) {
+	case *ateapipb.ActorTemplate:
+		return x.GetUid()
+	case *ateapipb.WorkerPool:
+		return x.GetUid()
+	case *ateapipb.SandboxConfig:
+		return x.GetUid()
+	default:
+		return ""
+	}
+}
+
+func resourceCreateTime(msg proto.Message) *timestamppb.Timestamp {
+	switch x := msg.(type) {
+	case *ateapipb.ActorTemplate:
+		return x.GetCreateTime()
+	case *ateapipb.WorkerPool:
+		return x.GetCreateTime()
+	case *ateapipb.SandboxConfig:
+		return x.GetCreateTime()
+	default:
+		return nil
+	}
+}
+
+func setResourceMeta(msg proto.Message, uid string, createTime *timestamppb.Timestamp) {
+	if uid == "" {
+		uid = uuid.NewString()
+	}
+	now := timestamppb.Now()
+	if createTime == nil {
+		createTime = now
+	}
+	switch x := msg.(type) {
+	case *ateapipb.ActorTemplate:
+		x.Uid = uid
+		x.CreateTime = createTime
+		x.UpdateTime = now
+	case *ateapipb.WorkerPool:
+		x.Uid = uid
+		x.CreateTime = createTime
+		x.UpdateTime = now
+	case *ateapipb.SandboxConfig:
+		x.Uid = uid
+		x.CreateTime = createTime
+		x.UpdateTime = now
+	}
+}
+
 func checkResourceIdentity(current, next proto.Message) error {
 	switch cur := current.(type) {
 	case *ateapipb.ActorTemplate:
@@ -496,7 +550,7 @@ func checkResourceIdentity(current, next proto.Message) error {
 		}
 	case *ateapipb.WorkerPool:
 		n := next.(*ateapipb.WorkerPool)
-		if cur.GetNamespace() != n.GetNamespace() || cur.GetName() != n.GetName() {
+		if cur.GetName() != n.GetName() {
 			return fmt.Errorf("WorkerPool identity is immutable")
 		}
 	case *ateapipb.SandboxConfig:
@@ -509,8 +563,16 @@ func checkResourceIdentity(current, next proto.Message) error {
 }
 
 func (s *Persistence) CreateWorkerPoolGrant(ctx context.Context, grant *ateapipb.WorkerPoolGrant) error {
-	dbKey := workerPoolGrantDBKey(grant.GetAtespace(), grant.GetWorkerPool().GetNamespace(), grant.GetWorkerPool().GetName())
-	dbBytes, err := protojson.Marshal(grant)
+	dbKey := workerPoolGrantDBKey(grant.GetAtespace(), grant.GetName())
+	dbGrant := proto.Clone(grant).(*ateapipb.WorkerPoolGrant)
+	if dbGrant.GetUid() == "" {
+		dbGrant.Uid = uuid.NewString()
+	}
+	now := timestamppb.Now()
+	dbGrant.CreateTime = now
+	dbGrant.UpdateTime = now
+	dbGrant.Version = 1
+	dbBytes, err := protojson.Marshal(dbGrant)
 	if err != nil {
 		return fmt.Errorf("in protojson.Marshal: %w", err)
 	}
@@ -521,11 +583,12 @@ func (s *Persistence) CreateWorkerPoolGrant(ctx context.Context, grant *ateapipb
 	if !ok {
 		return store.ErrAlreadyExists
 	}
+	proto.Merge(grant, dbGrant)
 	return nil
 }
 
-func (s *Persistence) GetWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (*ateapipb.WorkerPoolGrant, error) {
-	dbKey := workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)
+func (s *Persistence) GetWorkerPoolGrant(ctx context.Context, atespace, name string) (*ateapipb.WorkerPoolGrant, error) {
+	dbKey := workerPoolGrantDBKey(atespace, name)
 	dbBytes, err := s.rdb.Get(ctx, dbKey).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
@@ -537,7 +600,7 @@ func (s *Persistence) GetWorkerPoolGrant(ctx context.Context, atespace, workerPo
 	if err := protojson.Unmarshal(dbBytes, grant); err != nil {
 		return nil, fmt.Errorf("while unmarshaling worker pool grant: %w", err)
 	}
-	if grant.GetAtespace() != atespace || grant.GetWorkerPool().GetNamespace() != workerPoolNamespace || grant.GetWorkerPool().GetName() != workerPoolName {
+	if grant.GetAtespace() != atespace || grant.GetName() != name {
 		return nil, fmt.Errorf("(impossible) mismatch between stored worker pool grant and key %q", dbKey)
 	}
 	return grant, nil
@@ -574,16 +637,16 @@ func (s *Persistence) ListWorkerPoolGrants(ctx context.Context, atespace string)
 	return result, nil
 }
 
-func (s *Persistence) WorkerPoolGranted(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (bool, error) {
-	n, err := s.rdb.Exists(ctx, workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)).Result()
+func (s *Persistence) WorkerPoolGranted(ctx context.Context, atespace, workerPoolName string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, workerPoolGrantDBKey(atespace, workerPoolName)).Result()
 	if err != nil {
 		return false, fmt.Errorf("while checking worker pool grant existence: %w", err)
 	}
 	return n > 0, nil
 }
 
-func (s *Persistence) DeleteWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) error {
-	dbKey := workerPoolGrantDBKey(atespace, workerPoolNamespace, workerPoolName)
+func (s *Persistence) DeleteWorkerPoolGrant(ctx context.Context, atespace, name string) error {
+	dbKey := workerPoolGrantDBKey(atespace, name)
 	n, err := s.rdb.Del(ctx, dbKey).Result()
 	if err != nil {
 		return fmt.Errorf("while deleting worker pool grant key %q: %w", dbKey, err)

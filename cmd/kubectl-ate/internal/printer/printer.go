@@ -174,10 +174,7 @@ func sortWorkerPoolGrants(grants []*ateapipb.WorkerPoolGrant) {
 		if c := cmp.Compare(a.GetAtespace(), b.GetAtespace()); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(a.GetWorkerPool().GetNamespace(), b.GetWorkerPool().GetNamespace()); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.GetWorkerPool().GetName(), b.GetWorkerPool().GetName())
+		return cmp.Compare(a.GetName(), b.GetName())
 	})
 }
 
@@ -186,13 +183,12 @@ func PrintWorkerPoolGrantsTo(out io.Writer, grants []*ateapipb.WorkerPoolGrant, 
 	sortWorkerPoolGrants(grants)
 	switch format {
 	case "json", "yaml":
-		return printProto(out, &ateapipb.ListWorkerPoolGrantsResponse{Grants: grants}, format)
+		return printProto(out, &ateapipb.ListWorkerPoolGrantsResponse{WorkerPoolGrants: grants}, format)
 	case "table":
 		w := tabwriter.NewWriter(out, 0, 0, 3, ' ', 0)
 		fmt.Fprintln(w, "ATESPACE\tWORKERPOOL")
 		for _, grant := range grants {
-			wp := grant.GetWorkerPool()
-			fmt.Fprintf(w, "%s\t%s/%s\n", grant.GetAtespace(), wp.GetNamespace(), wp.GetName())
+			fmt.Fprintf(w, "%s\t%s\n", grant.GetAtespace(), grant.GetWorkerPool().GetName())
 		}
 		return w.Flush()
 	default:

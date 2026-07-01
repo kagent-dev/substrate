@@ -17,16 +17,16 @@ package cmd
 import "testing"
 
 func TestParseWorkerPoolRef(t *testing.T) {
-	namespace, name, err := parseWorkerPoolRef("worker-ns/pool-a")
+	name, err := parseWorkerPoolRef("pool-a")
 	if err != nil {
 		t.Fatalf("parseWorkerPoolRef returned error: %v", err)
 	}
-	if namespace != "worker-ns" || name != "pool-a" {
-		t.Fatalf("parseWorkerPoolRef = %q, %q; want worker-ns, pool-a", namespace, name)
+	if name != "pool-a" {
+		t.Fatalf("parseWorkerPoolRef = %q; want pool-a", name)
 	}
 
-	for _, input := range []string{"", "pool-a", "/pool-a", "worker-ns/", "worker-ns/pool-a/extra"} {
-		if _, _, err := parseWorkerPoolRef(input); err == nil {
+	for _, input := range []string{""} {
+		if _, err := parseWorkerPoolRef(input); err == nil {
 			t.Errorf("parseWorkerPoolRef(%q) returned nil error", input)
 		}
 	}

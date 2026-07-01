@@ -32,13 +32,13 @@ func resolveSandboxAssets(
 	st store.Interface,
 	poolNamespace, poolName string,
 ) (*ateletpb.SandboxAssets, error) {
-	protoWP, err := st.GetWorkerPool(ctx, poolNamespace, poolName)
+	protoWP, err := st.GetWorkerPool(ctx, poolName)
 	if err != nil {
-		return nil, fmt.Errorf("while getting WorkerPool %s/%s: %w", poolNamespace, poolName, err)
+		return nil, fmt.Errorf("while getting WorkerPool %s: %w", poolName, err)
 	}
 	wp, err := protoWorkerPoolToAPI(protoWP)
 	if err != nil {
-		return nil, fmt.Errorf("while converting WorkerPool %s/%s: %w", poolNamespace, poolName, err)
+		return nil, fmt.Errorf("while converting WorkerPool %s: %w", poolName, err)
 	}
 
 	class := wp.Spec.SandboxClass

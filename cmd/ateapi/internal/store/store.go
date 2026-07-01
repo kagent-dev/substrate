@@ -92,8 +92,8 @@ type Interface interface {
 	// Stores a new WorkerPool. Returns ErrAlreadyExists if the key is taken.
 	CreateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool) error
 
-	// Fetches a WorkerPool by namespace and name. Returns ErrNotFound if missing.
-	GetWorkerPool(ctx context.Context, namespace, name string) (*ateapipb.WorkerPool, error)
+	// Fetches a WorkerPool by name. Returns ErrNotFound if missing.
+	GetWorkerPool(ctx context.Context, name string) (*ateapipb.WorkerPool, error)
 
 	// Lists all WorkerPools.
 	ListWorkerPools(ctx context.Context) ([]*ateapipb.WorkerPool, error)
@@ -102,7 +102,7 @@ type Interface interface {
 	UpdateWorkerPool(ctx context.Context, workerPool *ateapipb.WorkerPool, expectedVersion int64) error
 
 	// Removes a WorkerPool. Returns ErrNotFound if missing.
-	DeleteWorkerPool(ctx context.Context, namespace, name string) error
+	DeleteWorkerPool(ctx context.Context, name string) error
 
 	// WatchWorkerPools returns WorkerPool changes.
 	WatchWorkerPools(ctx context.Context) (*WorkerPoolWatch, error)
@@ -126,16 +126,16 @@ type Interface interface {
 	CreateWorkerPoolGrant(ctx context.Context, grant *ateapipb.WorkerPoolGrant) error
 
 	// Fetches a worker pool grant. Returns ErrNotFound if missing.
-	GetWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (*ateapipb.WorkerPoolGrant, error)
+	GetWorkerPoolGrant(ctx context.Context, atespace, name string) (*ateapipb.WorkerPoolGrant, error)
 
 	// Lists worker pool grants in the given atespace, or all grants if atespace is empty.
 	ListWorkerPoolGrants(ctx context.Context, atespace string) ([]*ateapipb.WorkerPoolGrant, error)
 
 	// Reports whether a worker pool grant exists.
-	WorkerPoolGranted(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) (bool, error)
+	WorkerPoolGranted(ctx context.Context, atespace, workerPoolName string) (bool, error)
 
 	// Removes a worker pool grant. Returns ErrNotFound if missing.
-	DeleteWorkerPoolGrant(ctx context.Context, atespace, workerPoolNamespace, workerPoolName string) error
+	DeleteWorkerPoolGrant(ctx context.Context, atespace, name string) error
 
 	// Fetches worker state by namespace, pool, and pod name. Returns ErrNotFound if missing.
 	GetWorker(ctx context.Context, namespace, pool, pod string) (*ateapipb.Worker, error)

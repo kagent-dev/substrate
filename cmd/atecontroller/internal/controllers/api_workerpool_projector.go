@@ -55,7 +55,7 @@ func (p *APIWorkerPoolProjector) Start(ctx context.Context) error {
 				break
 			}
 			if err := p.applyEvent(ctx, event); err != nil {
-				log.Error(err, "project WorkerPool", "namespace", event.GetWorkerPool().GetNamespace(), "name", event.GetWorkerPool().GetName())
+				log.Error(err, "project WorkerPool", "name", event.GetWorkerPool().GetName())
 			}
 		}
 		if !sleepOrDone(ctx, time.Second) {
@@ -66,13 +66,13 @@ func (p *APIWorkerPoolProjector) Start(ctx context.Context) error {
 
 func (p *APIWorkerPoolProjector) applyEvent(ctx context.Context, event *ateapipb.WatchWorkerPoolsResponse) error {
 	wp := event.GetWorkerPool()
-	if wp.GetNamespace() == "" || wp.GetName() == "" {
+	if wp.GetName() == "" || wp.GetSpec().GetDeploymentAtespace() == "" {
 		return nil
 	}
 	if event.GetType() == ateapipb.ResourceEventType_RESOURCE_EVENT_TYPE_DELETED {
 		return client.IgnoreNotFound(p.Delete(ctx, &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace: wp.GetNamespace(),
+				Namespace: wp.GetSpec().GetDeploymentAtespace(),
 				Name:      deploymentName(wp.GetName()),
 			},
 		}))
@@ -96,7 +96,7 @@ func protoWorkerPoolToAPI(in *ateapipb.WorkerPool) (*atev1alpha1.WorkerPool, err
 	}
 	return &atev1alpha1.WorkerPool{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: in.GetNamespace(),
+			Namespace: in.GetSpec().GetDeploymentAtespace(),
 			Name:      in.GetName(),
 			Labels:    copyStringMap(in.GetLabels()),
 		},

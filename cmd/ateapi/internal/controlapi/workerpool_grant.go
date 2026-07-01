@@ -24,10 +24,11 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func (s *Service) CreateWorkerPoolGrant(ctx context.Context, req *ateapipb.CreateWorkerPoolGrantRequest) (*ateapipb.CreateWorkerPoolGrantResponse, error) {
-	grant := req.GetGrant()
+func (s *Service) CreateWorkerPoolGrant(ctx context.Context, req *ateapipb.CreateWorkerPoolGrantRequest) (*ateapipb.WorkerPoolGrant, error) {
+	grant := req.GetWorkerPoolGrant()
 	if err := validateWorkerPoolGrant(grant); err != nil {
 		return nil, err
 	}
@@ -41,44 +42,47 @@ func (s *Service) CreateWorkerPoolGrant(ctx context.Context, req *ateapipb.Creat
 	}
 
 	wp := grant.GetWorkerPool()
-	_, err = s.persistence.GetWorkerPool(ctx, wp.GetNamespace(), wp.GetName())
+	_, err = s.persistence.GetWorkerPool(ctx, wp.GetName())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Errorf(codes.FailedPrecondition, "WorkerPool %s/%s not found", wp.GetNamespace(), wp.GetName())
+			return nil, status.Errorf(codes.FailedPrecondition, "WorkerPool %s not found", wp.GetName())
 		}
 		return nil, fmt.Errorf("while getting WorkerPool: %w", err)
 	}
 
 	if err := s.persistence.CreateWorkerPoolGrant(ctx, grant); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
-			return nil, status.Errorf(codes.AlreadyExists, "WorkerPoolGrant %s/%s/%s already exists", grant.GetAtespace(), wp.GetNamespace(), wp.GetName())
+			return nil, status.Errorf(codes.AlreadyExists, "WorkerPoolGrant %s/%s already exists", grant.GetAtespace(), grant.GetName())
 		}
 		return nil, fmt.Errorf("while recording worker pool grant: %w", err)
 	}
 
-	stored, err := s.persistence.GetWorkerPoolGrant(ctx, grant.GetAtespace(), wp.GetNamespace(), wp.GetName())
+	stored, err := s.persistence.GetWorkerPoolGrant(ctx, grant.GetAtespace(), grant.GetName())
 	if err != nil {
 		return nil, fmt.Errorf("while fetching recorded worker pool grant from DB: %w", err)
 	}
-	return &ateapipb.CreateWorkerPoolGrantResponse{Grant: stored}, nil
+	return stored, nil
 }
 
-func (s *Service) GetWorkerPoolGrant(ctx context.Context, req *ateapipb.GetWorkerPoolGrantRequest) (*ateapipb.GetWorkerPoolGrantResponse, error) {
-	if err := validateWorkerPoolGrantRef(req.GetAtespace(), req.GetWorkerPool()); err != nil {
+func (s *Service) GetWorkerPoolGrant(ctx context.Context, req *ateapipb.GetWorkerPoolGrantRequest) (*ateapipb.WorkerPoolGrant, error) {
+	ref := req.GetWorkerPoolGrant()
+	if err := validateWorkerPoolGrantRef(ref); err != nil {
 		return nil, err
 	}
-	wp := req.GetWorkerPool()
-	grant, err := s.persistence.GetWorkerPoolGrant(ctx, req.GetAtespace(), wp.GetNamespace(), wp.GetName())
+	grant, err := s.persistence.GetWorkerPoolGrant(ctx, ref.GetAtespace(), ref.GetName())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "WorkerPoolGrant %s/%s/%s not found", req.GetAtespace(), wp.GetNamespace(), wp.GetName())
+			return nil, status.Errorf(codes.NotFound, "WorkerPoolGrant %s/%s not found", ref.GetAtespace(), ref.GetName())
 		}
 		return nil, fmt.Errorf("while getting worker pool grant from DB: %w", err)
 	}
-	return &ateapipb.GetWorkerPoolGrantResponse{Grant: grant}, nil
+	return grant, nil
 }
 
 func (s *Service) ListWorkerPoolGrants(ctx context.Context, req *ateapipb.ListWorkerPoolGrantsRequest) (*ateapipb.ListWorkerPoolGrantsResponse, error) {
+	if err := validatePageSize(req.GetPageSize()); err != nil {
+		return nil, err
+	}
 	if req.GetAtespace() != "" {
 		if err := resources.ValidateAtespace(req.GetAtespace()); err != nil {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -88,39 +92,42 @@ func (s *Service) ListWorkerPoolGrants(ctx context.Context, req *ateapipb.ListWo
 	if err != nil {
 		return nil, fmt.Errorf("while listing worker pool grants in db: %w", err)
 	}
-	return &ateapipb.ListWorkerPoolGrantsResponse{Grants: grants}, nil
+	return &ateapipb.ListWorkerPoolGrantsResponse{WorkerPoolGrants: grants}, nil
 }
 
-func (s *Service) DeleteWorkerPoolGrant(ctx context.Context, req *ateapipb.DeleteWorkerPoolGrantRequest) (*ateapipb.DeleteWorkerPoolGrantResponse, error) {
-	if err := validateWorkerPoolGrantRef(req.GetAtespace(), req.GetWorkerPool()); err != nil {
+func (s *Service) DeleteWorkerPoolGrant(ctx context.Context, req *ateapipb.DeleteWorkerPoolGrantRequest) (*emptypb.Empty, error) {
+	ref := req.GetWorkerPoolGrant()
+	if err := validateWorkerPoolGrantRef(ref); err != nil {
 		return nil, err
 	}
-	wp := req.GetWorkerPool()
-	if err := s.persistence.DeleteWorkerPoolGrant(ctx, req.GetAtespace(), wp.GetNamespace(), wp.GetName()); err != nil {
+	if err := s.persistence.DeleteWorkerPoolGrant(ctx, ref.GetAtespace(), ref.GetName()); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "WorkerPoolGrant %s/%s/%s not found", req.GetAtespace(), wp.GetNamespace(), wp.GetName())
+			return nil, status.Errorf(codes.NotFound, "WorkerPoolGrant %s/%s not found", ref.GetAtespace(), ref.GetName())
 		}
 		return nil, fmt.Errorf("while deleting worker pool grant from DB: %w", err)
 	}
-	return &ateapipb.DeleteWorkerPoolGrantResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func validateWorkerPoolGrant(grant *ateapipb.WorkerPoolGrant) error {
 	if grant == nil {
 		return status.Error(codes.InvalidArgument, "grant is required")
 	}
-	return validateWorkerPoolGrantRef(grant.GetAtespace(), grant.GetWorkerPool())
+	if err := validateWorkerPoolGrantRef(&ateapipb.WorkerPoolGrantRef{Atespace: grant.GetAtespace(), Name: grant.GetName()}); err != nil {
+		return err
+	}
+	return validateWorkerPoolRef(grant.GetWorkerPool())
 }
 
-func validateWorkerPoolGrantRef(atespace string, workerPool *ateapipb.WorkerPoolRef) error {
-	if atespace == "" {
-		return status.Error(codes.InvalidArgument, "atespace is required")
+func validateWorkerPoolGrantRef(ref *ateapipb.WorkerPoolGrantRef) error {
+	if ref == nil {
+		return status.Error(codes.InvalidArgument, "worker_pool_grant is required")
 	}
-	if err := resources.ValidateAtespace(atespace); err != nil {
+	if ref.GetAtespace() == "" {
+		return status.Error(codes.InvalidArgument, "worker_pool_grant.atespace is required")
+	}
+	if err := resources.ValidateAtespace(ref.GetAtespace()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
-	if workerPool == nil {
-		return status.Error(codes.InvalidArgument, "worker_pool is required")
-	}
-	return validateWorkerPoolRef(workerPool)
+	return validateResourceName("worker_pool_grant.name", ref.GetName())
 }

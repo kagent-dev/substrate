@@ -16,7 +16,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/agent-substrate/substrate/cmd/kubectl-ate/internal/printer"
 	"github.com/agent-substrate/substrate/internal/ateclient"
@@ -33,14 +32,14 @@ var adminWorkerPoolCmd = &cobra.Command{
 }
 
 var adminWorkerPoolGrantCmd = &cobra.Command{
-	Use:   "grant namespace/name --atespace atespace",
+	Use:   "grant name --atespace atespace",
 	Short: "Grant an atespace access to a worker pool",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if workerPoolGrantAtespace == "" {
 			return fmt.Errorf("--atespace is required")
 		}
-		namespace, name, err := parseWorkerPoolRef(args[0])
+		name, err := parseWorkerPoolRef(args[0])
 		if err != nil {
 			return err
 		}
@@ -53,30 +52,28 @@ var adminWorkerPoolGrantCmd = &cobra.Command{
 		defer apiClient.Close()
 
 		resp, err := apiClient.CreateWorkerPoolGrant(ctx, &ateapipb.CreateWorkerPoolGrantRequest{
-			Grant: &ateapipb.WorkerPoolGrant{
-				Atespace: workerPoolGrantAtespace,
-				WorkerPool: &ateapipb.WorkerPoolRef{
-					Namespace: namespace,
-					Name:      name,
-				},
+			WorkerPoolGrant: &ateapipb.WorkerPoolGrant{
+				Atespace:   workerPoolGrantAtespace,
+				Name:       name,
+				WorkerPool: &ateapipb.WorkerPoolRef{Name: name},
 			},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to grant worker pool access: %w", err)
 		}
-		return printer.PrintWorkerPoolGrant(resp.GetGrant(), outputFmt)
+		return printer.PrintWorkerPoolGrant(resp, outputFmt)
 	},
 }
 
 var adminWorkerPoolRevokeCmd = &cobra.Command{
-	Use:   "revoke namespace/name --atespace atespace",
+	Use:   "revoke name --atespace atespace",
 	Short: "Revoke an atespace's access to a worker pool",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if workerPoolGrantAtespace == "" {
 			return fmt.Errorf("--atespace is required")
 		}
-		namespace, name, err := parseWorkerPoolRef(args[0])
+		name, err := parseWorkerPoolRef(args[0])
 		if err != nil {
 			return err
 		}
@@ -89,15 +86,11 @@ var adminWorkerPoolRevokeCmd = &cobra.Command{
 		defer apiClient.Close()
 
 		if _, err := apiClient.DeleteWorkerPoolGrant(ctx, &ateapipb.DeleteWorkerPoolGrantRequest{
-			Atespace: workerPoolGrantAtespace,
-			WorkerPool: &ateapipb.WorkerPoolRef{
-				Namespace: namespace,
-				Name:      name,
-			},
+			WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: workerPoolGrantAtespace, Name: name},
 		}); err != nil {
 			return fmt.Errorf("failed to revoke worker pool access: %w", err)
 		}
-		fmt.Printf("workerpool access revoked for atespace %q on %s/%s\n", workerPoolGrantAtespace, namespace, name)
+		fmt.Printf("workerpool access revoked for atespace %q on %s\n", workerPoolGrantAtespace, name)
 		return nil
 	},
 }
@@ -120,16 +113,15 @@ var adminWorkerPoolGrantsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to list worker pool access grants: %w", err)
 		}
-		return printer.PrintWorkerPoolGrants(resp.GetGrants(), outputFmt)
+		return printer.PrintWorkerPoolGrants(resp.GetWorkerPoolGrants(), outputFmt)
 	},
 }
 
-func parseWorkerPoolRef(arg string) (string, string, error) {
-	namespace, name, ok := strings.Cut(arg, "/")
-	if !ok || namespace == "" || name == "" || strings.Contains(name, "/") {
-		return "", "", fmt.Errorf("worker pool must be specified as namespace/name")
+func parseWorkerPoolRef(arg string) (string, error) {
+	if arg == "" {
+		return "", fmt.Errorf("worker pool name is required")
 	}
-	return namespace, name, nil
+	return arg, nil
 }
 
 func init() {

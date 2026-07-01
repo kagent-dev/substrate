@@ -522,12 +522,10 @@ func createWorkerPoolWithoutGrant(t *testing.T, tc *testContext, ns string, name
 func createWorkerPoolGrant(t *testing.T, tc *testContext, atespace string, ns string, name string) {
 	t.Helper()
 	_, err := tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{
-		Grant: &ateapipb.WorkerPoolGrant{
-			Atespace: atespace,
-			WorkerPool: &ateapipb.WorkerPoolRef{
-				Namespace: ns,
-				Name:      name,
-			},
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrant{
+			Atespace:   atespace,
+			Name:       name,
+			WorkerPool: &ateapipb.WorkerPoolRef{Name: name},
 		},
 	})
 	if err != nil {
@@ -2331,31 +2329,28 @@ func TestWorkerPoolGrantLifecycle(t *testing.T) {
 	createWorkerPoolWithoutGrant(t, tc, ns, "pool-a", map[string]string{"tier": "test"})
 
 	grant := &ateapipb.WorkerPoolGrant{
-		Atespace: testAtespace,
-		WorkerPool: &ateapipb.WorkerPoolRef{
-			Namespace: ns,
-			Name:      "pool-a",
-		},
+		Atespace:   testAtespace,
+		Name:       "pool-a",
+		WorkerPool: &ateapipb.WorkerPoolRef{Name: "pool-a"},
 	}
-	createResp, err := tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{Grant: grant})
+	createResp, err := tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{WorkerPoolGrant: grant})
 	if err != nil {
 		t.Fatalf("CreateWorkerPoolGrant failed: %v", err)
 	}
-	if diff := cmp.Diff(grant, createResp.GetGrant(), protocmp.Transform()); diff != "" {
+	if diff := cmp.Diff(grant, createResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.WorkerPoolGrant{}, "uid", "create_time", "update_time", "version")); diff != "" {
 		t.Errorf("CreateWorkerPoolGrant mismatch (-want +got):\n%s", diff)
 	}
 
-	_, err = tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{Grant: grant})
-	assertGrpcError(t, err, codes.AlreadyExists, fmt.Sprintf("WorkerPoolGrant %s/%s/pool-a already exists", testAtespace, ns))
+	_, err = tc.client.CreateWorkerPoolGrant(context.Background(), &ateapipb.CreateWorkerPoolGrantRequest{WorkerPoolGrant: grant})
+	assertGrpcError(t, err, codes.AlreadyExists, fmt.Sprintf("WorkerPoolGrant %s/pool-a already exists", testAtespace))
 
 	getResp, err := tc.client.GetWorkerPoolGrant(context.Background(), &ateapipb.GetWorkerPoolGrantRequest{
-		Atespace:   testAtespace,
-		WorkerPool: grant.GetWorkerPool(),
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: testAtespace, Name: grant.GetName()},
 	})
 	if err != nil {
 		t.Fatalf("GetWorkerPoolGrant failed: %v", err)
 	}
-	if diff := cmp.Diff(grant, getResp.GetGrant(), protocmp.Transform()); diff != "" {
+	if diff := cmp.Diff(grant, getResp, protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.WorkerPoolGrant{}, "uid", "create_time", "update_time", "version")); diff != "" {
 		t.Errorf("GetWorkerPoolGrant mismatch (-want +got):\n%s", diff)
 	}
 
@@ -2363,21 +2358,19 @@ func TestWorkerPoolGrantLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkerPoolGrants failed: %v", err)
 	}
-	if diff := cmp.Diff([]*ateapipb.WorkerPoolGrant{grant}, listResp.GetGrants(), protocmp.Transform()); diff != "" {
+	if diff := cmp.Diff([]*ateapipb.WorkerPoolGrant{grant}, listResp.GetWorkerPoolGrants(), protocmp.Transform(), protocmp.IgnoreFields(&ateapipb.WorkerPoolGrant{}, "uid", "create_time", "update_time", "version")); diff != "" {
 		t.Errorf("ListWorkerPoolGrants mismatch (-want +got):\n%s", diff)
 	}
 
 	if _, err := tc.client.DeleteWorkerPoolGrant(context.Background(), &ateapipb.DeleteWorkerPoolGrantRequest{
-		Atespace:   testAtespace,
-		WorkerPool: grant.GetWorkerPool(),
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: testAtespace, Name: grant.GetName()},
 	}); err != nil {
 		t.Fatalf("DeleteWorkerPoolGrant failed: %v", err)
 	}
 	_, err = tc.client.GetWorkerPoolGrant(context.Background(), &ateapipb.GetWorkerPoolGrantRequest{
-		Atespace:   testAtespace,
-		WorkerPool: grant.GetWorkerPool(),
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: testAtespace, Name: grant.GetName()},
 	})
-	assertGrpcError(t, err, codes.NotFound, fmt.Sprintf("WorkerPoolGrant %s/%s/pool-a not found", testAtespace, ns))
+	assertGrpcError(t, err, codes.NotFound, fmt.Sprintf("WorkerPoolGrant %s/pool-a not found", testAtespace))
 }
 
 func TestCreateAtespace_Success(t *testing.T) {

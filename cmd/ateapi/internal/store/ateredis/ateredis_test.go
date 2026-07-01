@@ -909,11 +909,9 @@ func newTestAtespace(name string) *ateapipb.Atespace {
 
 func newTestWorkerPoolGrant(atespace, namespace, name string) *ateapipb.WorkerPoolGrant {
 	return &ateapipb.WorkerPoolGrant{
-		Atespace: atespace,
-		WorkerPool: &ateapipb.WorkerPoolRef{
-			Namespace: namespace,
-			Name:      name,
-		},
+		Atespace:   atespace,
+		Name:       name,
+		WorkerPool: &ateapipb.WorkerPoolRef{Name: name},
 	}
 }
 
@@ -982,14 +980,14 @@ func TestWorkerPoolGrantLifecycle(t *testing.T) {
 		t.Errorf("second CreateWorkerPoolGrant = %v, want ErrAlreadyExists", err)
 	}
 
-	got, err := s.GetWorkerPoolGrant(ctx, "team-a", "workers", "pool-a")
+	got, err := s.GetWorkerPoolGrant(ctx, "team-a", "pool-a")
 	if err != nil {
 		t.Fatalf("GetWorkerPoolGrant failed: %v", err)
 	}
 	if diff := cmp.Diff(grant, got, protocmp.Transform()); diff != "" {
 		t.Errorf("GetWorkerPoolGrant mismatch (-want +got):\n%s", diff)
 	}
-	granted, err := s.WorkerPoolGranted(ctx, "team-a", "workers", "pool-a")
+	granted, err := s.WorkerPoolGranted(ctx, "team-a", "pool-a")
 	if err != nil {
 		t.Fatalf("WorkerPoolGranted failed: %v", err)
 	}
@@ -1016,20 +1014,20 @@ func TestWorkerPoolGrantLifecycle(t *testing.T) {
 		t.Errorf("ListWorkerPoolGrants(all) returned %d grants, want 2", len(all))
 	}
 
-	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); err != nil {
+	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "pool-a"); err != nil {
 		t.Fatalf("DeleteWorkerPoolGrant failed: %v", err)
 	}
-	if _, err := s.GetWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.GetWorkerPoolGrant(ctx, "team-a", "pool-a"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetWorkerPoolGrant after delete = %v, want ErrNotFound", err)
 	}
-	granted, err = s.WorkerPoolGranted(ctx, "team-a", "workers", "pool-a")
+	granted, err = s.WorkerPoolGranted(ctx, "team-a", "pool-a")
 	if err != nil {
 		t.Fatalf("WorkerPoolGranted after delete failed: %v", err)
 	}
 	if granted {
 		t.Errorf("WorkerPoolGranted after delete = true, want false")
 	}
-	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "workers", "pool-a"); !errors.Is(err, store.ErrNotFound) {
+	if err := s.DeleteWorkerPoolGrant(ctx, "team-a", "pool-a"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("second DeleteWorkerPoolGrant = %v, want ErrNotFound", err)
 	}
 }

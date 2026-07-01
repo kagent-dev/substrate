@@ -110,13 +110,13 @@ func deployProbe(t *testing.T, ctx context.Context, clients *e2e.Clients, bucket
 	_, _ = clients.SubstrateAPI.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{Name: probeNamespace})
 	_, err = clients.SubstrateAPI.CreateWorkerPool(ctx, &ateapipb.CreateWorkerPoolRequest{
 		WorkerPool: &ateapipb.WorkerPool{
-			Namespace: probeNamespace,
-			Name:      probeTemplate,
-			Labels:    map[string]string{"workload": probeTemplate},
+			Name:   probeTemplate,
+			Labels: map[string]string{"workload": probeTemplate},
 			Spec: &ateapipb.WorkerPoolSpec{
-				Replicas:     3,
-				AteomImage:   ateomImage,
-				SandboxClass: string(v1alpha1.SandboxClassGvisor),
+				Replicas:           3,
+				AteomImage:         ateomImage,
+				SandboxClass:       string(v1alpha1.SandboxClassGvisor),
+				DeploymentAtespace: probeNamespace,
 			},
 		},
 	})
@@ -156,7 +156,7 @@ func waitForGolden(t *testing.T, ctx context.Context, clients *e2e.Clients) (str
 			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: probeNamespace, Name: probeTemplate},
 		})
 		if err == nil {
-			at := actorTemplateAPI(resp.GetActorTemplate())
+			at := actorTemplateAPI(resp)
 			switch at.Status.Phase {
 			case v1alpha1.PhaseReady:
 				t.Logf("probe ActorTemplate ready, golden=%s", at.Status.GoldenActorID)

@@ -335,18 +335,14 @@ func TestPrintWorkerPoolGrantsTo_Table(t *testing.T) {
 	var buf bytes.Buffer
 	grants := []*ateapipb.WorkerPoolGrant{
 		{
-			Atespace: "team-b",
-			WorkerPool: &ateapipb.WorkerPoolRef{
-				Namespace: "worker-ns",
-				Name:      "pool-b",
-			},
+			Atespace:   "team-b",
+			Name:       "pool-b",
+			WorkerPool: &ateapipb.WorkerPoolRef{Name: "pool-b"},
 		},
 		{
-			Atespace: "team-a",
-			WorkerPool: &ateapipb.WorkerPoolRef{
-				Namespace: "worker-ns",
-				Name:      "pool-a",
-			},
+			Atespace:   "team-a",
+			Name:       "pool-a",
+			WorkerPool: &ateapipb.WorkerPoolRef{Name: "pool-a"},
 		},
 	}
 
@@ -355,8 +351,8 @@ func TestPrintWorkerPoolGrantsTo_Table(t *testing.T) {
 	}
 
 	expected := `ATESPACE   WORKERPOOL
-team-a     worker-ns/pool-a
-team-b     worker-ns/pool-b
+team-a     pool-a
+team-b     pool-b
 `
 	if diff := cmp.Diff(expected, buf.String()); diff != "" {
 		t.Errorf("output mismatch (-want +got):\n%s", diff)
@@ -367,11 +363,9 @@ func TestPrintWorkerPoolGrantsTo_JSON(t *testing.T) {
 	var buf bytes.Buffer
 	grants := []*ateapipb.WorkerPoolGrant{
 		{
-			Atespace: "team-a",
-			WorkerPool: &ateapipb.WorkerPoolRef{
-				Namespace: "worker-ns",
-				Name:      "pool-a",
-			},
+			Atespace:   "team-a",
+			Name:       "pool-a",
+			WorkerPool: &ateapipb.WorkerPoolRef{Name: "pool-a"},
 		},
 	}
 
@@ -380,12 +374,12 @@ func TestPrintWorkerPoolGrantsTo_JSON(t *testing.T) {
 	}
 
 	expected := `{
-  "grants": [
+  "workerPoolGrants": [
     {
       "atespace": "team-a",
+      "name": "pool-a",
       "workerPool": {
-        "name": "pool-a",
-        "namespace": "worker-ns"
+        "name": "pool-a"
       }
     }
   ]

@@ -580,7 +580,7 @@ func createActorTemplate(ctx context.Context, t *testing.T, clients *e2e.Clients
 			ActorTemplate: &ateapipb.ActorTemplateRef{Atespace: nsObj.Name, Name: at.Name},
 		})
 		if err == nil {
-			curAt := actorTemplateAPI(resp.GetActorTemplate())
+			curAt := actorTemplateAPI(resp)
 			lastPhase = curAt.Status.Phase
 			if lastPhase == v1alpha1.PhaseReady {
 				t.Logf("ActorTemplate %s is Ready with golden snapshot %q", at.Name, curAt.Status.GoldenSnapshot)
@@ -628,23 +628,15 @@ func cleanupTemplateResources(ctx context.Context, t *testing.T, clients *e2e.Cl
 	})
 	ignoreMissing("ActorTemplate", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPoolGrant(ctx, &ateapipb.DeleteWorkerPoolGrantRequest{
-		Atespace: demoAtespace,
-		WorkerPool: &ateapipb.WorkerPoolRef{
-			Namespace: at.Namespace,
-			Name:      at.Name,
-		},
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: demoAtespace, Name: at.Name},
 	})
 	ignoreMissing("demo WorkerPoolGrant", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPoolGrant(ctx, &ateapipb.DeleteWorkerPoolGrantRequest{
-		Atespace: resources.GoldenActorAtespace,
-		WorkerPool: &ateapipb.WorkerPoolRef{
-			Namespace: at.Namespace,
-			Name:      at.Name,
-		},
+		WorkerPoolGrant: &ateapipb.WorkerPoolGrantRef{Atespace: resources.GoldenActorAtespace, Name: at.Name},
 	})
 	ignoreMissing("golden WorkerPoolGrant", err)
 	_, err = clients.SubstrateAPI.DeleteWorkerPool(ctx, &ateapipb.DeleteWorkerPoolRequest{
-		WorkerPool: &ateapipb.WorkerPoolRef{Namespace: at.Namespace, Name: at.Name},
+		WorkerPool: &ateapipb.WorkerPoolRef{Name: at.Name},
 	})
 	ignoreMissing("WorkerPool", err)
 	_, err = clients.SubstrateAPI.DeleteAtespace(ctx, &ateapipb.DeleteAtespaceRequest{Name: at.Namespace})
@@ -712,14 +704,14 @@ func waitForActorStatus(ctx context.Context, t *testing.T, clients *e2e.Clients,
 
 func workerPoolProto(wp *v1alpha1.WorkerPool) *ateapipb.WorkerPool {
 	return &ateapipb.WorkerPool{
-		Namespace: wp.Namespace,
-		Name:      wp.Name,
-		Labels:    copyStringMap(wp.Labels),
+		Name:   wp.Name,
+		Labels: copyStringMap(wp.Labels),
 		Spec: &ateapipb.WorkerPoolSpec{
-			Replicas:          wp.Spec.Replicas,
-			AteomImage:        wp.Spec.AteomImage,
-			SandboxClass:      string(wp.Spec.SandboxClass),
-			SandboxConfigName: wp.Spec.SandboxConfigName,
+			Replicas:           wp.Spec.Replicas,
+			AteomImage:         wp.Spec.AteomImage,
+			SandboxClass:       string(wp.Spec.SandboxClass),
+			SandboxConfigName:  wp.Spec.SandboxConfigName,
+			DeploymentAtespace: wp.Namespace,
 		},
 	}
 }
