@@ -133,7 +133,7 @@ apply_kind_extras() {
 
 wait_rollouts() {
   log_step "wait_rollouts"
-  run_kubectl -n "${NS}" rollout status deployment/ate-api-server-deployment --timeout=180s
+  run_kubectl -n "${NS}" rollout status deployment/ate-api-server --timeout=180s
   run_kubectl -n "${NS}" rollout status deployment/ate-controller --timeout=180s
   run_kubectl -n "${NS}" rollout status deployment/atenet-router --timeout=180s
   run_kubectl -n "${NS}" rollout status daemonset/atelet --timeout=180s
