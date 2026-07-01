@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if eq .Values.auth.mode "jwt" }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -22,4 +21,3 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     apps: ate-client
-{{- end }}

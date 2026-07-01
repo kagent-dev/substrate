@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/portforward"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -159,7 +160,7 @@ func dialPortForward(ctx context.Context, kubeconfigPath, k8sContext string, tra
 
 	// TODO: Should we special-case a LoadBalancer "api" Service and dial its
 	// address directly instead of port-forwarding?
-	localPort, stopForward, err := portforward.ServicePortForward(ctx, config, clientset, "ate-system", "api", 443)
+	localPort, stopForward, err := portforward.ServicePortForward(ctx, config, clientset, installdefaults.SystemNamespace, installdefaults.APIServiceName, 443)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +240,7 @@ func bearerTokenDialOption(ctx context.Context, clientset *kubernetes.Clientset)
 			ExpirationSeconds: &expirationSeconds,
 		},
 	}
-	token, err := clientset.CoreV1().ServiceAccounts("ate-system").CreateToken(ctx, "ate-client", tokenRequest, metav1.CreateOptions{})
+	token, err := clientset.CoreV1().ServiceAccounts(installdefaults.SystemNamespace).CreateToken(ctx, "ate-client", tokenRequest, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to request ateapi bearer token: %w", err)
 	}
