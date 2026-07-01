@@ -71,6 +71,13 @@ spec:
       containers:
       - name: ate-controller
         image: ko://github.com/agent-substrate/substrate/cmd/atecontroller
+        args:
+        # The atecontroller binary defaults --ateapi-conn-spec to
+        # dns:///api.ate-system.svc:443, which is correct only for the
+        # canonical render (release name "substrate" in namespace
+        # "ate-system"). Pass the chart-resolved Service so the controller
+        # dials the right backend when substrate is installed as a subchart.
+        - "--ateapi-conn-spec=dns:///api.ate-system.svc:443"
         ports:
         - name: metrics
           containerPort: 8080

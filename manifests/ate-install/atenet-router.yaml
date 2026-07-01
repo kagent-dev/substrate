@@ -161,6 +161,9 @@ spec:
         - "--standalone"
         - "--networking-mode=agentgateway"
         - "--namespace=ate-system"
+        # Pass the chart-resolved router Service name so /statusz looks up the
+        # correct Service when substrate is installed as a subchart.
+        - "--router-service-name=atenet-router"
         - "--port-http=8080"
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"

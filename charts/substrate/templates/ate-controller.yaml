@@ -70,8 +70,14 @@ spec:
       containers:
       - name: ate-controller
         image: {{ include "substrate.componentImage" (list "atecontroller" .) }}
-{{- if eq .Values.auth.mode "jwt" }}
         args:
+        # The atecontroller binary defaults --ateapi-conn-spec to
+        # dns:///api.ate-system.svc:443, which is correct only for the
+        # canonical render (release name "substrate" in namespace
+        # "ate-system"). Pass the chart-resolved Service so the controller
+        # dials the right backend when substrate is installed as a subchart.
+        - "--ateapi-conn-spec=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
+{{- if eq .Values.auth.mode "jwt" }}
         - "--ateapi-auth=jwt"
         - "--ateapi-ca-file=/run/ateapi-ca/ca.crt"
         - "--ateapi-server-name={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc"

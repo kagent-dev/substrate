@@ -144,6 +144,9 @@ spec:
         - "--standalone"
         - "--networking-mode=agentgateway"
         - "--namespace={{ .Release.Namespace }}"
+        # Pass the chart-resolved router Service name so /statusz looks up the
+        # correct Service when substrate is installed as a subchart.
+        - "--router-service-name={{ include "substrate.fullname" (list "atenet-router" .) }}"
         - "--port-http=8080"
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"
