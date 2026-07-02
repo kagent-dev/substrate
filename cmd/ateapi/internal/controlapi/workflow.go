@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/scheduling"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
@@ -81,9 +82,12 @@ type ActorWorkflow struct {
 	instruments          *Instruments
 	egressGatewayAddress string
 	pluginRegistry       VolumePluginRegistry
+	// workflowDeadline is the maximum duration of a single actor workflow.
+	workflowDeadline time.Duration
 }
 
-// NewActorWorkflow creates a new ActorWorkflow. instruments may be nil.
+// NewActorWorkflow creates a new ActorWorkflow. workflowDeadline bounds how
+// long a single Resume/Suspend can run end-to-end; instruments may be nil.
 func NewActorWorkflow(
 	store store.Interface,
 	workerCache *workercache.Cache,
@@ -96,6 +100,7 @@ func NewActorWorkflow(
 	instruments *Instruments,
 	egressGatewayAddress string,
 	pluginRegistry VolumePluginRegistry,
+	workflowDeadline time.Duration,
 ) *ActorWorkflow {
 	return &ActorWorkflow{
 		store:                store,
@@ -111,19 +116,23 @@ func NewActorWorkflow(
 		instruments:          instruments,
 		egressGatewayAddress: egressGatewayAddress,
 		pluginRegistry:       pluginRegistry,
+		workflowDeadline:     workflowDeadline,
 	}
 }
 
 func (w *ActorWorkflow) acquireActorLock(ctx context.Context, actorRef resources.ActorRef) (context.Context, *store.Lock, error) {
 	lockKey := "lock:actor:" + actorRef.Atespace + ":" + actorRef.Name
+	workflowCtx, cancel := context.WithTimeout(ctx, w.workflowDeadline)
 
-	lock, err := w.store.AcquireLock(ctx, lockKey)
+	lock, err := w.store.AcquireLock(workflowCtx, lockKey)
 	if err != nil {
+		cancel()
 		if errors.Is(err, store.ErrLockConflict) {
 			return nil, nil, status.Error(grpcCodes.Aborted, "another operation is in progress for this actor")
 		}
 		return nil, nil, fmt.Errorf("while acquiring lock: %w", err)
 	}
 
+	context.AfterFunc(lock.Context(), cancel)
 	return lock.Context(), lock, nil
 }
