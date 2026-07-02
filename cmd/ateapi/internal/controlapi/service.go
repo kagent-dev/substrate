@@ -17,6 +17,7 @@ package controlapi
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
@@ -50,7 +51,8 @@ type VolumePluginRegistry interface {
 	GetPlugin(ctx context.Context, name string) (volume.VolumePluginControlPlane, error)
 }
 
-// NewService creates a service. instruments may be nil; the record helpers no-op.
+// NewService creates a service. actorWorkflowDeadline bounds how long a single
+// Resume/Suspend workflow can run end-to-end. instruments may be nil.
 func NewService(
 	persistence store.Interface,
 	workerCache *workercache.Cache,
@@ -62,6 +64,7 @@ func NewService(
 	dialer *AteletDialer,
 	instruments *Instruments,
 	egressGatewayAddress string,
+	actorWorkflowDeadline time.Duration,
 	volumePlugins map[string]volume.VolumePluginControlPlane,
 ) *Service {
 	s := &Service{
@@ -75,7 +78,7 @@ func NewService(
 		instruments:           instruments,
 		volumePlugins:         volumePlugins,
 	}
-	s.actorWorkflow = NewActorWorkflow(persistence, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, storageClassLister, instruments, egressGatewayAddress, s)
+	s.actorWorkflow = NewActorWorkflow(persistence, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, storageClassLister, instruments, egressGatewayAddress, s, actorWorkflowDeadline)
 	return s
 }
 

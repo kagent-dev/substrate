@@ -367,7 +367,7 @@ func setupTest(t *testing.T, ns string) *testContext {
 	volPlugins := map[string]volume.VolumePluginControlPlane{
 		mockDriverName: mockPlugin,
 	}
-	service := NewService(persistence, wc, actorTemplateLister, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, scLister, dialer, instruments, "", volPlugins)
+	service := NewService(persistence, wc, actorTemplateLister, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, scLister, dialer, instruments, "", 30*time.Second, volPlugins)
 
 	// 5. Start REAL gRPC Server for ATE API
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(ateinterceptors.ServerUnaryInterceptor))
