@@ -21,6 +21,9 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/ateredis"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -204,4 +207,94 @@ func TestRunWorkflow_RetryOnPersistenceConflict(t *testing.T) {
 			t.Errorf("Execute called %d times, want 1; calls = %v", got, calls)
 		}
 	})
+}
+
+func newLockTestWorkflow(t *testing.T) (*miniredis.Miniredis, *ActorWorkflow) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{mr.Addr()}})
+	return mr, &ActorWorkflow{
+		store:            ateredis.NewPersistence(rdb),
+		workflowDeadline: 30 * time.Second,
+	}
+}
+
+func TestAcquireActorLock_HeartbeatKeepsLockAlivePastTTL(t *testing.T) {
+	mr, w := newLockTestWorkflow(t)
+
+	lockTTL := 150 * time.Millisecond
+	heartbeat := 40 * time.Millisecond
+
+	ctx, release, err := w.acquireActorLock(context.Background(), "actor-1", lockTTL, heartbeat)
+	if err != nil {
+		t.Fatalf("acquireActorLock: %v", err)
+	}
+	defer release()
+
+	time.Sleep(4 * lockTTL)
+
+	if !mr.Exists("lock:actor:actor-1") {
+		t.Fatalf("lock key disappeared from Redis despite heartbeat; ctx err=%v cause=%v", ctx.Err(), context.Cause(ctx))
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("workflow ctx cancelled while heartbeat was healthy: err=%v cause=%v", ctx.Err(), context.Cause(ctx))
+	}
+}
+
+func TestAcquireActorLock_LostLockCancelsWorkflow(t *testing.T) {
+	mr, w := newLockTestWorkflow(t)
+
+	ctx, release, err := w.acquireActorLock(context.Background(), "actor-2", 200*time.Millisecond, 30*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquireActorLock: %v", err)
+	}
+	defer release()
+
+	mr.Del("lock:actor:actor-2")
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("workflow ctx was not cancelled after lock was lost")
+	}
+
+	if cause := context.Cause(ctx); !errors.Is(cause, errLostActorLock) {
+		t.Errorf("context.Cause = %v, want errLostActorLock", cause)
+	}
+}
+
+func TestAcquireActorLock_ReleaseRemovesLock(t *testing.T) {
+	mr, w := newLockTestWorkflow(t)
+
+	_, release, err := w.acquireActorLock(context.Background(), "actor-3", 200*time.Millisecond, 60*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquireActorLock: %v", err)
+	}
+
+	if !mr.Exists("lock:actor:actor-3") {
+		t.Fatalf("lock key not in Redis after acquire")
+	}
+	release()
+	if mr.Exists("lock:actor:actor-3") {
+		t.Errorf("lock key still in Redis after release")
+	}
+}
+
+func TestAcquireActorLock_ConflictReturnsAborted(t *testing.T) {
+	_, w := newLockTestWorkflow(t)
+
+	_, release, err := w.acquireActorLock(context.Background(), "actor-4", 5*time.Second, time.Second)
+	if err != nil {
+		t.Fatalf("first acquireActorLock: %v", err)
+	}
+	defer release()
+
+	_, _, err = w.acquireActorLock(context.Background(), "actor-4", 5*time.Second, time.Second)
+	if err == nil {
+		t.Fatalf("expected second acquireActorLock to fail")
+	}
 }
