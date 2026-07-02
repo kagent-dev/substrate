@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -214,7 +215,7 @@ func TestDialForWorkerTarget(t *testing.T) {
 				Spec:       corev1.PodSpec{NodeName: "node-1"},
 			}
 			ateletPod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Namespace: ateletNamespace, Name: "atelet-abc", UID: "atelet-uid"},
+				ObjectMeta: metav1.ObjectMeta{Namespace: installdefaults.SystemNamespace, Name: "atelet-abc", UID: "atelet-uid"},
 				Spec:       corev1.PodSpec{NodeName: "node-1"},
 				Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: tc.ateletIP}}},
 			}
@@ -241,7 +242,7 @@ func TestDialForWorkerErrors(t *testing.T) {
 
 	t.Run("unknown worker pod", func(t *testing.T) {
 		ateletPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ateletNamespace, Name: "atelet-abc", UID: "atelet-uid"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: installdefaults.SystemNamespace, Name: "atelet-abc", UID: "atelet-uid"},
 			Spec:       corev1.PodSpec{NodeName: "node-1"},
 			Status:     corev1.PodStatus{PodIPs: []corev1.PodIP{{IP: "10.244.1.7"}}},
 		}
@@ -253,7 +254,7 @@ func TestDialForWorkerErrors(t *testing.T) {
 
 	t.Run("atelet without assigned IPs", func(t *testing.T) {
 		ateletPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ateletNamespace, Name: "atelet-abc", UID: "atelet-uid"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: installdefaults.SystemNamespace, Name: "atelet-abc", UID: "atelet-uid"},
 			Spec:       corev1.PodSpec{NodeName: "node-1"},
 		}
 		d := newDialerForPods(t, workerPod, ateletPod)
