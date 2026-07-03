@@ -69,3 +69,10 @@ See `values.yaml` for the full set; the important keys:
 | `redis.useIAMAuth` | `false` | Google IAM auth |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces/metrics |
+| `nodeSelector` | `{}` | Global nodeSelector applied to all workloads (ate-api-server, ate-controller, atenet-router, dns, rustfs, atelet) |
+| `ateApiServer.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |
+| `ateController.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |
+| `atenetRouter.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |
+| `dns.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |
+| `rustfs.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |
+| `atelet.nodeSelector` | `{}` | Per-component override; takes precedence over `nodeSelector` when non-empty |

@@ -92,6 +92,10 @@ spec:
         app: dns
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atenet-dns" .) }}
+      {{- with (or .Values.dns.nodeSelector .Values.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       shareProcessNamespace: true
       initContainers:
       - name: init-dns

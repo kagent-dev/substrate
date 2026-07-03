@@ -67,6 +67,10 @@ spec:
         app: ate-controller
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-controller" .) }}
+      {{- with (or .Values.ateController.nodeSelector .Values.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: ate-controller
         image: {{ include "substrate.componentImage" (list "atecontroller" .) }}
