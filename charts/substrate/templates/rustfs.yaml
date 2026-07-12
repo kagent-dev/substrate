@@ -59,6 +59,10 @@ spec:
       labels:
         app: rustfs
     spec:
+      {{- with (or .Values.rustfs.nodeSelector .Values.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsUser: 10001
         runAsGroup: 10001

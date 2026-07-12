@@ -71,6 +71,12 @@ auth:
 # manifests/ate-install/ install path (kubectl apply).
 createNamespace: false
 
+# Global nodeSelector applied to the substrate workloads (ate-api-server,
+# ate-controller, atenet-router, dns, rustfs, and the atelet DaemonSet). Each
+# of those components also exposes its own `nodeSelector`; when set to a
+# non-empty map it overrides this global default for that component.
+nodeSelector: {}
+
 valkey:
   enabled: true
   replicas: 6
@@ -82,6 +88,8 @@ rustfs:
   bucket: ate-snapshots
   accessKey: rustfsadmin
   secretKey: rustfsadmin
+  # Overrides the global .Values.nodeSelector for the rustfs deployment.
+  nodeSelector: {}
 
 # atelet daemonset overrides. Defaults use the in-cluster RustFS deployment for
 # snapshots. Set rustfs.enabled=false and override these fields when using
@@ -93,6 +101,23 @@ atelet:
   storageBackend: s3
   extraArgs: []
   extraEnv: []
+  # Overrides the global .Values.nodeSelector for the atelet DaemonSet.
+  nodeSelector: {}
+
+# Per-component overrides for the control-plane deployments. Each nodeSelector,
+# when set to a non-empty map, overrides the global .Values.nodeSelector for
+# that component only.
+ateApiServer:
+  nodeSelector: {}
+
+ateController:
+  nodeSelector: {}
+
+atenetRouter:
+  nodeSelector: {}
+
+dns:
+  nodeSelector: {}
 
 redis:
   # Override the cluster address. Empty -> derived from valkey.enabled

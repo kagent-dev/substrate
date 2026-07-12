@@ -69,6 +69,10 @@ spec:
         prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-api-server" .) }}
+      {{- with (or .Values.ateApiServer.nodeSelector .Values.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- if eq .Values.auth.mode "jwt" }}
       initContainers:
       - name: assemble-cred-bundle

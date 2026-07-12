@@ -136,6 +136,10 @@ spec:
         prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atenet-router" .) }}
+      {{- with (or .Values.atenetRouter.nodeSelector .Values.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: atenet-router
         image: {{ include "substrate.componentImage" (list "atenet" .) }}
