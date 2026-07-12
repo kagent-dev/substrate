@@ -176,19 +176,24 @@ spec:
         - -c
         - |
           set -e
+          REPLICAS={{ .Values.valkey.replicas }}
           echo "Waiting for all Valkey pods to resolve..."
-          for i in 0 1 2 3 4 5; do
+          i=0
+          while [ "${i}" -lt "${REPLICAS}" ]; do
             until getent hosts {{ $sts }}-${i}.{{ $headless }}.{{ $ns }}.svc >/dev/null 2>&1; do
               echo "Waiting for {{ $sts }}-${i} DNS..."
               sleep 2
             done
+            i=$((i + 1))
           done
 
           echo "All pods resolved. Getting IPs..."
           POD_IPS=""
-          for i in 0 1 2 3 4 5; do
+          i=0
+          while [ "${i}" -lt "${REPLICAS}" ]; do
             ip=$(getent hosts {{ $sts }}-${i}.{{ $headless }}.{{ $ns }}.svc | awk '{print $1}')
             POD_IPS="${POD_IPS} ${ip}:6379"
+            i=$((i + 1))
           done
 
           echo "Checking if Valkey cluster is already initialized..."
