@@ -36,6 +36,7 @@ func TestIsWorkerEligibleForActor(t *testing.T) {
 		templateClass    atev1alpha1.SandboxClass
 		templateSelector *metav1.LabelSelector
 		actorSelector    *ateapipb.Selector
+		requiredPool     string
 		wantEligible     bool
 	}{
 		{
@@ -132,6 +133,26 @@ func TestIsWorkerEligibleForActor(t *testing.T) {
 			wantEligible: false,
 		},
 		{
+			name: "required worker pool match",
+			worker: &ateapipb.Worker{
+				SandboxClass: "gvisor",
+				WorkerPool:   "pool-a",
+			},
+			templateClass: atev1alpha1.SandboxClassGvisor,
+			requiredPool:  "pool-a",
+			wantEligible:  true,
+		},
+		{
+			name: "required worker pool mismatch",
+			worker: &ateapipb.Worker{
+				SandboxClass: "gvisor",
+				WorkerPool:   "pool-b",
+			},
+			templateClass: atev1alpha1.SandboxClassGvisor,
+			requiredPool:  "pool-a",
+			wantEligible:  false,
+		},
+		{
 			name: "microvm template matches only microvm worker",
 			worker: &ateapipb.Worker{
 				SandboxClass: "microvm",
@@ -159,7 +180,7 @@ func TestIsWorkerEligibleForActor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := isWorkerEligibleForActor(tt.worker, tt.templateClass, tt.templateSelector, tt.actorSelector)
+			got, err := isWorkerEligibleForActor(tt.worker, tt.templateClass, tt.templateSelector, tt.actorSelector, tt.requiredPool)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

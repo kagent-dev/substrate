@@ -68,6 +68,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		ActorTemplateNamespace: templateNamespace,
 		ActorTemplateName:      templateName,
 		WorkerSelector:         in.GetWorkerSelector(),
+		RequiredWorkerPoolName: in.GetRequiredWorkerPoolName(),
 	}
 	stored, err := s.persistence.CreateActor(ctx, actor)
 	if err != nil {
@@ -121,6 +122,9 @@ func validateCreateActorRequest(req *ateapipb.CreateActorRequest) error {
 
 	if val := actor.GetWorkerSelector(); val != nil {
 		errs = append(errs, validateSelector(val, actorPath.Child("worker_selector"))...)
+	}
+	if val, p := actor.GetRequiredWorkerPoolName(), actorPath.Child("required_worker_pool_name"); val != "" {
+		errs = append(errs, resources.ValidateResourceName(val, p)...)
 	}
 
 	if len(errs) > 0 {

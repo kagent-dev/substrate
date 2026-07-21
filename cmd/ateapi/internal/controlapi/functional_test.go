@@ -1333,6 +1333,41 @@ func TestResumeActor_NoWorkers(t *testing.T) {
 	assertGrpcError(t, err, codes.FailedPrecondition, "no free workers available")
 }
 
+func TestResumeActor_RequiredWorkerPoolDoesNotFallback(t *testing.T) {
+	ns := namespaceForTest("ns-required-pool-no-fallback")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns})
+	createWorkerPool(t, tc, ns, "pool-b", map[string]string{"group": ns})
+	createTemplate(t, tc, ns)
+
+	createWorkerPod(t, tc, ns, "worker-b", "node1", "pool-b")
+
+	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
+		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "id1"},
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl1",
+		RequiredWorkerPoolName: "pool-a",
+	}})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: "id1"},
+	})
+	assertGrpcError(t, err, codes.FailedPrecondition, "no free workers available")
+
+	getResp, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: "id1"}})
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+	if got := getResp.GetWorkerPoolName(); got != "" {
+		t.Errorf("expected actor to remain unassigned, got worker_pool_name=%q", got)
+	}
+}
+
 // TestResumeActor_MultiPoolSelector exercises the AND-of-two-selectors path
 // end to end: a template's WorkerSelector gates two pools, and the actor's
 // worker_selector narrows to just one of them.
