@@ -323,6 +323,14 @@ type ActorTemplateSpec struct {
 	// +kubebuilder:default=gvisor
 	SandboxClass SandboxClass `json:"sandboxClass,omitempty"`
 
+	// RequiredWorkerPoolName restricts actors from this template to one WorkerPool.
+	// When set, the scheduler only considers workers owned by that WorkerPool.
+	// If no worker in that pool is free, ResumeActor fails instead of falling
+	// back to another eligible pool.
+	//
+	// +optional
+	RequiredWorkerPoolName string `json:"requiredWorkerPoolName,omitempty"`
+
 	// WorkerSelector restricts which worker pools actors from this template may
 	// use. The scheduler only considers pools whose labels match this selector.
 	// If nil, all pools are eligible (subject to the actor's own worker_selector).

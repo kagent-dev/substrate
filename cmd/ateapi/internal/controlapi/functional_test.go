@@ -1333,6 +1333,47 @@ func TestResumeActor_NoWorkers(t *testing.T) {
 	assertGrpcError(t, err, codes.FailedPrecondition, "no free workers available")
 }
 
+func TestCreateActor_DefaultsRequiredWorkerPoolFromTemplate(t *testing.T) {
+	ns := namespaceForTest("ns-template-required-pool")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	ensureDefaultGvisorSandboxConfig(t, tc)
+	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns})
+
+	actorTemplate := &atev1alpha1.ActorTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tmpl-required-pool",
+			Namespace: ns,
+		},
+		Spec: atev1alpha1.ActorTemplateSpec{
+			PauseImage: "pause@sha256:abc",
+			SnapshotsConfig: atev1alpha1.SnapshotsConfig{
+				Location: "gs://fake-fake-fake",
+			},
+			Containers: []atev1alpha1.Container{
+				{Name: "main", Image: "main@sha256:abc", Command: []string{"/main"}},
+			},
+			RequiredWorkerPoolName: "pool-a",
+		},
+	}
+	if _, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).Create(context.Background(), actorTemplate, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create actor template: %v", err)
+	}
+
+	resp, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
+		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "id1"},
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl-required-pool",
+	}})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+	if got := resp.GetRequiredWorkerPoolName(); got != "pool-a" {
+		t.Fatalf("expected required_worker_pool_name to default from template, got %q", got)
+	}
+}
+
 func TestResumeActor_RequiredWorkerPoolDoesNotFallback(t *testing.T) {
 	ns := namespaceForTest("ns-required-pool-no-fallback")
 	tc := setupTest(t, ns)

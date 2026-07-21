@@ -37,14 +37,17 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 	templateNamespace := in.GetActorTemplateNamespace()
 	templateName := in.GetActorTemplateName()
 
-	setSpanActorRefAttributes(ctx, in.GetMetadata().GetAtespace(), in.GetMetadata().GetName())
-
-	_, err := s.actorTemplateLister.ActorTemplates(templateNamespace).Get(templateName)
+	actorTemplate, err := s.actorTemplateLister.ActorTemplates(templateNamespace).Get(templateName)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil, status.Errorf(codes.FailedPrecondition, "ActorTemplate %s/%s not found", templateNamespace, templateName)
 		}
 		return nil, fmt.Errorf("while getting ActorTemplate: %w", err)
+	}
+
+	requiredWorkerPoolName := in.GetRequiredWorkerPoolName()
+	if requiredWorkerPoolName == "" {
+		requiredWorkerPoolName = actorTemplate.Spec.RequiredWorkerPoolName
 	}
 
 	atespace := in.GetMetadata().GetAtespace()
@@ -68,7 +71,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		ActorTemplateNamespace: templateNamespace,
 		ActorTemplateName:      templateName,
 		WorkerSelector:         in.GetWorkerSelector(),
-		RequiredWorkerPoolName: in.GetRequiredWorkerPoolName(),
+		RequiredWorkerPoolName: requiredWorkerPoolName,
 	}
 	stored, err := s.persistence.CreateActor(ctx, actor)
 	if err != nil {

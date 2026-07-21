@@ -256,6 +256,13 @@ spec:
                 - message: All images must be pinned (changing the image invalidates
                     snapshots)
                   rule: self.contains('@')
+              requiredWorkerPoolName:
+                description: |-
+                  RequiredWorkerPoolName restricts actors from this template to one WorkerPool.
+                  When set, the scheduler only considers workers owned by that WorkerPool.
+                  If no worker in that pool is free, ResumeActor fails instead of falling
+                  back to another eligible pool.
+                type: string
               sandboxClass:
                 default: gvisor
                 description: |-
