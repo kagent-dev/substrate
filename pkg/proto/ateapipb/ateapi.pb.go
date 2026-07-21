@@ -446,8 +446,13 @@ type Actor struct {
 	// suspend/pause since eligibility is no longer a single fixed pool
 	// reference on the ActorTemplate.
 	WorkerPoolName string `protobuf:"bytes,12,opt,name=worker_pool_name,json=workerPoolName,proto3" json:"worker_pool_name,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// required_worker_pool_name is an optional strict placement constraint.
+	// When set, the scheduler only considers workers owned by this WorkerPool.
+	// If no worker in that pool is free, ResumeActor fails instead of falling
+	// back to another eligible pool. Set at CreateActor.
+	RequiredWorkerPoolName string `protobuf:"bytes,13,opt,name=required_worker_pool_name,json=requiredWorkerPoolName,proto3" json:"required_worker_pool_name,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -560,6 +565,13 @@ func (x *Actor) GetWorkerSelector() *Selector {
 func (x *Actor) GetWorkerPoolName() string {
 	if x != nil {
 		return x.WorkerPoolName
+	}
+	return ""
+}
+
+func (x *Actor) GetRequiredWorkerPoolName() string {
+	if x != nil {
+		return x.RequiredWorkerPoolName
 	}
 	return ""
 }
@@ -2221,7 +2233,7 @@ const file_ateapi_proto_rawDesc = "" +
 	"\vcreate_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12;\n" +
 	"\vupdate_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"updateTime\"\x84\x06\n" +
+	"updateTime\"\xbf\x06\n" +
 	"\x05Actor\x124\n" +
 	"\bmetadata\x18\x01 \x01(\v2\x18.ateapi.ResourceMetadataR\bmetadata\x128\n" +
 	"\x18actor_template_namespace\x18\x02 \x01(\tR\x16actorTemplateNamespace\x12.\n" +
@@ -2236,7 +2248,8 @@ const file_ateapi_proto_rawDesc = "" +
 	"\x14latest_snapshot_info\x18\n" +
 	" \x01(\v2\x14.ateapi.SnapshotInfoR\x12latestSnapshotInfo\x129\n" +
 	"\x0fworker_selector\x18\v \x01(\v2\x10.ateapi.SelectorR\x0eworkerSelector\x12(\n" +
-	"\x10worker_pool_name\x18\f \x01(\tR\x0eworkerPoolName\"\xb1\x01\n" +
+	"\x10worker_pool_name\x18\f \x01(\tR\x0eworkerPoolName\x129\n" +
+	"\x19required_worker_pool_name\x18\r \x01(\tR\x16requiredWorkerPoolName\"\xb1\x01\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSTATUS_RESUMING\x10\x01\x12\x12\n" +
