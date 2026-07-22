@@ -14,7 +14,15 @@
 
 package ateclient
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/agent-substrate/substrate/internal/installdefaults"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+)
 
 func TestIsJWTAuthModeArg(t *testing.T) {
 	tests := []struct {
@@ -36,5 +44,40 @@ func TestIsJWTAuthModeArg(t *testing.T) {
 				t.Fatalf("isJWTAuthModeArg(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsJWTModeFromServiceUsesBackingPod(t *testing.T) {
+	clientset := fake.NewSimpleClientset(
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: installdefaults.SystemNamespace,
+				Name:      installdefaults.APIServiceName,
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "ate-api-server"},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: installdefaults.SystemNamespace,
+				Name:      "ate-api-server-deployment-abc123",
+				Labels:    map[string]string{"app": "ate-api-server"},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: "ate-api-server",
+					Args: []string{"--auth-mode=jwt"},
+				}},
+			},
+		},
+	)
+
+	got, err := isJWTModeFromService(context.Background(), clientset)
+	if err != nil {
+		t.Fatalf("isJWTModeFromService() error = %v", err)
+	}
+	if !got {
+		t.Fatalf("isJWTModeFromService() = false, want true")
 	}
 }
