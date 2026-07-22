@@ -214,7 +214,12 @@ func dialPortForward(ctx context.Context, kubeconfigPath, k8sContext string, tra
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithTransportCredentials(transportCreds))
 	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
-	jwtOpts, err := jwtDialOptions(ctx, clientset)
+	jwtMode, err := isJWTModeFromService(ctx, clientset)
+	if err != nil {
+		close(stopCh)
+		return nil, err
+	}
+	jwtOpts, err := jwtDialOptions(ctx, clientset, jwtMode)
 	if err != nil {
 		close(stopCh)
 		return nil, err
@@ -242,11 +247,7 @@ func dialPortForward(ctx context.Context, kubeconfigPath, k8sContext string, tra
 	}, nil
 }
 
-func jwtDialOptions(ctx context.Context, clientset *kubernetes.Clientset) ([]grpc.DialOption, error) {
-	jwtMode, err := isJWTMode(ctx, clientset)
-	if err != nil {
-		return nil, err
-	}
+func jwtDialOptions(ctx context.Context, clientset kubernetes.Interface, jwtMode bool) ([]grpc.DialOption, error) {
 	if !jwtMode {
 		return nil, nil
 	}
@@ -268,20 +269,30 @@ func jwtDialOptions(ctx context.Context, clientset *kubernetes.Clientset) ([]grp
 	return []grpc.DialOption{grpc.WithPerRPCCredentials(bearerTokenCreds(token.Status.Token))}, nil
 }
 
-func isJWTMode(ctx context.Context, clientset *kubernetes.Clientset) (bool, error) {
-	// TODO: Replace deployment introspection with an explicit client-readable
-	// config file once ateapi auth mode is part of install/runtime config.
-	deployment, err := clientset.AppsV1().Deployments(installdefaults.SystemNamespace).Get(ctx, "ate-api-server", metav1.GetOptions{})
+func isJWTModeFromService(ctx context.Context, clientset kubernetes.Interface) (bool, error) {
+	// TODO: Replace pod introspection with an explicit client-readable config
+	// once ateapi auth mode is part of install/runtime config.
+	svc, err := clientset.CoreV1().Services(installdefaults.SystemNamespace).Get(ctx, installdefaults.APIServiceName, metav1.GetOptions{})
 	if err != nil {
-		return false, fmt.Errorf("failed to get ate-api-server deployment: %w", err)
+		return false, fmt.Errorf("failed to get ateapi service %s/%s: %w", installdefaults.SystemNamespace, installdefaults.APIServiceName, err)
 	}
-	for _, container := range deployment.Spec.Template.Spec.Containers {
+	selector := labels.SelectorFromSet(svc.Spec.Selector).String()
+	pods, err := clientset.CoreV1().Pods(installdefaults.SystemNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to list ateapi pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return false, fmt.Errorf("no ate-api-server pods found in %q namespace", installdefaults.SystemNamespace)
+	}
+	for _, container := range pods.Items[0].Spec.Containers {
 		if container.Name != "ate-api-server" {
 			continue
 		}
 		return isJWTAuthModeArg(container.Args), nil
 	}
-	return false, fmt.Errorf("failed to find ate-api-server container in deployment")
+	return false, fmt.Errorf("failed to find ate-api-server container in pod %s/%s", pods.Items[0].Namespace, pods.Items[0].Name)
 }
 
 func isJWTAuthModeArg(args []string) bool {
