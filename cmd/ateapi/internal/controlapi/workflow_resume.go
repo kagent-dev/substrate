@@ -170,6 +170,10 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 	}
 
 	var assignedWorker *ateapipb.Worker
+	requiredWorkerPool := state.Actor.GetRequiredWorkerPoolName()
+	if requiredWorkerPool == "" {
+		requiredWorkerPool = state.ActorTemplate.Spec.RequiredWorkerPoolName
+	}
 
 	// Check if we already have a worker assigned from a previous failed attempt.
 	// This can happen if ateapi crashed after updating worker with actor assignment,
@@ -181,7 +185,7 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 		if worker.Assignment.Actor.Atespace != input.Atespace || worker.Assignment.Actor.Name != input.ActorName {
 			continue
 		}
-		eligible, err := isWorkerEligibleForActor(worker, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector(), state.Actor.GetRequiredWorkerPoolName())
+		eligible, err := isWorkerEligibleForActor(worker, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector(), requiredWorkerPool)
 		if err != nil {
 			return fmt.Errorf("while checking worker eligibility: %w", err)
 		}
@@ -208,7 +212,7 @@ func (s *AssignWorkerStep) Execute(ctx context.Context, input *ResumeInput, stat
 		}(releaseWorker)
 	}
 	if assignedWorker == nil {
-		pickedWorker, err := s.findFreeWorker(workers, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector(), state.Actor.GetRequiredWorkerPoolName(), state.Actor.GetLatestSnapshotInfo().GetLocal().GetNodeVmsWithLocalSnapshots())
+		pickedWorker, err := s.findFreeWorker(workers, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector(), requiredWorkerPool, state.Actor.GetLatestSnapshotInfo().GetLocal().GetNodeVmsWithLocalSnapshots())
 		if err != nil {
 			return err
 		}

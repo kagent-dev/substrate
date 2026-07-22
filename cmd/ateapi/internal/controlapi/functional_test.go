@@ -1374,6 +1374,63 @@ func TestCreateActor_DefaultsRequiredWorkerPoolFromTemplate(t *testing.T) {
 	}
 }
 
+func TestResumeActor_LegacyActorUsesTemplateRequiredWorkerPool(t *testing.T) {
+	ns := namespaceForTest("ns-legacy-template-required-pool")
+	tc := setupTest(t, ns)
+	defer tc.cleanup()
+
+	createWorkerPool(t, tc, ns, "pool-a", map[string]string{"group": ns})
+	createWorkerPool(t, tc, ns, "pool-b", map[string]string{"group": ns})
+
+	actorTemplate := &atev1alpha1.ActorTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tmpl-required-pool",
+			Namespace: ns,
+		},
+		Spec: atev1alpha1.ActorTemplateSpec{
+			PauseImage: "pause@sha256:abc",
+			SnapshotsConfig: atev1alpha1.SnapshotsConfig{
+				Location: "gs://fake-fake-fake",
+			},
+			Containers: []atev1alpha1.Container{
+				{Name: "main", Image: "main@sha256:abc", Command: []string{"/main"}},
+			},
+			RequiredWorkerPoolName: "pool-a",
+		},
+	}
+	if _, err := tc.substrateClient.ApiV1alpha1().ActorTemplates(ns).Create(context.Background(), actorTemplate, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create actor template: %v", err)
+	}
+
+	createWorkerPod(t, tc, ns, "worker-b", "node1", "pool-b")
+
+	_, err := tc.persistence.CreateActor(context.Background(), &ateapipb.Actor{
+		Metadata: &ateapipb.ResourceMetadata{
+			Atespace: testAtespace,
+			Name:     "legacy-id1",
+		},
+		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
+		ActorTemplateNamespace: ns,
+		ActorTemplateName:      "tmpl-required-pool",
+	})
+	if err != nil {
+		t.Fatalf("CreateActor in persistence failed: %v", err)
+	}
+
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{
+		Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: "legacy-id1"},
+	})
+	assertGrpcError(t, err, codes.FailedPrecondition, "no free workers available")
+
+	getResp, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: "legacy-id1"}})
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+	if got := getResp.GetWorkerPoolName(); got != "" {
+		t.Errorf("expected actor to remain unassigned, got worker_pool_name=%q", got)
+	}
+}
+
 func TestResumeActor_RequiredWorkerPoolDoesNotFallback(t *testing.T) {
 	ns := namespaceForTest("ns-required-pool-no-fallback")
 	tc := setupTest(t, ns)
