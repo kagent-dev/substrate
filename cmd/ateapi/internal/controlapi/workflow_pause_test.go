@@ -99,7 +99,7 @@ func TestFindFreeWorker_EmptyNodeRestriction(t *testing.T) {
 	s := &AssignWorkerStep{}
 
 	// Old behavior: []string{""}, no worker has NodeName == "", returns nil.
-	got, err := s.findFreeWorker(workers, "", nil, nil, []string{""})
+	got, err := s.findFreeWorker(workers, "", nil, nil, "", []string{""})
 	if err != nil {
 		t.Fatalf("findFreeWorker: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestFindFreeWorker_EmptyNodeRestriction(t *testing.T) {
 	}
 
 	// Fixed behavior: nil restrictions, any free worker matches.
-	got, err = s.findFreeWorker(workers, "", nil, nil, nil)
+	got, err = s.findFreeWorker(workers, "", nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("findFreeWorker: %v", err)
 	}

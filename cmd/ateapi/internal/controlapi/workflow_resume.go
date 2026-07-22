@@ -332,7 +332,11 @@ func (s *CallAteletRestoreStep) CheckPrerequisite(ctx context.Context, input *Re
 		}
 		return status.Errorf(codes.Aborted, "actor %s crashed", input.ActorName)
 	}
-	eligible, err := isWorkerEligibleForActor(state.Worker, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector())
+	requiredWorkerPool := state.Actor.GetRequiredWorkerPoolName()
+	if requiredWorkerPool == "" {
+		requiredWorkerPool = state.ActorTemplate.Spec.RequiredWorkerPoolName
+	}
+	eligible, err := isWorkerEligibleForActor(state.Worker, state.ActorTemplate.Spec.SandboxClass, state.ActorTemplate.Spec.WorkerSelector, state.Actor.GetWorkerSelector(), requiredWorkerPool)
 	if err != nil {
 		return fmt.Errorf("while calling isWorkerEligbleForActor :%w", err)
 	}
