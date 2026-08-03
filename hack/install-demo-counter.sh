@@ -55,6 +55,8 @@ demo-counter_deploy() {
       demos/counter/counter.yaml.tmpl \
     | run_ko apply -f -
 
+  KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}" hack/copy-token-mode-credentials.sh ate-demo-counter
+
   # Wait for the demo to be fully ready before returning. On a cold cluster the
   # first ActorTemplate golden snapshot pays one-time costs (downloading the
   # gVisor runsc binary, first gVisor pod start, image pulls). Blocking here

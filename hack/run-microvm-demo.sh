@@ -123,6 +123,7 @@ log "Applying the counter-microvm demo manifest..."
 sed -e "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" \
     demos/counter/counter-microvm.yaml.tmpl \
   | ./hack/run-tool.sh ko apply -f - ${KUBECTL_CONTEXT:+-- --context="${KUBECTL_CONTEXT}"}
+KUBECTL_CONTEXT="${KUBECTL_CONTEXT}" hack/copy-token-mode-credentials.sh ate-demo-counter-microvm
 
 # --- 4. next steps ----------------------------------------------------------
 KCTX_FLAG=""

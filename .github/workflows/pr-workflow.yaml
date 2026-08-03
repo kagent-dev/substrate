@@ -87,6 +87,8 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
     - name: Create cluster
+      env:
+        KIND_ENABLE_PODCERT: ${{ matrix.ateapi-client-auth == 'cert' }}
       run: hack/create-kind-cluster.sh
     - name: Install Agent Substrate
       run: hack/install-ate-kind.sh --deploy-ate-system --ateapi-client-auth=${{ matrix.ateapi-client-auth }}

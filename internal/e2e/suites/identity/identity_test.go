@@ -124,6 +124,7 @@ func deployProbe(t *testing.T, bucket string) {
 		applyArgs = append(applyArgs, "--", "--context="+e2e.KubeContext)
 	}
 	e2e.RunCmdWithEnv(t, []string{"KO_CONFIG_PATH=" + root}, filepath.Join(root, "hack/run-tool.sh"), applyArgs...)
+	e2e.CopyTokenModeCredentials(t, probeNamespace)
 
 	t.Cleanup(func() {
 		// Deletion needs no image build, so go straight to kubectl (matching

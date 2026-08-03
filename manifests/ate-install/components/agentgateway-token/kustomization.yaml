@@ -12,17 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - ../kind-token-client
-
-components:
-  - ../components/agentgateway
-  - ../components/agentgateway-token
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
 
 patches:
+  - path: configmap.yaml
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -34,6 +28,10 @@ patches:
           spec:
             containers:
             - name: agentgateway
-              env:
-              - name: AGENTGATEWAY_OTLP_ADDRESS
-                value: opentelemetry-collector.otel-system.svc:4317
+              volumeMounts:
+              - name: podidentity
+                mountPath: /run/podidentity.podcert.ate.dev
+                $patch: delete
+              - name: servicedns-ca
+                mountPath: /run/servicedns-ca
+                readOnly: true

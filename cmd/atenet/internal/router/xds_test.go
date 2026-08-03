@@ -160,6 +160,34 @@ func TestXdsServer_UpdateSnapshot(t *testing.T) {
 	}
 }
 
+func TestXdsServer_OrdinaryUpstreamTLS(t *testing.T) {
+	x := NewXdsServer(0)
+	x.SetUpstreamTls("", "/run/token-mode-ca/ca.crt", "", "internal.ate-system.svc")
+	socket := x.buildUpstreamTransportSocket()
+	if socket == nil {
+		t.Fatal("ordinary TLS produced no transport socket")
+	}
+	var cfg tlsv3.UpstreamTlsContext
+	if err := socket.GetTypedConfig().UnmarshalTo(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GetSni() != "internal.ate-system.svc" {
+		t.Errorf("SNI = %q", cfg.GetSni())
+	}
+	common := cfg.GetCommonTlsContext()
+	if len(common.GetTlsCertificates()) != 0 {
+		t.Fatal("ordinary TLS unexpectedly presents a client certificate")
+	}
+	validation := common.GetValidationContext()
+	if got := validation.GetTrustedCa().GetFilename(); got != "/run/token-mode-ca/ca.crt" {
+		t.Errorf("trusted CA = %q", got)
+	}
+	matchers := validation.GetMatchTypedSubjectAltNames()
+	if len(matchers) != 1 || matchers[0].GetSanType() != tlsv3.SubjectAltNameMatcher_DNS || matchers[0].GetMatcher().GetExact() != "internal.ate-system.svc" {
+		t.Fatalf("DNS SAN matchers = %+v", matchers)
+	}
+}
+
 func TestXdsServer_UpdateSnapshot_WithHttps(t *testing.T) {
 	const certPath = "/run/servicedns.podcert.ate.dev/credential-bundle.pem"
 

@@ -148,6 +148,7 @@ type XdsServer struct {
 	// cert carries only a spiffe:// URI SAN, so without this Envoy's default
 	// SAN check against the dialed IP fails ("verify SAN list").
 	upstreamSpiffePrefix string
+	upstreamServerName   string
 
 	otlpHost string
 	otlpPort uint32
@@ -271,12 +272,13 @@ const otlpDefaultPort = "4317"
 // (cert+key concatenated) presented to the actor's atunnel ingress server;
 // trustBundlePath is the CA bundle used to validate that server. Empty
 // credentialBundlePath leaves the upstream as plaintext.
-func (x *XdsServer) SetUpstreamTls(credentialBundlePath, trustBundlePath, spiffePrefix string) {
+func (x *XdsServer) SetUpstreamTls(credentialBundlePath, trustBundlePath, spiffePrefix, serverName string) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.upstreamCredentialBundlePath = credentialBundlePath
 	x.upstreamTrustBundlePath = trustBundlePath
 	x.upstreamSpiffePrefix = spiffePrefix
+	x.upstreamServerName = serverName
 }
 
 // SetOtlpCollector enables Envoy-side tracing pointed at the OTLP gRPC
@@ -569,12 +571,13 @@ func (x *XdsServer) buildOtlpCollectorCluster() *clusterv3.Cluster {
 // bundle. Validation is by the SPIFFE URI SAN prefix (see upstreamSpiffePrefix)
 // rather than the dialed pod IP.
 func (x *XdsServer) buildUpstreamTransportSocket() *corev3.TransportSocket {
-	if x.upstreamCredentialBundlePath == "" {
+	if x.upstreamTrustBundlePath == "" {
 		return nil
 	}
 
-	commonTls := &tlsv3.CommonTlsContext{
-		TlsCertificates: []*tlsv3.TlsCertificate{
+	commonTls := &tlsv3.CommonTlsContext{}
+	if x.upstreamCredentialBundlePath != "" {
+		commonTls.TlsCertificates = []*tlsv3.TlsCertificate{
 			{
 				CertificateChain: &corev3.DataSource{
 					Specifier: &corev3.DataSource_Filename{Filename: x.upstreamCredentialBundlePath},
@@ -583,7 +586,7 @@ func (x *XdsServer) buildUpstreamTransportSocket() *corev3.TransportSocket {
 					Specifier: &corev3.DataSource_Filename{Filename: x.upstreamCredentialBundlePath},
 				},
 			},
-		},
+		}
 	}
 	if x.upstreamTrustBundlePath != "" {
 		validationCtx := &tlsv3.CertificateValidationContext{
@@ -595,7 +598,12 @@ func (x *XdsServer) buildUpstreamTransportSocket() *corev3.TransportSocket {
 		// prefix) rather than the dialed pod IP. Without this, Envoy checks the
 		// cert SAN against the ephemeral pod IP, which the SPIFFE-only cert
 		// never matches.
-		if x.upstreamSpiffePrefix != "" {
+		if x.upstreamServerName != "" {
+			validationCtx.MatchTypedSubjectAltNames = []*tlsv3.SubjectAltNameMatcher{{
+				SanType: tlsv3.SubjectAltNameMatcher_DNS,
+				Matcher: &matcherv3.StringMatcher{MatchPattern: &matcherv3.StringMatcher_Exact{Exact: x.upstreamServerName}},
+			}}
+		} else if x.upstreamSpiffePrefix != "" {
 			validationCtx.MatchTypedSubjectAltNames = []*tlsv3.SubjectAltNameMatcher{
 				{
 					SanType: tlsv3.SubjectAltNameMatcher_URI,
@@ -610,7 +618,7 @@ func (x *XdsServer) buildUpstreamTransportSocket() *corev3.TransportSocket {
 		}
 	}
 
-	upstreamTls := &tlsv3.UpstreamTlsContext{CommonTlsContext: commonTls}
+	upstreamTls := &tlsv3.UpstreamTlsContext{CommonTlsContext: commonTls, Sni: x.upstreamServerName}
 	upstreamTlsAny, _ := anypb.New(upstreamTls)
 	return &corev3.TransportSocket{
 		Name: "envoy.transport_sockets.tls",

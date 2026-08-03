@@ -204,7 +204,15 @@ func serverTLSConfig(ctx context.Context, clientset kubernetes.Interface) (*tls.
 		LabelSelector: liveBundleSelector,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list ClusterTrustBundles: %w", err)
+		configMap, configMapErr := clientset.CoreV1().ConfigMaps("ate-system").Get(ctx, "token-mode-ca", metav1.GetOptions{})
+		if configMapErr != nil {
+			return nil, fmt.Errorf("failed to list ClusterTrustBundles: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(configMap.Data["ca.crt"])) {
+			return nil, fmt.Errorf("ConfigMap ate-system/token-mode-ca contains no valid certificates")
+		}
+		return &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool, ServerName: apiServerName}, nil
 	}
 
 	pool := x509.NewCertPool()

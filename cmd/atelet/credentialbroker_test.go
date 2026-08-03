@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -80,6 +81,36 @@ func TestVerifyClientOnSameNode(t *testing.T) {
 	}
 	if err := verifyClientOnSameNode(&substratex509.PodIdentity{NodeName: "node-a", NodeUID: "replacement-node"})(state); err == nil {
 		t.Fatal("replacement node accepted")
+	}
+}
+
+func TestValidateBrokerTokenClaims(t *testing.T) {
+	valid := &k8sjwt.KubernetesClaims{
+		Subject:            "system:serviceaccount:workers:default",
+		Namespace:          "workers",
+		ServiceAccountName: "default",
+		ServiceAccountUID:  "sa-uid",
+		PodUID:             "pod-uid",
+		NodeName:           "node-a",
+		NodeUID:            "node-uid",
+	}
+	if err := validateBrokerTokenClaims(valid, "node-a", "node-uid"); err != nil {
+		t.Fatalf("valid claims rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*k8sjwt.KubernetesClaims){
+		"unbound pod":     func(c *k8sjwt.KubernetesClaims) { c.PodUID = "" },
+		"unbound node":    func(c *k8sjwt.KubernetesClaims) { c.NodeUID = "" },
+		"wrong node":      func(c *k8sjwt.KubernetesClaims) { c.NodeUID = "other-node" },
+		"wrong subject":   func(c *k8sjwt.KubernetesClaims) { c.Subject = "system:serviceaccount:workers:other" },
+		"unbound account": func(c *k8sjwt.KubernetesClaims) { c.ServiceAccountUID = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			claims := *valid
+			mutate(&claims)
+			if err := validateBrokerTokenClaims(&claims, "node-a", "node-uid"); err == nil {
+				t.Fatal("invalid claims accepted")
+			}
+		})
 	}
 }
 

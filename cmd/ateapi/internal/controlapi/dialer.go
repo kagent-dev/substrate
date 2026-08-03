@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/agent-substrate/substrate/internal/credbundle"
@@ -63,19 +64,34 @@ type AteletDialer struct {
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
 // are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath string) *AteletDialer {
+func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath, serverName string) *AteletDialer {
 	return &AteletDialer{
 		workerIndexer: workerIndexer,
 		ateletIndexer: ateletIndexer,
 		ateletConns:   lru.New(1024),
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
-			if err != nil {
-				return nil, err
-			}
-			return credentials.NewTLS(tlsConfig), nil
+			return ateletTransportCredentials(clientBundlePath, serverCAPath, serverName, expectedPodUID)
 		},
 	}
+}
+
+func ateletTransportCredentials(clientBundlePath, serverCAPath, serverName, expectedPodUID string) (credentials.TransportCredentials, error) {
+	if serverName == "" {
+		tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
+		if err != nil {
+			return nil, err
+		}
+		return credentials.NewTLS(tlsConfig), nil
+	}
+	ca, err := os.ReadFile(serverCAPath)
+	if err != nil {
+		return nil, fmt.Errorf("while reading atelet CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(ca) {
+		return nil, fmt.Errorf("atelet CA %q contains no certificates", serverCAPath)
+	}
+	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS13, RootCAs: pool, ServerName: serverName}), nil
 }
 
 // DialForWorker returns a gRPC connection to the Atelet running on the same node as the specified worker pod.

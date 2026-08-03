@@ -26,7 +26,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 // NamespaceLabel marks the namespaces the suites create, so leftovers from a
@@ -116,8 +118,47 @@ func CreateNamespace(t *testing.T) *Namespace {
 			// Keep polling.
 		}
 	}
+	CopyTokenModeCredentials(t, nsName)
 
 	return &Namespace{Name: nsName}
+}
+
+// CopyTokenModeCredentials copies the fallback TLS credentials into a worker namespace.
+// It is a no-op when the cluster is not using token mode.
+func CopyTokenModeCredentials(t *testing.T, namespace string) {
+	t.Helper()
+	copyTokenModeCredentials(t, GetClients().K8s.CoreV1(), namespace)
+}
+
+func copyTokenModeCredentials(t *testing.T, core corev1client.CoreV1Interface, namespace string) {
+	t.Helper()
+	ctx := t.Context()
+	secret, err := core.Secrets("ate-system").Get(ctx, "token-mode-tls", metav1.GetOptions{})
+	if k8errors.IsNotFound(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("Failed to read token-mode TLS Secret: %v", err)
+	}
+	if _, err := core.Secrets(namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secret.Name},
+		Type:       secret.Type,
+		Data:       secret.Data,
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to copy token-mode TLS Secret into namespace %s: %v", namespace, err)
+	}
+
+	configMap, err := core.ConfigMaps("ate-system").Get(ctx, "token-mode-ca", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to read token-mode CA ConfigMap: %v", err)
+	}
+	if _, err := core.ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: configMap.Name},
+		Data:       configMap.Data,
+		BinaryData: configMap.BinaryData,
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to copy token-mode CA ConfigMap into namespace %s: %v", namespace, err)
+	}
 }
 
 // Delete the namespace explicitly. This will fail the test if deletion fails.

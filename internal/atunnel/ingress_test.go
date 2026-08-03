@@ -95,6 +95,76 @@ func TestServeHTTP(t *testing.T) {
 	}
 }
 
+func TestServeHTTPTokenAuthentication(t *testing.T) {
+	upstream, err := url.Parse("http://actor.internal:80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, upstream)
+	s.tokenVerifier = func(_ context.Context, token string) error {
+		if token != "valid" {
+			return context.Canceled
+		}
+		return nil
+	}
+	s.proxy.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get(RouterAuthorizationHeader); got != "" {
+			t.Errorf("upstream %s = %q, want stripped", RouterAuthorizationHeader, got)
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody}, nil
+	})
+	if err := s.Activate("team-a", "actor-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name, authorization string
+		wantStatus          int
+	}{
+		{"valid", "Bearer valid", http.StatusNoContent},
+		{"missing", "", http.StatusUnauthorized},
+		{"invalid", "Bearer invalid", http.StatusUnauthorized},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "https://worker/", nil)
+			req.Host = "actor-1.team-a.actors.resources.substrate.ate.dev"
+			req.Header.Set(RouterAuthorizationHeader, tt.authorization)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestTokenAuthenticationConfiguredByNewServer(t *testing.T) {
+	dir := t.TempDir()
+	bundle, caFile := makeCertFiles(t, dir)
+	upstream, err := url.Parse("http://actor.internal:80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(Config{
+		ClientAuthMode:       ClientAuthModeToken,
+		CredentialBundlePath: bundle,
+		TokenAuth: TokenAuthConfig{
+			Issuer:             "https://kubernetes.default.svc",
+			Audience:           "atunnel.ate-system.svc",
+			Subject:            "system:serviceaccount:ate-system:atenet-router",
+			CAFile:             caFile,
+			DiscoveryTokenFile: filepath.Join(dir, "token"),
+		},
+		Upstream: upstream,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.tokenVerifier == nil {
+		t.Fatal("token verifier was not configured")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

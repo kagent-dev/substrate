@@ -22,14 +22,40 @@ spec:
     spec:
       containers:
       - name: ate-controller
+        args:
+        - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
+        - --ateapi-use-token-auth=true
+        - --ateapi-token-file=/run/ateapi-token/token
+        - --ateapi-server-name=api.ate-system.svc
+        - --atunnel-credential-secret=token-mode-tls
+        - --atunnel-auth-mode=token
+        - --atunnel-trust-configmap=token-mode-ca
+        - --atunnel-token-issuer=$(ATE_JWT_ISSUER)
+        - --atunnel-token-audience=atunnel.ate-system.svc
+        - --atunnel-token-subject=system:serviceaccount:ate-system:atenet-router
+        env:
+        - name: ATE_JWT_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: ate-api-server-envvars
+              key: ATE_API_K8SJWT_ISSUER
         volumeMounts:
-        - name: ateapi-token
-          mountPath: /run/ateapi-token
-          readOnly: true
+        - name: podidentity
+          $patch: delete
         - name: servicedns-ca
           mountPath: /run/servicedns-ca
           readOnly: true
+        - name: ateapi-token
+          mountPath: /run/ateapi-token
+          readOnly: true
       volumes:
+      - $patch: replace
+      - name: servicedns-ca
+        configMap:
+          name: token-mode-ca
+          items:
+          - key: ca.crt
+            path: trust-bundle.pem
       - name: ateapi-token
         projected:
           sources:
@@ -37,15 +63,129 @@ spec:
               audience: api.ate-system.svc
               expirationSeconds: 3600
               path: token
-      - name: servicedns-ca
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ate-api-server
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: ate-api-server
+        args:
+        - --grpc-listen-addr=0.0.0.0:443
+        - --grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem
+        - --redis-cluster-address=@env
+        - --redis-no-tls=true
+        - --redis-use-iam-auth=@env
+        - --client-jwt-issuer=@env
+        - --client-jwt-audience=api.ate-system.svc
+        - --actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json
+        - --actor-id-ca-pool=/run/actor-id-ca-pool/pool.json
+        - --atelet-server-name=internal.ate-system.svc
+        - --atelet-client-cred-bundle=
+        - --pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
+        - --drain-delay=13s
+        - --drain-timeout=15s
+        volumeMounts:
+        - name: servicedns
+          mountPath: /run/servicedns.podcert.ate.dev
+        - name: podidentity
+          mountPath: /run/podidentity.podcert.ate.dev
+        - name: actor-id-jwt-pool
+          mountPath: /run/actor-id-jwt-pool
+        - name: actor-id-ca-pool
+          mountPath: /run/actor-id-ca-pool
+          readOnly: true
+        - name: valkey-ca-certs
+          $patch: delete
+      volumes:
+      - $patch: replace
+      - name: servicedns
+        secret:
+          secretName: token-mode-tls
+      - name: podidentity
+        configMap:
+          name: token-mode-ca
+          items:
+          - key: ca.crt
+            path: trust-bundle.pem
+      - name: actor-id-jwt-pool
         projected:
           sources:
-          - clusterTrustBundle:
-              signerName: servicedns.podcert.ate.dev/identity
-              labelSelector:
-                matchLabels:
-                  podcert.ate.dev/canarying: live
-              path: trust-bundle.pem
+          - secret:
+              name: actor-id-jwt-pool
+              items:
+              - key: pool
+                path: pool.json
+      - name: actor-id-ca-pool
+        projected:
+          sources:
+          - secret:
+              name: actor-id-ca-pool
+              items:
+              - key: pool
+                path: pool.json
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: atelet
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: atelet
+        args:
+        - --gcp-auth-for-image-pulls=true
+        - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
+        - --client-ca-certs=
+        - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
+        - --ateapi-use-token-auth=true
+        - --ateapi-token-file=/run/ateapi-token/token
+        - --credential-broker-token-issuer=$(ATE_JWT_ISSUER)
+        - --credential-broker-token-audience=atelet.ate-system.svc
+        env:
+        - name: ATE_JWT_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: ate-api-server-envvars
+              key: ATE_API_K8SJWT_ISSUER
+        volumeMounts:
+        - name: servicedns-ca
+          mountPath: /run/servicedns.podcert.ate.dev
+          $patch: delete
+        - name: servicedns-ca
+          mountPath: /run/servicedns-ca
+          readOnly: true
+        - name: ateapi-token
+          mountPath: /run/ateapi-token
+          readOnly: true
+      volumes:
+      - $patch: replace
+      - name: podidentity
+        secret:
+          secretName: token-mode-tls
+      - name: servicedns-ca
+        configMap:
+          name: token-mode-ca
+          items:
+          - key: ca.crt
+            path: trust-bundle.pem
+      - name: ateapi-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              audience: api.ate-system.svc
+              expirationSeconds: 3600
+              path: token
+      - name: run-ateom
+        hostPath:
+          path: /var/lib/ateom-gvisor
+          type: DirectoryOrCreate
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -57,14 +197,64 @@ spec:
     spec:
       containers:
       - name: atenet-router
+        args:
+        - router
+        - --standalone
+        - --namespace=ate-system
+        - --port-http=8080
+        - --port-xds=18000
+        - --port-extproc=50051
+        - --extproc-address=127.0.0.1
+        - --status-port=4040
+        - --port-https=8443
+        - --envoy-cert-path=/run/servicedns.podcert.ate.dev/credential-bundle.pem
+        - --ateapi-address=dns:///api.ate-system.svc:443
+        - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
+        - --ateapi-use-token-auth=true
+        - --ateapi-token-file=/run/ateapi-token/token
+        - --ateapi-server-name=api.ate-system.svc
+        - --upstream-credential-bundle=
+        - --upstream-trust-bundle=/run/servicedns-ca/trust-bundle.pem
+        - --upstream-spiffe-prefix=
+        - --upstream-server-name=internal.ate-system.svc
+        - --upstream-token-file=/run/atunnel-token/token
         volumeMounts:
-        - name: ateapi-token
-          mountPath: /run/ateapi-token
-          readOnly: true
         - name: servicedns-ca
           mountPath: /run/servicedns-ca
           readOnly: true
+        - name: ateapi-token
+          mountPath: /run/ateapi-token
+          readOnly: true
+        - name: atunnel-token
+          mountPath: /run/atunnel-token
+          readOnly: true
+        - name: podidentity
+          $patch: delete
+      - name: envoy
+        volumeMounts:
+        - name: envoy-config
+          mountPath: /etc/envoy
+        - name: servicedns
+          mountPath: /run/servicedns.podcert.ate.dev
+        - name: servicedns-ca
+          mountPath: /run/servicedns-ca
+          readOnly: true
+        - name: podidentity
+          $patch: delete
       volumes:
+      - $patch: replace
+      - name: envoy-config
+        configMap:
+          name: atenet-router-envoy-config
+      - name: servicedns
+        secret:
+          secretName: token-mode-tls
+      - name: servicedns-ca
+        configMap:
+          name: token-mode-ca
+          items:
+          - key: ca.crt
+            path: trust-bundle.pem
       - name: ateapi-token
         projected:
           sources:
@@ -72,12 +262,105 @@ spec:
               audience: api.ate-system.svc
               expirationSeconds: 3600
               path: token
-      - name: servicedns-ca
+      - name: atunnel-token
         projected:
           sources:
-          - clusterTrustBundle:
-              signerName: servicedns.podcert.ate.dev/identity
-              labelSelector:
-                matchLabels:
-                  podcert.ate.dev/canarying: live
-              path: trust-bundle.pem
+          - serviceAccountToken:
+              audience: atunnel.ate-system.svc
+              expirationSeconds: 3600
+              path: token
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-config
+  namespace: ate-system
+data:
+  valkey.conf: |
+    port 6379
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+    protected-mode no
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey-cluster
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: valkey
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          POD_DNS="${HOSTNAME}.valkey-cluster-service.ate-system.svc"
+          cp /etc/valkey/valkey.conf /tmp/valkey.conf
+          {
+            echo "cluster-announce-hostname ${POD_DNS}"
+            echo "cluster-announce-port 6379"
+            echo "cluster-announce-bus-port 16379"
+            echo "cluster-preferred-endpoint-type hostname"
+          } >> /tmp/valkey.conf
+          exec valkey-server /tmp/valkey.conf
+        volumeMounts:
+        - name: config
+          mountPath: /etc/valkey
+        - name: data
+          mountPath: /data
+        - name: servicedns
+          $patch: delete
+        - name: podidentity
+          $patch: delete
+        - name: valkey-ca-certs
+          $patch: delete
+      volumes:
+      - name: servicedns
+        $patch: delete
+      - name: podidentity
+        $patch: delete
+      - name: valkey-ca-certs
+        $patch: delete
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: valkey-cluster-init
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: init
+        volumeMounts:
+        - name: podidentity
+          $patch: delete
+        - name: valkey-ca-certs
+          $patch: delete
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          for i in 0 1 2 3 4 5; do
+            until getent hosts valkey-cluster-${i}.valkey-cluster-service.ate-system.svc >/dev/null 2>&1; do sleep 2; done
+          done
+          VALKEY_NODES=""
+          for i in 0 1 2 3 4 5; do
+            VALKEY_NODES="${VALKEY_NODES} valkey-cluster-${i}.valkey-cluster-service.ate-system.svc:6379"
+          done
+          until valkey-cli -h valkey-cluster-0.valkey-cluster-service.ate-system.svc ping >/dev/null 2>&1; do sleep 2; done
+          INIT_STATUS=$(valkey-cli -h valkey-cluster-0.valkey-cluster-service.ate-system.svc cluster info 2>/dev/null | grep cluster_state || true)
+          if [ -z "${INIT_STATUS}" ] || ! echo "${INIT_STATUS}" | grep -q "cluster_state:ok"; then
+            valkey-cli --cluster create ${VALKEY_NODES} --cluster-replicas 1 --cluster-yes
+          fi
+      volumes:
+      - name: podidentity
+        $patch: delete
+      - name: valkey-ca-certs
+        $patch: delete

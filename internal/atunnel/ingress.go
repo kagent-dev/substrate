@@ -41,26 +41,45 @@ const (
 	StaleAssignmentHeader = "X-Ate-Assignment-Stale"
 	// OriginalHostHeader carries the actor authority across router dataplanes
 	// that must use :authority to select the worker as their dynamic backend.
-	// atunnel only accepts mTLS-authenticated router clients, and the router's
-	// ext_proc server overwrites this header before every request.
+	// The router's ext_proc server overwrites this header before every request.
 	OriginalHostHeader = "X-Ate-Original-Host"
+	// RouterAuthorizationHeader carries the router's Pod-bound token. Atunnel
+	// removes it before proxying so actor workloads never receive it.
+	RouterAuthorizationHeader = "X-Ate-Router-Authorization"
 )
 
 // Config configures an ingress Server.
 type Config struct {
+	ClientAuthMode       ClientAuthMode
 	CredentialBundlePath string
 	TrustBundlePath      string
 	AllowedClientID      string
+	TokenAuth            TokenAuthConfig
 	Upstream             *url.URL
 }
+
+type TokenAuthConfig struct {
+	Issuer             string
+	Audience           string
+	Subject            string
+	CAFile             string
+	DiscoveryTokenFile string
+}
+
+type ClientAuthMode string
+
+const (
+	ClientAuthModeMTLS  ClientAuthMode = "mtls"
+	ClientAuthModeToken ClientAuthMode = "token"
+)
 
 // Server is an activation-aware HTTPS reverse proxy. It is long-lived across
 // actor activations, but only routes requests for the actor currently assigned
 // to its worker.
 type Server struct {
-	credentialBundlePath string
-	tlsConfig            *tls.Config
-	proxy                *httputil.ReverseProxy
+	tlsConfig     *tls.Config
+	proxy         *httputil.ReverseProxy
+	tokenVerifier func(context.Context, string) error
 
 	mu     sync.Mutex
 	active *activation
@@ -78,12 +97,6 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.CredentialBundlePath == "" {
 		return nil, fmt.Errorf("atunnel: credential bundle path is required")
 	}
-	if cfg.TrustBundlePath == "" {
-		return nil, fmt.Errorf("atunnel: trust bundle path is required")
-	}
-	if cfg.AllowedClientID == "" {
-		return nil, fmt.Errorf("atunnel: allowed client identity is required")
-	}
 	if cfg.Upstream == nil || cfg.Upstream.Scheme == "" || cfg.Upstream.Host == "" {
 		return nil, fmt.Errorf("atunnel: upstream URL is required")
 	}
@@ -94,15 +107,6 @@ func NewServer(cfg Config) (*Server, error) {
 	if _, err := loadCredentialBundle(cfg.CredentialBundlePath); err != nil {
 		return nil, err
 	}
-	trustPEM, err := os.ReadFile(cfg.TrustBundlePath)
-	if err != nil {
-		return nil, fmt.Errorf("atunnel: reading trust bundle: %w", err)
-	}
-	clientCAs := x509.NewCertPool()
-	if !clientCAs.AppendCertsFromPEM(trustPEM) {
-		return nil, fmt.Errorf("atunnel: trust bundle %q contains no certificates", cfg.TrustBundlePath)
-	}
-
 	proxy := httputil.NewSingleHostReverseProxy(cfg.Upstream)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	proxy.Transport = transport
@@ -111,23 +115,43 @@ func NewServer(cfg Config) (*Server, error) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}
 
-	s := &Server{
-		credentialBundlePath: cfg.CredentialBundlePath,
-		proxy:                proxy,
-	}
-	s.tlsConfig = &tls.Config{
+	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-			return loadCredentialBundle(s.credentialBundlePath)
+			return loadCredentialBundle(cfg.CredentialBundlePath)
 		},
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		// TODO(liorlieberman): reload the trust bundle per connection via
-		// GetConfigForClient, mirroring GetCertificate above. kubelet keeps the
-		// projected ClusterTrustBundle in sync with the signer, but this pool is
-		// frozen at process start, so after a CA rotation a long-lived worker
-		// rejects the router until its pod restarts.
-		ClientCAs: clientCAs,
-		VerifyConnection: func(cs tls.ConnectionState) error {
+	}
+	tokenVerifier, err := configureClientAuthentication(cfg, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &Server{
+		tlsConfig:     tlsConfig,
+		proxy:         proxy,
+		tokenVerifier: tokenVerifier,
+	}, nil
+}
+
+func configureClientAuthentication(cfg Config, tlsConfig *tls.Config) (func(context.Context, string) error, error) {
+	switch cfg.ClientAuthMode {
+	case "", ClientAuthModeMTLS:
+		if cfg.TrustBundlePath == "" {
+			return nil, fmt.Errorf("atunnel: trust bundle path is required")
+		}
+		if cfg.AllowedClientID == "" {
+			return nil, fmt.Errorf("atunnel: allowed client identity is required")
+		}
+		trustPEM, err := os.ReadFile(cfg.TrustBundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("atunnel: reading trust bundle: %w", err)
+		}
+		clientCAs := x509.NewCertPool()
+		if !clientCAs.AppendCertsFromPEM(trustPEM) {
+			return nil, fmt.Errorf("atunnel: trust bundle %q contains no certificates", cfg.TrustBundlePath)
+		}
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = clientCAs
+		tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
 				return fmt.Errorf("atunnel: client certificate is required")
 			}
@@ -137,9 +161,13 @@ func NewServer(cfg Config) (*Server, error) {
 				}
 			}
 			return fmt.Errorf("atunnel: client is not %q", cfg.AllowedClientID)
-		},
+		}
+		return nil, nil
+	case ClientAuthModeToken:
+		return newKubernetesTokenVerifier(cfg.TokenAuth)
+	default:
+		return nil, fmt.Errorf("atunnel: unsupported client auth mode %q", cfg.ClientAuthMode)
 	}
-	return s, nil
 }
 
 func loadCredentialBundle(path string) (*tls.Certificate, error) {
@@ -234,6 +262,16 @@ func (s *Server) closeIdleUpstreamConnections() {
 
 // ServeHTTP validates the actor hostname on every request before proxying it.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.tokenVerifier != nil {
+		const prefix = "Bearer "
+		authorization := r.Header.Get(RouterAuthorizationHeader)
+		if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) ||
+			s.tokenVerifier(r.Context(), strings.TrimSpace(authorization[len(prefix):])) != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r.Header.Del(RouterAuthorizationHeader)
+	}
 	actorHost := r.Header.Get(OriginalHostHeader)
 	if actorHost == "" {
 		actorHost = r.Host

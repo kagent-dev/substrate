@@ -18,6 +18,7 @@ set -o errexit -o nounset -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kind}"
+KIND_ENABLE_PODCERT="${KIND_ENABLE_PODCERT:-true}"
 reg_name="kind-registry"
 reg_port="5001"
 
@@ -73,6 +74,7 @@ if [ "${HAS_KVM}" = "1" ]; then
     containerPath: /dev/kvm
 EOF
 fi
+if [ "${KIND_ENABLE_PODCERT}" = "true" ]; then
 cat <<EOF >> "${ROOT}/bin/kind-config.yaml"
 # cmd/podcertcontroller depends on ClusterTrustBundle & PodCertificateRequest.
 # They are not enabled by default as of Kubernetes v1.36
@@ -84,6 +86,7 @@ featureGates:
 runtimeConfig:
   "certificates.k8s.io/v1beta1": "true"
 EOF
+fi
 
 echo "Deleting existing kind cluster '${KIND_CLUSTER_NAME}' if it exists..."
 "${ROOT}"/hack/kind.sh delete cluster --name "${KIND_CLUSTER_NAME}" || true
