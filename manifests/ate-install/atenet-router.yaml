@@ -211,6 +211,11 @@ spec:
         # Trust bundle used to verify ateapi's servicedns serving cert.
         - name: "servicedns-ca"
           mountPath: "/run/servicedns-ca"
+        # Shared with the Envoy container: the router writes the
+        # drain-complete marker here at the end of its shutdown sequence,
+        # releasing Envoy's preStop poll.
+        - name: "drain-signal"
+          mountPath: "/var/run/atenet"
       - name: envoy
         image: envoyproxy/envoy:v1.30-latest
         command:
@@ -219,6 +224,14 @@ spec:
         - "/etc/envoy/envoy.yaml"
         - "--component-log-level"
         - "upstream:debug,router:debug,ext_proc:debug"
+        # Prevents Envoy from fast-exiting on SIGTERM before atenet-router finishes
+        # its drain sequence. Polls for the drain-complete marker written by the
+        # router on the shared emptyDir, terminating Envoy as soon as the drain
+        # completes (or at terminationGracePeriodSeconds if the router crashes).
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "while [ ! -f /var/run/atenet/drain-complete ]; do sleep 0.5; done"]
         ports:
         - name: http
           containerPort: 8080
@@ -249,6 +262,10 @@ spec:
       - name: envoy-config
         configMap:
           name: atenet-router-envoy-config
+      # Pod-shared scratch space for the shutdown handshake between the router
+      # and the Envoy preStop hook.
+      - name: "drain-signal"
+        emptyDir: {}
       - name: "servicedns"
         projected:
           sources:
