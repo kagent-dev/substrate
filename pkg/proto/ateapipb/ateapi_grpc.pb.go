@@ -51,6 +51,16 @@ const (
 	Control_GetAtespace_FullMethodName            = "/ateapi.Control/GetAtespace"
 	Control_ListAtespaces_FullMethodName          = "/ateapi.Control/ListAtespaces"
 	Control_DeleteAtespace_FullMethodName         = "/ateapi.Control/DeleteAtespace"
+	Control_GetEgressPolicy_FullMethodName        = "/ateapi.Control/GetEgressPolicy"
+	Control_CreateEgressPolicy_FullMethodName     = "/ateapi.Control/CreateEgressPolicy"
+	Control_UpdateEgressPolicy_FullMethodName     = "/ateapi.Control/UpdateEgressPolicy"
+	Control_DeleteEgressPolicy_FullMethodName     = "/ateapi.Control/DeleteEgressPolicy"
+	Control_ListEgressPolicies_FullMethodName     = "/ateapi.Control/ListEgressPolicies"
+	Control_GetCredential_FullMethodName          = "/ateapi.Control/GetCredential"
+	Control_CreateCredential_FullMethodName       = "/ateapi.Control/CreateCredential"
+	Control_UpdateCredential_FullMethodName       = "/ateapi.Control/UpdateCredential"
+	Control_DeleteCredential_FullMethodName       = "/ateapi.Control/DeleteCredential"
+	Control_ListCredentials_FullMethodName        = "/ateapi.Control/ListCredentials"
 )
 
 // ControlClient is the client API for Control service.
@@ -99,6 +109,16 @@ type ControlClient interface {
 	// Delete an empty Atespace. Rejects (FailedPrecondition) if any Actors or
 	// ActorSnapshotTags remain.
 	DeleteAtespace(ctx context.Context, in *DeleteAtespaceRequest, opts ...grpc.CallOption) (*Atespace, error)
+	GetEgressPolicy(ctx context.Context, in *GetEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error)
+	CreateEgressPolicy(ctx context.Context, in *CreateEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error)
+	UpdateEgressPolicy(ctx context.Context, in *UpdateEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error)
+	DeleteEgressPolicy(ctx context.Context, in *DeleteEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error)
+	ListEgressPolicies(ctx context.Context, in *ListEgressPoliciesRequest, opts ...grpc.CallOption) (*ListEgressPoliciesResponse, error)
+	GetCredential(ctx context.Context, in *GetCredentialRequest, opts ...grpc.CallOption) (*Credential, error)
+	CreateCredential(ctx context.Context, in *CreateCredentialRequest, opts ...grpc.CallOption) (*Credential, error)
+	UpdateCredential(ctx context.Context, in *UpdateCredentialRequest, opts ...grpc.CallOption) (*Credential, error)
+	DeleteCredential(ctx context.Context, in *DeleteCredentialRequest, opts ...grpc.CallOption) (*Credential, error)
+	ListCredentials(ctx context.Context, in *ListCredentialsRequest, opts ...grpc.CallOption) (*ListCredentialsResponse, error)
 }
 
 type controlClient struct {
@@ -289,6 +309,106 @@ func (c *controlClient) DeleteAtespace(ctx context.Context, in *DeleteAtespaceRe
 	return out, nil
 }
 
+func (c *controlClient) GetEgressPolicy(ctx context.Context, in *GetEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EgressPolicy)
+	err := c.cc.Invoke(ctx, Control_GetEgressPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) CreateEgressPolicy(ctx context.Context, in *CreateEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EgressPolicy)
+	err := c.cc.Invoke(ctx, Control_CreateEgressPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) UpdateEgressPolicy(ctx context.Context, in *UpdateEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EgressPolicy)
+	err := c.cc.Invoke(ctx, Control_UpdateEgressPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) DeleteEgressPolicy(ctx context.Context, in *DeleteEgressPolicyRequest, opts ...grpc.CallOption) (*EgressPolicy, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EgressPolicy)
+	err := c.cc.Invoke(ctx, Control_DeleteEgressPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) ListEgressPolicies(ctx context.Context, in *ListEgressPoliciesRequest, opts ...grpc.CallOption) (*ListEgressPoliciesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListEgressPoliciesResponse)
+	err := c.cc.Invoke(ctx, Control_ListEgressPolicies_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) GetCredential(ctx context.Context, in *GetCredentialRequest, opts ...grpc.CallOption) (*Credential, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Credential)
+	err := c.cc.Invoke(ctx, Control_GetCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) CreateCredential(ctx context.Context, in *CreateCredentialRequest, opts ...grpc.CallOption) (*Credential, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Credential)
+	err := c.cc.Invoke(ctx, Control_CreateCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) UpdateCredential(ctx context.Context, in *UpdateCredentialRequest, opts ...grpc.CallOption) (*Credential, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Credential)
+	err := c.cc.Invoke(ctx, Control_UpdateCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) DeleteCredential(ctx context.Context, in *DeleteCredentialRequest, opts ...grpc.CallOption) (*Credential, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Credential)
+	err := c.cc.Invoke(ctx, Control_DeleteCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) ListCredentials(ctx context.Context, in *ListCredentialsRequest, opts ...grpc.CallOption) (*ListCredentialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCredentialsResponse)
+	err := c.cc.Invoke(ctx, Control_ListCredentials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -335,6 +455,16 @@ type ControlServer interface {
 	// Delete an empty Atespace. Rejects (FailedPrecondition) if any Actors or
 	// ActorSnapshotTags remain.
 	DeleteAtespace(context.Context, *DeleteAtespaceRequest) (*Atespace, error)
+	GetEgressPolicy(context.Context, *GetEgressPolicyRequest) (*EgressPolicy, error)
+	CreateEgressPolicy(context.Context, *CreateEgressPolicyRequest) (*EgressPolicy, error)
+	UpdateEgressPolicy(context.Context, *UpdateEgressPolicyRequest) (*EgressPolicy, error)
+	DeleteEgressPolicy(context.Context, *DeleteEgressPolicyRequest) (*EgressPolicy, error)
+	ListEgressPolicies(context.Context, *ListEgressPoliciesRequest) (*ListEgressPoliciesResponse, error)
+	GetCredential(context.Context, *GetCredentialRequest) (*Credential, error)
+	CreateCredential(context.Context, *CreateCredentialRequest) (*Credential, error)
+	UpdateCredential(context.Context, *UpdateCredentialRequest) (*Credential, error)
+	DeleteCredential(context.Context, *DeleteCredentialRequest) (*Credential, error)
+	ListCredentials(context.Context, *ListCredentialsRequest) (*ListCredentialsResponse, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -398,6 +528,36 @@ func (UnimplementedControlServer) ListAtespaces(context.Context, *ListAtespacesR
 }
 func (UnimplementedControlServer) DeleteAtespace(context.Context, *DeleteAtespaceRequest) (*Atespace, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAtespace not implemented")
+}
+func (UnimplementedControlServer) GetEgressPolicy(context.Context, *GetEgressPolicyRequest) (*EgressPolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetEgressPolicy not implemented")
+}
+func (UnimplementedControlServer) CreateEgressPolicy(context.Context, *CreateEgressPolicyRequest) (*EgressPolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateEgressPolicy not implemented")
+}
+func (UnimplementedControlServer) UpdateEgressPolicy(context.Context, *UpdateEgressPolicyRequest) (*EgressPolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateEgressPolicy not implemented")
+}
+func (UnimplementedControlServer) DeleteEgressPolicy(context.Context, *DeleteEgressPolicyRequest) (*EgressPolicy, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteEgressPolicy not implemented")
+}
+func (UnimplementedControlServer) ListEgressPolicies(context.Context, *ListEgressPoliciesRequest) (*ListEgressPoliciesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEgressPolicies not implemented")
+}
+func (UnimplementedControlServer) GetCredential(context.Context, *GetCredentialRequest) (*Credential, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCredential not implemented")
+}
+func (UnimplementedControlServer) CreateCredential(context.Context, *CreateCredentialRequest) (*Credential, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateCredential not implemented")
+}
+func (UnimplementedControlServer) UpdateCredential(context.Context, *UpdateCredentialRequest) (*Credential, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateCredential not implemented")
+}
+func (UnimplementedControlServer) DeleteCredential(context.Context, *DeleteCredentialRequest) (*Credential, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteCredential not implemented")
+}
+func (UnimplementedControlServer) ListCredentials(context.Context, *ListCredentialsRequest) (*ListCredentialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCredentials not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -744,6 +904,186 @@ func _Control_DeleteAtespace_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_GetEgressPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEgressPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).GetEgressPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_GetEgressPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).GetEgressPolicy(ctx, req.(*GetEgressPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_CreateEgressPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateEgressPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).CreateEgressPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_CreateEgressPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).CreateEgressPolicy(ctx, req.(*CreateEgressPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_UpdateEgressPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateEgressPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).UpdateEgressPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_UpdateEgressPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).UpdateEgressPolicy(ctx, req.(*UpdateEgressPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_DeleteEgressPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteEgressPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).DeleteEgressPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_DeleteEgressPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).DeleteEgressPolicy(ctx, req.(*DeleteEgressPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_ListEgressPolicies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEgressPoliciesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListEgressPolicies(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ListEgressPolicies_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListEgressPolicies(ctx, req.(*ListEgressPoliciesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_GetCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).GetCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_GetCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).GetCredential(ctx, req.(*GetCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_CreateCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).CreateCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_CreateCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).CreateCredential(ctx, req.(*CreateCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_UpdateCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).UpdateCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_UpdateCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).UpdateCredential(ctx, req.(*UpdateCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_DeleteCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).DeleteCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_DeleteCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).DeleteCredential(ctx, req.(*DeleteCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_ListCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCredentialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ListCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListCredentials(ctx, req.(*ListCredentialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -822,6 +1162,46 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteAtespace",
 			Handler:    _Control_DeleteAtespace_Handler,
+		},
+		{
+			MethodName: "GetEgressPolicy",
+			Handler:    _Control_GetEgressPolicy_Handler,
+		},
+		{
+			MethodName: "CreateEgressPolicy",
+			Handler:    _Control_CreateEgressPolicy_Handler,
+		},
+		{
+			MethodName: "UpdateEgressPolicy",
+			Handler:    _Control_UpdateEgressPolicy_Handler,
+		},
+		{
+			MethodName: "DeleteEgressPolicy",
+			Handler:    _Control_DeleteEgressPolicy_Handler,
+		},
+		{
+			MethodName: "ListEgressPolicies",
+			Handler:    _Control_ListEgressPolicies_Handler,
+		},
+		{
+			MethodName: "GetCredential",
+			Handler:    _Control_GetCredential_Handler,
+		},
+		{
+			MethodName: "CreateCredential",
+			Handler:    _Control_CreateCredential_Handler,
+		},
+		{
+			MethodName: "UpdateCredential",
+			Handler:    _Control_UpdateCredential_Handler,
+		},
+		{
+			MethodName: "DeleteCredential",
+			Handler:    _Control_DeleteCredential_Handler,
+		},
+		{
+			MethodName: "ListCredentials",
+			Handler:    _Control_ListCredentials_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

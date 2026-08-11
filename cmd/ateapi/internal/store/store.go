@@ -80,6 +80,19 @@ type Interface interface {
 	// empty. Returns a page of actors and a next page token.
 	ListActors(ctx context.Context, atespace string, pageSize int32, pageToken string) ([]*ateapipb.Actor, string, error)
 
+	GetEgressPolicy(ctx context.Context, atespace, name string) (*ateapipb.EgressPolicy, error)
+	GetEgressPolicyForActor(ctx context.Context, actorRef resources.ActorRef, actorUID string) (*ateapipb.EgressPolicy, error)
+	CreateEgressPolicy(ctx context.Context, egressPolicy *ateapipb.EgressPolicy, actorUID string) (*ateapipb.EgressPolicy, error)
+	UpdateEgressPolicy(ctx context.Context, atespace, name string, mutate func(*ateapipb.EgressPolicy) error) (*ateapipb.EgressPolicy, error)
+	DeleteEgressPolicy(ctx context.Context, atespace, name string) (*ateapipb.EgressPolicy, error)
+	ListEgressPolicies(ctx context.Context, atespace string, pageSize int32, pageToken string) ([]*ateapipb.EgressPolicy, string, error)
+
+	GetCredential(ctx context.Context, atespace, name string) (*ateapipb.Credential, error)
+	CreateCredential(ctx context.Context, credential *ateapipb.Credential) (*ateapipb.Credential, error)
+	UpdateCredential(ctx context.Context, atespace, name string, mutate func(*ateapipb.Credential) error) (*ateapipb.Credential, error)
+	DeleteCredential(ctx context.Context, atespace, name string) (*ateapipb.Credential, error)
+	ListCredentials(ctx context.Context, atespace string, pageSize int32, pageToken string) ([]*ateapipb.Credential, string, error)
+
 	// Creates an immutable ActorSnapshot. The caller sets snapshot_uri; the
 	// store keeps no location of its own.
 	CreateActorSnapshot(ctx context.Context, snapshot *ateapipb.ActorSnapshot) (*ateapipb.ActorSnapshot, error)

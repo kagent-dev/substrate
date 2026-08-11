@@ -20,6 +20,7 @@ import (
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
+	"github.com/agent-substrate/substrate/internal/proto/egresspolicypb"
 	"github.com/agent-substrate/substrate/internal/volume"
 	"github.com/agent-substrate/substrate/internal/volume/csi"
 	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
@@ -31,6 +32,7 @@ import (
 // Service implements ateapipb.Control
 type Service struct {
 	ateapipb.UnimplementedControlServer
+	egresspolicypb.UnimplementedResolverServer
 	persistence           store.Interface
 	workerCache           *workercache.Cache
 	dialer                *AteletDialer
@@ -42,6 +44,7 @@ type Service struct {
 	instruments           *Instruments
 	mu                    sync.RWMutex
 	volumePlugins         map[string]volume.VolumePluginControlPlane
+	kubeClient            kubernetes.Interface
 }
 
 var _ ateapipb.ControlServer = (*Service)(nil)
@@ -76,6 +79,7 @@ func NewService(
 		dialer:                dialer,
 		instruments:           instruments,
 		volumePlugins:         volumePlugins,
+		kubeClient:            kubeClient,
 	}
 	s.actorWorkflow = NewActorWorkflow(persistence, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, storageClassLister, kubeClient, instruments, egressGatewayAddress, s)
 	return s

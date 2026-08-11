@@ -107,6 +107,37 @@ func actorScanPattern(atespace string) string {
 	return "actor:" + atespace + ":*"
 }
 
+func egressPolicyDBKey(atespace, name string) string {
+	return "egress-policy:{" + atespace + "}:" + name
+}
+
+func egressPolicyScanPattern(atespace string) string {
+	if atespace == "" {
+		return "egress-policy:*"
+	}
+	return "egress-policy:{" + atespace + "}:*"
+}
+
+func egressPolicyActorIndexDBKey(actorRef resources.ActorRef) string {
+	return "egress-policy-actor:{" + actorRef.Atespace + "}:" + actorRef.Name
+}
+
+func credentialDBKey(atespace, name string) string {
+	return "credential:" + atespace + ":" + name
+}
+
+func credentialScanPattern(atespace string) string {
+	if atespace == "" {
+		return "credential:*"
+	}
+	return "credential:" + atespace + ":*"
+}
+
+type egressPolicyActorIndex struct {
+	PolicyName string `json:"policyName"`
+	ActorUID   string `json:"actorUid"`
+}
+
 func actorSnapshotDBKey(atespace, name string) string {
 	return "actor-snapshot:" + atespace + ":" + name
 }
@@ -231,6 +262,15 @@ func (s *Persistence) DeleteAtespace(ctx context.Context, name string) (*ateapip
 	}
 	if hasTags {
 		return nil, store.ErrFailedPrecondition
+	}
+	for _, pattern := range []string{egressPolicyScanPattern(name), credentialScanPattern(name)} {
+		hasResource, err := s.hasMatching(ctx, pattern)
+		if err != nil {
+			return nil, fmt.Errorf("while checking egress resources: %w", err)
+		}
+		if hasResource {
+			return nil, store.ErrFailedPrecondition
+		}
 	}
 	if err := s.rdb.Del(ctx, dbKey).Err(); err != nil {
 		return nil, fmt.Errorf("while deleting atespace key %q: %w", dbKey, err)
@@ -749,6 +789,13 @@ func (s *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorR
 			return nil, store.ErrVersionConflict
 		}
 		return nil, err
+	}
+	// The policy is UID-pinned and therefore already inert after deletion.
+	// Remove it eagerly so a replacement Actor can create its own policy.
+	if policy, policyErr := s.GetEgressPolicyForActor(ctx, actorRef, deleted.GetMetadata().GetUid()); policyErr == nil {
+		if _, policyErr := s.DeleteEgressPolicy(ctx, actorRef.Atespace, policy.GetMetadata().GetName()); policyErr != nil {
+			slog.WarnContext(ctx, "failed to clean up deleted Actor's egress policy", slog.Any("err", policyErr))
+		}
 	}
 
 	return deleted, nil

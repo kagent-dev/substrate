@@ -17,6 +17,8 @@ syntax = "proto3";
 package ateapi;
 
 import "google/protobuf/field_mask.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
@@ -80,6 +82,18 @@ service Control {
   // Delete an empty Atespace. Rejects (FailedPrecondition) if any Actors or
   // ActorSnapshotTags remain.
   rpc DeleteAtespace(DeleteAtespaceRequest) returns (Atespace) {}
+
+  rpc GetEgressPolicy(GetEgressPolicyRequest) returns (EgressPolicy) {}
+  rpc CreateEgressPolicy(CreateEgressPolicyRequest) returns (EgressPolicy) {}
+  rpc UpdateEgressPolicy(UpdateEgressPolicyRequest) returns (EgressPolicy) {}
+  rpc DeleteEgressPolicy(DeleteEgressPolicyRequest) returns (EgressPolicy) {}
+  rpc ListEgressPolicies(ListEgressPoliciesRequest) returns (ListEgressPoliciesResponse) {}
+
+  rpc GetCredential(GetCredentialRequest) returns (Credential) {}
+  rpc CreateCredential(CreateCredentialRequest) returns (Credential) {}
+  rpc UpdateCredential(UpdateCredentialRequest) returns (Credential) {}
+  rpc DeleteCredential(DeleteCredentialRequest) returns (Credential) {}
+  rpc ListCredentials(ListCredentialsRequest) returns (ListCredentialsResponse) {}
 }
 
 message LocalSnapshotInfo {
@@ -260,6 +274,62 @@ message Atespace {
   ResourceMetadata metadata = 1;
 }
 
+// EgressPolicy is Atespace-scoped and grants one Actor in the same Atespace
+// access to destinations. A matching rule authorizes its destination. The
+// optional allow_all baseline authorizes every destination but does not stop
+// matching rules from applying their effects. With neither, traffic is denied.
+message EgressPolicy {
+  ResourceMetadata metadata = 1;
+  oneof target {
+    ObjectRef actor = 2;
+  }
+  google.protobuf.Empty allow_all = 3;
+  repeated EgressRule rules = 4;
+  // Every extension is required. An enforcement point that does not
+  // understand one must fail closed.
+  repeated google.protobuf.Any extensions = 5;
+}
+
+message EgressRule {
+  oneof match {
+    HostnameMatch hostname = 1;
+    IPBlockMatch ip_blocks = 2;
+  }
+}
+
+message HostnameMatch {
+  string pattern = 1;
+  // Credential injection requires an exact hostname match.
+  HeaderCredentialInjection credential_injection = 2;
+}
+
+message IPBlockMatch {
+  repeated string cidrs = 1;
+}
+
+message HeaderCredentialInjection {
+  string header = 1;
+  CredentialReference credential = 2;
+}
+
+message CredentialReference {
+  // Resolves in the policy's Atespace.
+  string name = 1;
+}
+
+message Credential {
+  ResourceMetadata metadata = 1;
+  oneof source {
+    KubernetesSecretKeySelector kubernetes_secret = 2;
+  }
+}
+
+message KubernetesSecretKeySelector {
+  string namespace = 1;
+  string name = 2;
+  string key = 3;
+}
+
 // ObjectRef references a Substrate resource by its (atespace, name) identity.
 message ObjectRef {
   // The atespace where the resource lives. Empty if the resource is global-scoped.
@@ -308,6 +378,40 @@ message ListAtespacesResponse {
 
 message DeleteAtespaceRequest {
   ObjectRef atespace = 1;
+}
+
+message GetEgressPolicyRequest { ObjectRef egress_policy = 1; }
+message CreateEgressPolicyRequest { EgressPolicy egress_policy = 1; }
+message UpdateEgressPolicyRequest {
+  EgressPolicy egress_policy = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+message DeleteEgressPolicyRequest { ObjectRef egress_policy = 1; }
+message ListEgressPoliciesRequest {
+  string atespace = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListEgressPoliciesResponse {
+  repeated EgressPolicy egress_policies = 1;
+  string next_page_token = 2;
+}
+
+message GetCredentialRequest { ObjectRef credential = 1; }
+message CreateCredentialRequest { Credential credential = 1; }
+message UpdateCredentialRequest {
+  Credential credential = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+message DeleteCredentialRequest { ObjectRef credential = 1; }
+message ListCredentialsRequest {
+  string atespace = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListCredentialsResponse {
+  repeated Credential credentials = 1;
+  string next_page_token = 2;
 }
 
 message GetActorRequest {
