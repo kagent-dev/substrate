@@ -37,8 +37,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
+	"github.com/agent-substrate/substrate/internal/proto/egresspolicypb"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
@@ -189,22 +191,27 @@ func xfccHeaderDER(chain ...[]byte) string {
 		url.PathEscape(buf.String()))
 }
 
-// egressHandler builds a Handler whose GetActor returns actor/err.
+// egressHandler builds a Handler whose policy resolver reflects actor/err.
 func egressHandler(roots *x509.CertPool, actor *ateapipb.Actor, err error) *Handler {
 	return New(&egressMockClient{actor: actor, err: err}, roots)
 }
 
 type egressMockClient struct {
-	ateapipb.ControlClient
+	egresspolicypb.ResolverClient
 	actor *ateapipb.Actor
 	err   error
+	calls int
 }
 
-func (m *egressMockClient) GetActor(context.Context, *ateapipb.GetActorRequest, ...grpc.CallOption) (*ateapipb.Actor, error) {
+func (m *egressMockClient) GetEffectiveEgressPolicy(_ context.Context, req *egresspolicypb.GetEffectiveEgressPolicyRequest, _ ...grpc.CallOption) (*egresspolicypb.EffectiveEgressPolicy, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.actor, nil
+	if m.actor.GetMetadata().GetUid() != req.GetActorUid() || m.actor.GetStatus() != ateapipb.Actor_STATUS_RUNNING {
+		return nil, status.Error(codes.PermissionDenied, "actor is not authorized")
+	}
+	return &egresspolicypb.EffectiveEgressPolicy{Policy: &ateapipb.EgressPolicy{AllowAll: &emptypb.Empty{}}}, nil
 }
 
 func runningActor() *ateapipb.Actor {
@@ -247,7 +254,8 @@ func wantStatus(t *testing.T, err error, want envoy_type.StatusCode) {
 func TestHandleRequestHeadersAllowsVerifiedActor(t *testing.T) {
 	ca := newTestCA(t, "actor-identity-ca")
 	leaf := ca.issueActorCert(t, actorCertOptions{})
-	h := egressHandler(ca.roots(), runningActor(), nil)
+	resolver := &egressMockClient{actor: runningActor()}
+	h := New(resolver, ca.roots())
 
 	res, err := h.HandleRequestHeaders(context.Background(), egressMetadata(xfccHeader(leaf)))
 	if err != nil {
@@ -255,6 +263,9 @@ func TestHandleRequestHeadersAllowsVerifiedActor(t *testing.T) {
 	}
 	if res.Response == nil {
 		t.Fatal("HandleRequestHeaders() returned no response")
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("policy resolver calls = %d, want 1", resolver.calls)
 	}
 	// Egress neither resumes an actor nor picks an upstream.
 	if res.Resume != "" {

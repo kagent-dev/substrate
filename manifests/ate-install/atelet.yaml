@@ -116,6 +116,7 @@ spec:
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - --ateapi-ca-file=/run/servicedns.podcert.ate.dev/trust-bundle.pem
+        - --egress-interception-ca-file=/run/egress-interception-ca/ca.crt
         # Graceful shutdown knobs. The sum must fit within
         # terminationGracePeriodSeconds above.
         - --drain-delay=0s
@@ -188,6 +189,9 @@ spec:
         - name: servicedns-ca
           mountPath: /run/servicedns.podcert.ate.dev
           readOnly: true
+        - name: egress-interception-ca
+          mountPath: /run/egress-interception-ca
+          readOnly: true
         - name: kubelet-plugins
           mountPath: /var/lib/kubelet/plugins
       volumes:
@@ -226,3 +230,6 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+      - name: egress-interception-ca
+        secret:
+          secretName: egress-interception-ca-certs

@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -43,6 +44,7 @@ import (
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/ingress"
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
+	"github.com/agent-substrate/substrate/internal/proto/egresspolicypb"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	v1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -225,6 +227,7 @@ func (s *RouterServer) Run(ctx context.Context) error {
 	// any direction missing from this map, so the mode is enforced here rather
 	// than merely advertised.
 	handlers := extproc.Handlers{}
+	var egressHandler *egress.Handler
 	if s.cfg.Mode.ServesIngress() {
 		parkMetrics, err := ingress.NewParkingMetrics()
 		if err != nil {
@@ -249,7 +252,7 @@ func (s *RouterServer) Run(ctx context.Context) error {
 				return fmt.Errorf("loading --actor-identity-ca-file %q: %w", s.cfg.ActorIdentityCAFile, err)
 			}
 		}
-		egressHandler := egress.New(s.apiClient, actorIdentityRoots)
+		egressHandler = egress.New(egresspolicypb.NewResolverClient(conn), actorIdentityRoots)
 		handlers[egressHandler.Direction()] = egressHandler
 	}
 
@@ -283,6 +286,9 @@ func (s *RouterServer) Run(ctx context.Context) error {
 	// Start ExtProc Server. Driven by the drain sequence rather than context
 	// cancel: ext_proc is failClosed, so it must outlive the dataplane's drain.
 	extprocGRPC := s.extprocSrv.NewGRPCServer()
+	if egressHandler != nil {
+		authv3.RegisterAuthorizationServer(extprocGRPC, egressHandler)
+	}
 	g.Go(func() error {
 		slog.InfoContext(ctx, "Starting ExtProc Server", slog.Int("port", s.cfg.ExtprocPort))
 		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.cfg.ExtprocPort))

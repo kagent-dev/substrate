@@ -81,6 +81,7 @@ function usage() {
   echo "  --create-jwt-authority-pool-secret     Create JWT authority pool secret"
   echo "  --create-actor-id-ca-pool-secret       Create actor ID CA pool secret"
   echo "  --create-actor-id-ca-certs-secret      Create actor ID CA certs secret"
+  echo "  --create-egress-interception-ca        Create egress interception CA secrets"
   echo "  --create-podcertificate-controller-cas Create podcertificate controller CAs"
   echo "  --create-valkey-ca-certs-secret        Create Valkey CA certs secret"
   echo "  --create-api-server-env-vars           Create ate-api-server env vars"
@@ -306,6 +307,26 @@ create_actor_id_ca_certs_secret() {
     | run_kubectl apply -f -
 }
 
+create_egress_interception_ca() {
+  log_step "create_egress_interception_ca"
+  run_kubectl_ate admin make-ca-pool \
+    --ca-id="1" \
+    --name="egress-interception-ca-pool" \
+    --secret-namespace=ate-system
+
+  local root=""
+  root=$(ca_pool_root_pem egress-interception-ca-pool ate-system)
+  if [[ -z "${root}" ]]; then
+    echo "error: failed to extract the egress interception CA root" >&2
+    return 1
+  fi
+  run_kubectl create secret generic egress-interception-ca-certs \
+    --from-literal=ca.crt="${root}" \
+    -n ate-system \
+    --dry-run=client -o yaml \
+    | run_kubectl apply -f -
+}
+
 create_podcertificate_controller_cas() {
   log_step "create_podcertificate_controller_cas"
   run_kubectl create namespace podcertificate-controller-system || true
@@ -451,6 +472,10 @@ ensure_apiserver_prerequisites() {
   # Derived from actor-id-ca-pool above, so it must come after it.
   run_kubectl get secret -n ate-system actor-id-ca-certs >/dev/null 2>&1 \
     || create_actor_id_ca_certs_secret
+  run_kubectl get secret -n ate-system egress-interception-ca-pool >/dev/null 2>&1 \
+    || create_egress_interception_ca
+  run_kubectl get secret -n ate-system egress-interception-ca-certs >/dev/null 2>&1 \
+    || create_egress_interception_ca
   run_kubectl get secret -n podcertificate-controller-system service-dns-ca-pool >/dev/null 2>&1 \
     || create_podcertificate_controller_cas
   run_kubectl get secret -n ate-system valkey-ca-certs >/dev/null 2>&1 \
@@ -771,6 +796,7 @@ while [[ "$#" -gt 0 ]]; do
     --create-jwt-authority-pool-secret) create_jwt_authority_pool_secret ;;
     --create-actor-id-ca-pool-secret) create_actor_id_ca_pool_secret ;;
     --create-actor-id-ca-certs-secret) create_actor_id_ca_certs_secret ;;
+    --create-egress-interception-ca) create_egress_interception_ca ;;
     --create-podcertificate-controller-cas) create_podcertificate_controller_cas ;;
     --create-valkey-ca-certs-secret) create_valkey_ca_certs_secret ;;
     --create-api-server-env-vars) create_api_server_env_vars ;;

@@ -36,15 +36,17 @@ import (
 	"strings"
 	"time"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	envoy_type "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/agent-substrate/substrate/cmd/atenet/internal/router/extproc"
+	"github.com/agent-substrate/substrate/internal/proto/egresspolicypb"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/substratex509"
-	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
 
 const (
@@ -66,7 +68,8 @@ const (
 
 // Handler authenticates the actor behind each egress CONNECT.
 type Handler struct {
-	apiClient ateapipb.ControlClient
+	authv3.UnimplementedAuthorizationServer
+	resolver egresspolicypb.ResolverClient
 	// actorIdentityRoots is the actor-identity CA bundle every actor
 	// certificate must chain to. Nil means the gateway cannot authenticate
 	// anyone, and every CONNECT fails closed.
@@ -76,8 +79,8 @@ type Handler struct {
 // New builds the egress handler. actorIdentityRoots is the same trust bundle
 // the egress listener uses as its trusted_ca; see verifyActorCertificate for
 // why the check is made again here.
-func New(apiClient ateapipb.ControlClient, actorIdentityRoots *x509.CertPool) *Handler {
-	return &Handler{apiClient: apiClient, actorIdentityRoots: actorIdentityRoots}
+func New(resolver egresspolicypb.ResolverClient, actorIdentityRoots *x509.CertPool) *Handler {
+	return &Handler{resolver: resolver, actorIdentityRoots: actorIdentityRoots}
 }
 
 func (h *Handler) Direction() extproc.Direction { return extproc.DirectionEgress }
@@ -117,7 +120,14 @@ func (h *Handler) HandleRequestHeaders(ctx context.Context, md *extproc.RequestM
 	if err := validateIdentity(identity); err != nil {
 		return extproc.Result{}, err
 	}
-	if err := h.validateActor(ctx, identity); err != nil {
+	effective, err := h.resolver.GetEffectiveEgressPolicy(ctx, &egresspolicypb.GetEffectiveEgressPolicyRequest{
+		Actor: actorRef(identity), ActorUid: identity.ActorUid,
+	})
+	if err != nil {
+		return extproc.Result{}, mapEgressPolicyError(identity.Atespace, identity.ActorName, err)
+	}
+	inspect, err := routePolicy(effective, md.Host)
+	if err != nil {
 		return extproc.Result{}, err
 	}
 
@@ -129,11 +139,20 @@ func (h *Handler) HandleRequestHeaders(ctx context.Context, md *extproc.RequestM
 		// (IP:port).
 		slog.String("destination", md.Host))
 
-	// Identity is authenticated; let the CONNECT proceed unchanged.
+	common := &extprocv3.CommonResponse{}
+	if inspect {
+		contextValue := policyContext(effective, md.Host)
+		if contextValue == "" || len(contextValue) > 32<<10 {
+			return extproc.Result{}, extproc.NewReqError(envoy_type.StatusCode_Forbidden, "egress denied: policy is too large")
+		}
+		common.ClearRouteCache = true
+		common.HeaderMutation = &extprocv3.HeaderMutation{SetHeaders: []*corev3.HeaderValueOption{
+			{Header: &corev3.HeaderValue{Key: inspectionHeader, Value: "1"}},
+			{Header: &corev3.HeaderValue{Key: policyContextHeader, Value: contextValue}},
+		}}
+	}
 	return extproc.Result{
-		Response: &extprocv3.HeadersResponse{
-			Response: &extprocv3.CommonResponse{},
-		},
+		Response: &extprocv3.HeadersResponse{Response: common},
 	}, nil
 }
 
@@ -146,45 +165,6 @@ func validateIdentity(identity *substratex509.ActorIdentity) error {
 	if !resources.IsValidResourceName(identity.Atespace) || !resources.IsValidResourceName(identity.ActorName) {
 		return extproc.NewReqError(envoy_type.StatusCode_Forbidden,
 			"egress denied: invalid actor identity %q/%q", identity.Atespace, identity.ActorName)
-	}
-	return nil
-}
-
-// validateActor checks the identity a certificate certifies against the control
-// plane's current view of that actor: it still exists, it is the actor the
-// certificate was issued to, and it is running. Every error it returns is
-// already a client-facing ext_proc denial.
-func (h *Handler) validateActor(ctx context.Context, identity *substratex509.ActorIdentity) error {
-	atespace := identity.Atespace
-	actorName := identity.ActorName
-	actorUID := identity.ActorUid
-
-	// Confirm the certified actor still exists. The name is only a lookup key
-	// here; the UID below is what actually authorizes.
-	// TODO: this can cause heavy load on ate api server. Change it based on https://github.com/agent-substrate/substrate/issues/592.
-	actor, err := h.apiClient.GetActor(ctx, &ateapipb.GetActorRequest{
-		Actor: &ateapipb.ObjectRef{Atespace: atespace, Name: actorName},
-	})
-	if err != nil {
-		return mapEgressIdentityError(atespace, actorName, err)
-	}
-
-	// Authorize on the UID, not the name. The UID the CA certified has to match the UID the
-	// control plane holds right now.
-	if uid := actor.GetMetadata().GetUid(); uid != actorUID {
-		slog.WarnContext(ctx, "egress denied: actor UID mismatch",
-			slog.String("atespace", atespace),
-			slog.String("actor", actorName),
-			slog.String("certificateActorUid", actorUID),
-			slog.String("currentActorUid", uid))
-		return extproc.NewReqError(envoy_type.StatusCode_Forbidden,
-			"egress denied: actor %q/%q is not the actor this certificate was issued to", atespace, actorName)
-	}
-
-	// The actor performing egress must actually be running.
-	if actor.GetStatus() != ateapipb.Actor_STATUS_RUNNING {
-		return extproc.NewReqError(envoy_type.StatusCode_Forbidden,
-			"egress denied: actor %q/%q is %s, not running", atespace, actorName, actor.GetStatus())
 	}
 	return nil
 }
@@ -395,15 +375,11 @@ func unquoteXFCC(value string) string {
 	return out.String()
 }
 
-// mapEgressIdentityError converts a GetActor failure into a client-facing
-// ext_proc denial. An unknown actor is treated as forbidden (the actor was
-// deleted out from under a still-valid certificate); transient control-plane
-// failures fail closed with 503.
-func mapEgressIdentityError(atespace, actorName string, err error) error {
+func mapEgressPolicyError(atespace, actorName string, err error) error {
 	switch status.Code(err) {
-	case codes.NotFound:
+	case codes.NotFound, codes.PermissionDenied, codes.FailedPrecondition:
 		return extproc.WrapReqError(envoy_type.StatusCode_Forbidden, err,
-			"egress denied: unknown actor %q/%q", atespace, actorName)
+			"egress denied for actor %q/%q", atespace, actorName)
 	case codes.Unavailable, codes.DeadlineExceeded:
 		return extproc.WrapReqError(envoy_type.StatusCode_ServiceUnavailable, err,
 			"egress identity check unavailable for %q/%q: %v", atespace, actorName, err)

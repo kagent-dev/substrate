@@ -92,6 +92,16 @@ func TestActorDirectAccess(t *testing.T) {
 func TestActorEgress(t *testing.T) {
 	ctx := context.Background()
 	actorName, _ := createAndResumeActor(t, ctx, "egress", egressTemplate)
+	clients := e2e.GetClients()
+	if _, err := clients.SubstrateAPI.CreateEgressPolicy(ctx, &ateapipb.CreateEgressPolicyRequest{EgressPolicy: &ateapipb.EgressPolicy{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: networkingAtespace, Name: actorName},
+		Target:   &ateapipb.EgressPolicy_Actor{Actor: &ateapipb.ObjectRef{Atespace: networkingAtespace, Name: actorName}},
+		Rules: []*ateapipb.EgressRule{{
+			Match: &ateapipb.EgressRule_Hostname{Hostname: &ateapipb.HostnameMatch{Pattern: "example.com"}},
+		}},
+	}}); err != nil {
+		t.Fatalf("CreateEgressPolicy: %v", err)
+	}
 	router := mustRouterClient(t, ctx)
 	defer router.Close()
 

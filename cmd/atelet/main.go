@@ -84,11 +84,12 @@ var (
 	port              = pflag.Int("port", 8085, "The port to listen on")
 	metricsListenAddr = pflag.String("metrics-listen-addr", ":9090", "Address and port the prometheus metrics server should listen on.")
 
-	grpcServerCredBundle = pflag.String("grpc-server-cred-bundle", "/run/podidentity.podcert.ate.dev/credential-bundle.pem", "Credential bundle atelet presents as its gRPC serving certificate.")
-	clientCACerts        = pflag.String("client-ca-certs", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify gRPC client certificates.")
-	ateapiAddress        = pflag.String("ateapi-address", "k8s:///api.ate-system.svc:443", "ateapi gRPC target used by the credential broker.")
-	ateapiCAFile         = pflag.String("ateapi-ca-file", "/run/servicedns.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify ateapi.")
-	ateapiServerName     = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
+	grpcServerCredBundle     = pflag.String("grpc-server-cred-bundle", "/run/podidentity.podcert.ate.dev/credential-bundle.pem", "Credential bundle atelet presents as its gRPC serving certificate.")
+	clientCACerts            = pflag.String("client-ca-certs", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify gRPC client certificates.")
+	ateapiAddress            = pflag.String("ateapi-address", "k8s:///api.ate-system.svc:443", "ateapi gRPC target used by the credential broker.")
+	ateapiCAFile             = pflag.String("ateapi-ca-file", "/run/servicedns.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify ateapi.")
+	ateapiServerName         = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
+	egressInterceptionCAFile = pflag.String("egress-interception-ca-file", "", "PEM CA certificate trusted by Actors for egress TLS interception.")
 
 	gcpAuthForImagePulls         = pflag.Bool("gcp-auth-for-image-pulls", true, "Use GCP application default credentials mechanism.")
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
@@ -1360,6 +1361,20 @@ func (s *AteomHerder) prepareOCIBundles(
 	}
 	if err := writeFileAtomic(filepath.Join(identityDir, ActorIDFileName), []byte(actorName), 0o644); err != nil {
 		return fmt.Errorf("while writing actor identity file: %w", err)
+	}
+	if *egressInterceptionCAFile != "" {
+		egressCA, err := os.ReadFile(*egressInterceptionCAFile)
+		if err != nil {
+			return fmt.Errorf("while reading egress interception CA: %w", err)
+		}
+		bundle, err := os.ReadFile("/etc/ssl/certs/ca-certificates.crt")
+		if err != nil {
+			return fmt.Errorf("while reading system CA bundle: %w", err)
+		}
+		bundle = append(append(bundle, '\n'), egressCA...)
+		if err := writeFileAtomic(filepath.Join(identityDir, ActorEgressCABundleFileName), bundle, 0o644); err != nil {
+			return fmt.Errorf("while writing actor egress CA bundle: %w", err)
+		}
 	}
 	// make directories for all durable-dir volumes
 	for _, vol := range spec.GetVolumes() {

@@ -48,6 +48,9 @@ const (
 	// ActorIDFileName is the file inside IdentityMountPath holding the
 	// actor's own ID, raw with no trailing newline.
 	ActorIDFileName = "actor-id"
+
+	ActorEgressCABundleFileName = "egress-ca-bundle.pem"
+	actorEgressCABundlePath     = IdentityMountPath + "/" + ActorEgressCABundleFileName
 )
 
 func prepareOCIDirectory(ctx context.Context, imageCache *imagecache.Store, actorUID, containerName, ref string, command, args []string, env []string, annotations map[string]string, netns string, identityDir string, volumes []*ateletpb.Volume, volumeMounts []*ateletpb.VolumeMount) error {
@@ -88,7 +91,7 @@ func prepareOCIDirectory(ctx context.Context, imageCache *imagecache.Store, acto
 	if err != nil {
 		return fmt.Errorf("while resolving process args for container %q: %w", containerName, err)
 	}
-	resolvedEnv := resolveActorEnv(&img.Config, env)
+	resolvedEnv := resolveActorEnv(&img.Config, env, *egressInterceptionCAFile != "")
 
 	// The identity bind target must exist in the rootfs for the mount to
 	// attach; ateom creates it through the mounted overlay (it lands in the
@@ -126,7 +129,7 @@ func prepareOCIDirectory(ctx context.Context, imageCache *imagecache.Store, acto
 // and the ActorTemplate env, with the template taking precedence. Duplicate keys
 // are removed in favor of template env > image env, and a default PATH stands in
 // when neither source sets one.
-func resolveActorEnv(imageCfg *v1.Config, templateEnv []string) []string {
+func resolveActorEnv(imageCfg *v1.Config, templateEnv []string, egressCA bool) []string {
 	var imageEnv []string
 	if imageCfg != nil {
 		imageEnv = imageCfg.Env
@@ -150,6 +153,11 @@ func resolveActorEnv(imageCfg *v1.Config, templateEnv []string) []string {
 
 	add(templateEnv...)
 	add(imageEnv...)
+	if egressCA {
+		add("SSL_CERT_FILE="+actorEgressCABundlePath,
+			"REQUESTS_CA_BUNDLE="+actorEgressCABundlePath,
+			"NODE_EXTRA_CA_CERTS="+actorEgressCABundlePath)
+	}
 	add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	return out
 }

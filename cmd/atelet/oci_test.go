@@ -105,11 +105,19 @@ func TestResolveActorEnv(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveActorEnv(tc.image, tc.templateEnv)
+			got := resolveActorEnv(tc.image, tc.templateEnv, false)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("resolveActorEnv(%v, %v) =\n  %v\nwant:\n  %v", tc.image, tc.templateEnv, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveActorEnvEgressCADefaults(t *testing.T) {
+	got := resolveActorEnv(&v1.Config{Env: []string{"SSL_CERT_FILE=/image-ca"}}, []string{"NODE_EXTRA_CA_CERTS=/template-ca"}, true)
+	if !slices.Contains(got, "SSL_CERT_FILE=/image-ca") || !slices.Contains(got, "NODE_EXTRA_CA_CERTS=/template-ca") ||
+		!slices.Contains(got, "REQUESTS_CA_BUNDLE="+actorEgressCABundlePath) {
+		t.Fatalf("egress CA env precedence = %v", got)
 	}
 }
 

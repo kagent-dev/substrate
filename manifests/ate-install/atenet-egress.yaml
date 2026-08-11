@@ -38,6 +38,10 @@ data:
     admin:
       address:
         socket_address: { address: 0.0.0.0, port_value: 15000 }
+    bootstrap_extensions:
+    - name: envoy.bootstrap.internal_listener
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.bootstrap.internal_listener.v3.InternalListener
     static_resources:
       listeners:
       - name: egress
@@ -98,6 +102,16 @@ data:
                 - name: connect
                   domains: ["*"]
                   routes:
+                  - match:
+                      connect_matcher: {}
+                      headers:
+                      - name: x-ate-egress-inspect
+                        string_match: { exact: "1" }
+                    route:
+                      cluster: egress_internal
+                      upgrade_configs:
+                      - upgrade_type: CONNECT
+                        connect_config: {}
                   - match: { connect_matcher: {} }
                     route:
                       cluster: egress_forward_proxy
@@ -137,6 +151,18 @@ data:
                     response_body_mode: NONE
                     request_trailer_mode: SKIP
                     response_trailer_mode: SKIP
+              - name: envoy.filters.http.set_filter_state
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.set_filter_state.v3.Config
+                  on_request_headers:
+                  - object_key: ate.egress_context
+                    factory_key: envoy.string
+                    format_string:
+                      text_format_source:
+                        inline_string: "%REQ(x-ate-egress-context)%"
+                    read_only: true
+                    shared_with_upstream: TRANSITIVE
+                    skip_if_empty: true
               - name: envoy.filters.http.dynamic_forward_proxy
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
@@ -146,7 +172,169 @@ data:
               - name: envoy.filters.http.router
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      - name: egress-inspection
+        internal_listener: {}
+        listener_filters:
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+        - name: envoy.filters.listener.http_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.http_inspector.v3.HttpInspector
+        filter_chains:
+        - filter_chain_match:
+            transport_protocol: tls
+            application_protocols: ["h2", "http/1.1"]
+          transport_socket: &interception_tls
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              disable_stateless_session_resumption: true
+              disable_stateful_session_resumption: true
+              common_tls_context:
+                custom_tls_certificate_selector:
+                  name: envoy.tls.certificate_selectors.on_demand_secret
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.cert_selectors.on_demand_secret.v3.Config
+                    config_source:
+                      api_config_source:
+                        api_type: DELTA_GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                        - envoy_grpc: { cluster_name: sds_mint }
+                    certificate_mapper:
+                      name: envoy.tls.certificate_mappers.sni
+                      typed_config:
+                        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.cert_mappers.sni.v3.SNI
+                        default_value: no-sni.invalid
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config: &inspected_hcm
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: inspected_https
+              codec_type: AUTO
+              route_config:
+                name: inspected_https
+                virtual_hosts:
+                - name: inspected
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: inspected_https_forward_proxy }
+                    request_headers_to_add: &policy_context_header
+                    - header:
+                        key: x-ate-egress-context
+                        value: "%FILTER_STATE(ate.egress_context:PLAIN)%"
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              http_filters:
+              - name: envoy.filters.http.ext_authz
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                  grpc_service:
+                    envoy_grpc: { cluster_name: ext_proc_server }
+                    timeout: 2s
+                  failure_mode_allow: false
+                  include_tls_session: true
+              - name: envoy.filters.http.dynamic_forward_proxy
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                  dns_cache_config: &inspection_dns
+                    name: inspection_dns_cache
+                    dns_lookup_family: ALL
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+        - filter_chain_match:
+            transport_protocol: raw_buffer
+            application_protocols: ["http/1.1"]
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: inspected_http
+              codec_type: AUTO
+              route_config:
+                name: inspected_http
+                virtual_hosts:
+                - name: inspected
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: inspected_http_forward_proxy }
+                    request_headers_to_add: *policy_context_header
+              http_filters:
+              - name: envoy.filters.http.ext_authz
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                  grpc_service:
+                    envoy_grpc: { cluster_name: ext_proc_server }
+                    timeout: 2s
+                  failure_mode_allow: false
+              - name: envoy.filters.http.dynamic_forward_proxy
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                  dns_cache_config: *inspection_dns
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
       clusters:
+      - name: egress_internal
+        type: STATIC
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: egress_internal
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  envoy_internal_address: { server_listener_name: egress-inspection }
+        transport_socket:
+          name: envoy.transport_sockets.internal_upstream
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.internal_upstream.v3.InternalUpstreamTransport
+            transport_socket:
+              name: envoy.transport_sockets.raw_buffer
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.transport_sockets.raw_buffer.v3.RawBuffer
+      - name: sds_mint
+        type: STATIC
+        connect_timeout: 1s
+        typed_extension_protocol_options:
+          envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+            "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+            explicit_http_config:
+              http2_protocol_options: {}
+        load_assignment:
+          cluster_name: sds_mint
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  pipe: { path: /run/sdsmintd/sds.sock }
+      - name: inspected_http_forward_proxy
+        lb_policy: CLUSTER_PROVIDED
+        connect_timeout: 5s
+        cluster_type:
+          name: envoy.clusters.dynamic_forward_proxy
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
+            dns_cache_config: *inspection_dns
+      - name: inspected_https_forward_proxy
+        lb_policy: CLUSTER_PROVIDED
+        connect_timeout: 5s
+        cluster_type:
+          name: envoy.clusters.dynamic_forward_proxy
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
+            dns_cache_config: *inspection_dns
+        transport_socket: &upstream_tls
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            auto_host_sni: true
+            common_tls_context:
+              validation_context:
+                trusted_ca: { filename: /etc/ssl/certs/ca-certificates.crt }
       # ext_proc gRPC server = the atenet router, co-located in this pod as a
       # sidecar and called over localhost (same topology the ingress gateway uses
       # for its dataplane + ext_proc).
@@ -207,7 +395,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
       - name: envoy
-        image: envoyproxy/envoy:v1.34-latest
+        image: envoyproxy/envoy:v1.37-latest
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -273,6 +461,25 @@ spec:
           readOnly: true
         - name: drain-signal
           mountPath: /var/run/atenet
+          readOnly: true
+        - name: sds-socket
+          mountPath: /run/sdsmintd
+      - name: sds-mint
+        image: ko://github.com/agent-substrate/substrate/cmd/sdsmintd
+        args:
+        - --socket=/run/sdsmintd/sds.sock
+        - --ca-pool=/run/egress-ca/pool.json
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          runAsNonRoot: true
+          runAsUser: 65532
+        volumeMounts:
+        - name: sds-socket
+          mountPath: /run/sdsmintd
+        - name: egress-ca-pool
+          mountPath: /run/egress-ca
           readOnly: true
       # Co-located ext_proc server: the same atenet router binary the ingress
       # gateway runs, started with --mode=egress so it serves only the egress
@@ -342,6 +549,11 @@ spec:
           name: atenet-egress
       - name: drain-signal
         emptyDir: {}
+      - name: sds-socket
+        emptyDir: {}
+      - name: egress-ca-pool
+        secret:
+          secretName: egress-interception-ca-pool
       - name: servicedns
         projected:
           sources:
