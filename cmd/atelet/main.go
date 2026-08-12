@@ -92,11 +92,9 @@ var (
 	ateapiServerName        = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
 	ateapiUseTokenAuth      = pflag.Bool("ateapi-use-token-auth", false, "Authenticate to ateapi with a projected ServiceAccount token instead of mTLS.")
 	ateapiTokenFile         = pflag.String("ateapi-token-file", "", "Projected ServiceAccount token used to authenticate to ateapi.")
-	brokerTokenIssuer       = pflag.String("credential-broker-token-issuer", "", "Kubernetes issuer accepted by the credential broker. Empty uses mTLS.")
+	brokerTokenIssuer       = pflag.String("credential-broker-token-issuer", "", "Enable Kubernetes TokenReview authentication when non-empty. Empty uses mTLS.")
 	brokerTokenAudience     = pflag.String("credential-broker-token-audience", "atelet.ate-system.svc", "Audience required on worker Pod-bound tokens.")
 	managementTokenAudience = pflag.String("management-token-audience", "atelet.ate-system.svc", "Audience required on ateapi tokens for lifecycle RPCs.")
-	brokerTokenCA           = pflag.String("credential-broker-token-ca", ateapiauth.DefaultServiceAccountCAFile, "CA used for Kubernetes issuer discovery.")
-	brokerDiscoveryToken    = pflag.String("credential-broker-discovery-token-file", ateapiauth.DefaultServiceAccountTokenFile, "ServiceAccount token used for Kubernetes issuer discovery.")
 
 	gcpAuthForImagePulls         = pflag.Bool("gcp-auth-for-image-pulls", true, "Use GCP application default credentials mechanism.")
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
@@ -286,7 +284,7 @@ func main() {
 	brokerTLS := tlsCfg.Clone()
 	broker := &credentialBroker{actorIdentityClient: ateapipb.NewActorIdentityClient(ateapiConn)}
 	if *brokerTokenIssuer != "" {
-		broker.tokenAuth, err = newBrokerTokenAuthenticator(ctx, *brokerTokenIssuer, *brokerTokenAudience, *brokerTokenCA, *brokerDiscoveryToken)
+		broker.tokenAuth, err = newBrokerTokenAuthenticator(ctx, *brokerTokenAudience)
 		if err != nil {
 			serverboot.Fatal(ctx, "Failed to configure credential broker token authentication", err)
 		}
@@ -1924,9 +1922,9 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 	return clientset, ateClient, nil
 }
 
-func newBrokerTokenAuthenticator(ctx context.Context, issuer, audience, caFile, discoveryTokenFile string) (*brokerTokenAuthenticator, error) {
-	if issuer == "" || audience == "" {
-		return nil, fmt.Errorf("credential broker token issuer and audience are required")
+func newBrokerTokenAuthenticator(ctx context.Context, audience string) (*brokerTokenAuthenticator, error) {
+	if audience == "" {
+		return nil, fmt.Errorf("credential broker token audience is required")
 	}
 	nodeName := os.Getenv("MY_NODE_NAME")
 	if nodeName == "" {
