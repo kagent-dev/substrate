@@ -189,7 +189,14 @@ func main() {
 	}
 
 	volPlugins := make(map[string]volume.VolumePluginControlPlane)
-	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts, *ateletServerName, *ateletTokenFile)
+	ateletDialer := controlapi.NewAteletDialer(controlapi.AteletDialerConfig{
+		WorkerIndexer:    workerPodInformer.GetIndexer(),
+		AteletIndexer:    ateletPodInformer.GetIndexer(),
+		ClientBundlePath: *ateletClientCredBundle,
+		ServerCAPath:     *podIdentityCACerts,
+		ServerName:       *ateletServerName,
+		TokenFile:        *ateletTokenFile,
+	})
 	sm := controlapi.NewService(redisPersistence, workerCache, actorTemplateLister, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, storageClassLister, ateletDialer, instruments, *egressGatewayAddress, volPlugins)
 
 	jwtIssuerDiscoveryClient := buildK8sServiceAccountIssuerDiscoveryClient(ctx, *clientJWTCAFile, *clientJWTIssuer)

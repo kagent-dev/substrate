@@ -249,17 +249,17 @@ func TestDialForAteletOnNode(t *testing.T) {
 	}
 
 	t.Run("no atelet on node", func(t *testing.T) {
-		d := NewAteletDialer(nil, newTestAteletIndexer(t), "", "")
+		d := NewAteletDialer(AteletDialerConfig{AteletIndexer: newTestAteletIndexer(t)})
 		if _, err := d.DialForAteletOnNode("node1"); !errors.Is(err, ErrNoAteletOnNode) {
 			t.Fatalf("DialForAteletOnNode = %v, want ErrNoAteletOnNode", err)
 		}
 	})
 
 	t.Run("more than one atelet on node", func(t *testing.T) {
-		d := NewAteletDialer(nil, newTestAteletIndexer(t,
+		d := NewAteletDialer(AteletDialerConfig{AteletIndexer: newTestAteletIndexer(t,
 			ateletPod("atelet-1", "uid-1", "node1", "10.0.0.1"),
 			ateletPod("atelet-2", "uid-2", "node1", "10.0.0.2"),
-		), "", "")
+		)})
 		_, err := d.DialForAteletOnNode("node1")
 		if err == nil || errors.Is(err, ErrNoAteletOnNode) {
 			t.Fatalf("DialForAteletOnNode = %v, want a non-ErrNoAteletOnNode error", err)
@@ -267,9 +267,9 @@ func TestDialForAteletOnNode(t *testing.T) {
 	})
 
 	t.Run("dials and caches the node's atelet", func(t *testing.T) {
-		d := NewAteletDialer(nil, newTestAteletIndexer(t,
+		d := NewAteletDialer(AteletDialerConfig{AteletIndexer: newTestAteletIndexer(t,
 			ateletPod("atelet-1", "uid-1", "node1", "10.0.0.1"),
-		), "", "")
+		)})
 		var credsUID string
 		d.dialCredentials = func(expectedPodUID string) (credentials.TransportCredentials, error) {
 			credsUID = expectedPodUID

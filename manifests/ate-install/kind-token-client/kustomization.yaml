@@ -12,54 +12,104 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Overlay: in-cluster clients authenticate to ateapi with a projected
-# ServiceAccount token instead of a client certificate. The server always
-# accepts both.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../kind
+  - ../token-client
+  - ../kind/rustfs.yaml
+  - ../kind/otel-collector.yaml
+  - ../kind/prometheus.yaml
 
 patches:
-  - path: ../token-client/patches.yaml
-  # --ateapi-use-token-auth switches the client to the projected
-  # ServiceAccount token below. The base manifests' --ateapi-client-cert is
-  # removed by index; the preceding `test` op pins the expected value so the
-  # build fails loudly if the base args are ever reordered.
-  - target:
-      group: apps
-      version: v1
+  - patch: |-
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: atelet
+        namespace: ate-system
+      spec:
+        template:
+          spec:
+            containers:
+            - name: atelet
+              args:
+              - --gcp-auth-for-image-pulls=false
+              - --localhost-registry-replacement=kind-registry:5000
+              - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
+              - --client-ca-certs=
+              - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
+              - --ateapi-use-token-auth=true
+              - --ateapi-token-file=/run/ateapi-token/token
+              - --credential-broker-token-issuer=$(ATE_JWT_ISSUER)
+              - --credential-broker-token-audience=atelet.ate-system.svc
+              - --log-level=debug
+              env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://opentelemetry-collector.otel-system.svc:4317
+              - name: OTEL_METRIC_EXPORT_INTERVAL
+                value: "10000"
+              - name: OTEL_METRIC_EXPORT_TIMEOUT
+                value: "10000"
+              - name: ATE_STORAGE_BACKEND
+                value: s3
+              - name: AWS_REGION
+                value: us-east-1
+              - name: AWS_ENDPOINT_URL
+                value: http://rustfs.ate-system.svc:9000
+              - name: AWS_S3_USE_PATH_STYLE
+                value: "true"
+              - name: AWS_ACCESS_KEY_ID
+                value: rustfsadmin
+              - name: AWS_SECRET_ACCESS_KEY
+                value: rustfsadmin
+  - patch: |-
+      apiVersion: apps/v1
       kind: Deployment
-      name: ate-controller
-      namespace: ate-system
-    patch: |-
-      - op: test
-        path: /spec/template/spec/containers/0/args/1
-        value: --ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-      - op: remove
-        path: /spec/template/spec/containers/0/args/1
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-use-token-auth=true
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-token-file=/run/ateapi-token/token
-  - target:
-      group: apps
-      version: v1
+      metadata:
+        name: ate-api-server
+        namespace: ate-system
+      spec:
+        template:
+          spec:
+            containers:
+            - name: ate-api-server
+              env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://opentelemetry-collector.otel-system.svc:4317
+              - name: OTEL_METRIC_EXPORT_INTERVAL
+                value: "10000"
+              - name: OTEL_METRIC_EXPORT_TIMEOUT
+                value: "10000"
+  - patch: |-
+      apiVersion: apps/v1
       kind: Deployment
-      name: atenet-router
-      namespace: ate-system
-    patch: |-
-      - op: test
-        path: /spec/template/spec/containers/0/args/13
-        value: --ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-      - op: remove
-        path: /spec/template/spec/containers/0/args/13
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-use-token-auth=true
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-token-file=/run/ateapi-token/token
+      metadata:
+        name: ate-controller
+        namespace: ate-system
+      spec:
+        template:
+          spec:
+            containers:
+            - name: ate-controller
+              env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://opentelemetry-collector.otel-system.svc:4317
+              - name: OTEL_METRIC_EXPORT_INTERVAL
+                value: "10000"
+              - name: OTEL_METRIC_EXPORT_TIMEOUT
+                value: "10000"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: atenet-router
+        namespace: ate-system
+      spec:
+        template:
+          spec:
+            containers:
+            - name: atenet-router
+              env:
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: http://opentelemetry-collector.otel-system.svc:4317

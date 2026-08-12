@@ -218,6 +218,7 @@ spec:
       - name: atenet-router
         args:
         - router
+        - --mode=ingress
         - --standalone
         - --namespace=ate-system
         - --port-http=8080

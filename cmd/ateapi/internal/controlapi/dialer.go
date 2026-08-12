@@ -64,16 +64,24 @@ type AteletDialer struct {
 	tokenFile       string
 }
 
-// NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
-// are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath, serverName, tokenFile string) *AteletDialer {
+type AteletDialerConfig struct {
+	WorkerIndexer    cache.Indexer
+	AteletIndexer    cache.Indexer
+	ClientBundlePath string
+	ServerCAPath     string
+	ServerName       string
+	TokenFile        string
+}
+
+// NewAteletDialer creates a new AteletDialer.
+func NewAteletDialer(cfg AteletDialerConfig) *AteletDialer {
 	return &AteletDialer{
-		workerIndexer: workerIndexer,
-		ateletIndexer: ateletIndexer,
+		workerIndexer: cfg.WorkerIndexer,
+		ateletIndexer: cfg.AteletIndexer,
 		ateletConns:   lru.New(1024),
-		tokenFile:     tokenFile,
+		tokenFile:     cfg.TokenFile,
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			return ateletTransportCredentials(clientBundlePath, serverCAPath, serverName, expectedPodUID)
+			return ateletTransportCredentials(cfg.ClientBundlePath, cfg.ServerCAPath, cfg.ServerName, expectedPodUID)
 		},
 	}
 }

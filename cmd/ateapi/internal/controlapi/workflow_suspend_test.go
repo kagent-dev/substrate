@@ -237,7 +237,7 @@ func newDanglingDialer() *AteletDialer {
 		byNamespaceAndName: func(obj any) ([]string, error) { return nil, nil },
 		byNode:             func(obj any) ([]string, error) { return nil, nil },
 	})
-	return NewAteletDialer(empty, empty, "", "", "", "")
+	return NewAteletDialer(AteletDialerConfig{WorkerIndexer: empty, AteletIndexer: empty})
 }
 
 func TestEnsureAteletSuspended_DanglingWorkerDoesNotRecordPhantomSnapshot(t *testing.T) {

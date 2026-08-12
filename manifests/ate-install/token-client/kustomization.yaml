@@ -28,46 +28,6 @@ resources:
 
 patches:
   - path: patches.yaml
-  # --ateapi-use-token-auth switches the client to the projected
-  # ServiceAccount token below. The base manifests' --ateapi-client-cert is
-  # removed by index; the preceding `test` op pins the expected value so the
-  # build fails loudly if the base args are ever reordered.
-  - target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: ate-controller
-      namespace: ate-system
-    patch: |-
-      - op: test
-        path: /spec/template/spec/containers/0/args/1
-        value: --ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-      - op: remove
-        path: /spec/template/spec/containers/0/args/1
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-use-token-auth=true
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-token-file=/run/ateapi-token/token
-  - target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: atenet-router
-      namespace: ate-system
-    patch: |-
-      - op: test
-        path: /spec/template/spec/containers/0/args/13
-        value: --ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-      - op: remove
-        path: /spec/template/spec/containers/0/args/13
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-use-token-auth=true
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --ateapi-token-file=/run/ateapi-token/token
   - target:
       group: rbac.authorization.k8s.io
       version: v1

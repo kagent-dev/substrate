@@ -108,6 +108,7 @@ type routerConfig struct {
 	// UpstreamSpiffePrefix validates the actor's atunnel server cert by its
 	// SPIFFE URI SAN prefix (trust domain) instead of the dialed pod IP.
 	UpstreamSpiffePrefix string
+	UpstreamServerName   string
 
 	// ActorIdentityCAFile is the PEM trust bundle for the actor-identity CA,
 	// used by the egress gateway's ext_proc sidecar to verify the actor client
