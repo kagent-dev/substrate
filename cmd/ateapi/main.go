@@ -205,8 +205,12 @@ func main() {
 	}
 
 	authCfg := ateapiauth.ServerConfig{
-		VerifyKubernetesToken: func(ctx context.Context, bearer string) (*k8sjwt.KubernetesClaims, error) {
-			return k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
+		VerifyBearerToken: func(ctx context.Context, bearer string) (ateapiauth.VerifiedBearerToken, error) {
+			claims, err := k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
+			if err != nil {
+				return ateapiauth.VerifiedBearerToken{}, err
+			}
+			return ateapiauth.VerifiedBearerToken{ID: claims.Subject, KubernetesClaims: claims}, nil
 		},
 	}
 	if err := ateapiauth.ValidateServerConfig(authCfg); err != nil {

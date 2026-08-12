@@ -38,7 +38,7 @@ func TestValidateServerConfig(t *testing.T) {
 		cfg     ServerConfig
 		wantErr bool
 	}{
-		{name: "valid", cfg: ServerConfig{VerifyBearerToken: func(context.Context, string) (string, error) { return "", nil }}},
+		{name: "valid", cfg: ServerConfig{VerifyBearerToken: func(context.Context, string) (VerifiedBearerToken, error) { return VerifiedBearerToken{}, nil }}},
 		{name: "missing verifier", cfg: ServerConfig{}, wantErr: true},
 	}
 
@@ -65,11 +65,11 @@ func TestChainedServerAuthenticatorPrincipal(t *testing.T) {
 	withBearer := func(ctx context.Context, token string) context.Context {
 		return metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "Bearer "+token))
 	}
-	verifyGoodToken := func(_ context.Context, bearer string) (string, error) {
+	verifyGoodToken := func(_ context.Context, bearer string) (VerifiedBearerToken, error) {
 		if bearer != "good-token" {
-			return "", fmt.Errorf("bad token")
+			return VerifiedBearerToken{}, fmt.Errorf("bad token")
 		}
-		return subject, nil
+		return VerifiedBearerToken{ID: subject}, nil
 	}
 
 	tests := []struct {
@@ -77,7 +77,7 @@ func TestChainedServerAuthenticatorPrincipal(t *testing.T) {
 		ctx  context.Context
 		// verify is the bearer token verifier; nil means the test fails if
 		// it is called (the certificate identity must take precedence).
-		verify   func(context.Context, string) (string, error)
+		verify   func(context.Context, string) (VerifiedBearerToken, error)
 		want     principal.PrincipalInfo
 		wantCode codes.Code
 	}{
@@ -135,9 +135,9 @@ func TestChainedServerAuthenticatorPrincipal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			verify := tt.verify
 			if verify == nil {
-				verify = func(context.Context, string) (string, error) {
+				verify = func(context.Context, string) (VerifiedBearerToken, error) {
 					t.Fatal("bearer token verifier called; certificate identity must take precedence")
-					return "", nil
+					return VerifiedBearerToken{}, nil
 				}
 			}
 			auth := newChainedAuthenticator(ServerConfig{VerifyBearerToken: verify})
@@ -161,8 +161,8 @@ func TestChainedServerAuthenticatorPrincipal(t *testing.T) {
 
 func TestJWTServerAuthenticatorRequiresBearer(t *testing.T) {
 	auth := jwtServerAuthenticator{
-		verifyBearerToken: func(context.Context, string) (string, error) {
-			return "", fmt.Errorf("bad token")
+		verifyBearerToken: func(context.Context, string) (VerifiedBearerToken, error) {
+			return VerifiedBearerToken{}, fmt.Errorf("bad token")
 		},
 	}
 
@@ -183,8 +183,8 @@ func TestJWTServerAuthenticatorRequiresBearer(t *testing.T) {
 func TestJWTServerAuthenticatorInjectsPrincipal(t *testing.T) {
 	const subject = "system:serviceaccount:default:router"
 	auth := jwtServerAuthenticator{
-		verifyBearerToken: func(context.Context, string) (string, error) {
-			return subject, nil
+		verifyBearerToken: func(context.Context, string) (VerifiedBearerToken, error) {
+			return VerifiedBearerToken{ID: subject}, nil
 		},
 	}
 
@@ -205,7 +205,9 @@ func TestJWTServerAuthenticatorInjectsPrincipal(t *testing.T) {
 
 func TestJWTServerAuthenticatorPreservesKubernetesClaims(t *testing.T) {
 	claims := &k8sjwt.KubernetesClaims{Subject: "system:serviceaccount:ate-system:atelet", PodUID: "pod-uid"}
-	auth := jwtServerAuthenticator{verifyKubernetesToken: func(context.Context, string) (*k8sjwt.KubernetesClaims, error) { return claims, nil }}
+	auth := jwtServerAuthenticator{verifyBearerToken: func(context.Context, string) (VerifiedBearerToken, error) {
+		return VerifiedBearerToken{ID: claims.Subject, KubernetesClaims: claims}, nil
+	}}
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer token"))
 	ctx, err := auth.authenticate(ctx)
 	if err != nil {

@@ -36,22 +36,25 @@ import (
 )
 
 func ValidateServerConfig(cfg ServerConfig) error {
-	if cfg.VerifyBearerToken == nil && cfg.VerifyKubernetesToken == nil {
+	if cfg.VerifyBearerToken == nil {
 		return fmt.Errorf("a bearer token verifier is required")
 	}
 	return nil
 }
 
+// VerifiedBearerToken is the identity established by a bearer token verifier.
+type VerifiedBearerToken struct {
+	ID               string
+	KubernetesClaims *k8sjwt.KubernetesClaims
+}
+
 // ServerConfig configures the server-side auth interceptor.
 type ServerConfig struct {
 	// VerifyBearerToken verifies a Bearer token presented by a client and
-	// returns the authenticated principal's ID (e.g. the JWT subject). It
-	// authenticates clients that did not present a certificate identity
+	// returns the authenticated identity and any verified bound-token claims.
+	// It authenticates clients that did not present a certificate identity
 	// (e.g. kubectl-ate, which dials without a client certificate).
-	VerifyBearerToken func(context.Context, string) (string, error)
-	// VerifyKubernetesToken optionally preserves verified bound-token claims in
-	// the request principal. When set, it takes precedence over VerifyBearerToken.
-	VerifyKubernetesToken func(context.Context, string) (*k8sjwt.KubernetesClaims, error)
+	VerifyBearerToken func(context.Context, string) (VerifiedBearerToken, error)
 }
 
 // UnaryServerInterceptor returns a gRPC unary interceptor enforcing cfg.
@@ -88,8 +91,7 @@ func (w *wrappedStream) Context() context.Context { return w.ctx }
 func newChainedAuthenticator(cfg ServerConfig) chainedServerAuthenticator {
 	return chainedServerAuthenticator{
 		jwt: jwtServerAuthenticator{
-			verifyBearerToken:     cfg.VerifyBearerToken,
-			verifyKubernetesToken: cfg.VerifyKubernetesToken,
+			verifyBearerToken: cfg.VerifyBearerToken,
 		},
 	}
 }
@@ -148,8 +150,7 @@ func mtlsPeerIdentity(ctx context.Context) (string, bool) {
 }
 
 type jwtServerAuthenticator struct {
-	verifyBearerToken     func(context.Context, string) (string, error)
-	verifyKubernetesToken func(context.Context, string) (*k8sjwt.KubernetesClaims, error)
+	verifyBearerToken func(context.Context, string) (VerifiedBearerToken, error)
 }
 
 func (a jwtServerAuthenticator) authenticate(ctx context.Context) (context.Context, error) {
@@ -157,20 +158,14 @@ func (a jwtServerAuthenticator) authenticate(ctx context.Context) (context.Conte
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
-	if a.verifyKubernetesToken != nil {
-		claims, err := a.verifyKubernetesToken(ctx, bearer)
-		if err != nil {
-			return nil, status.Errorf(codes.Unauthenticated, "invalid bearer token: %v", err)
-		}
-		return principal.InjectContext(ctx, principal.PrincipalInfo{ID: claims.Subject, Kind: principal.KindJWT, KubernetesClaims: claims}), nil
-	}
-	id, err := a.verifyBearerToken(ctx, bearer)
+	verified, err := a.verifyBearerToken(ctx, bearer)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid bearer token: %v", err)
 	}
 	return principal.InjectContext(ctx, principal.PrincipalInfo{
-		ID:   id,
-		Kind: principal.KindJWT,
+		ID:               verified.ID,
+		Kind:             principal.KindJWT,
+		KubernetesClaims: verified.KubernetesClaims,
 	}), nil
 }
 
