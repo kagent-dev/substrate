@@ -40,6 +40,7 @@ type WorkerPoolReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
 	OTelEndpoint string
+	WorkerAuth   WorkerAuthConfig
 	// OTelMetricExportInterval is the OTEL_METRIC_EXPORT_INTERVAL propagated to
 	// ateom pods. Empty keeps the SDK's default.
 	OTelMetricExportInterval string
@@ -116,7 +117,7 @@ func (r *WorkerPoolReconciler) applyDeployment(ctx context.Context, wp *atev1alp
 		MetricExportTimeout:  r.OTelMetricExportTimeout,
 		TracesSampler:        r.OTelTracesSampler,
 		TracesSamplerArg:     r.OTelTracesSamplerArg,
-	})
+	}, r.WorkerAuth)
 	if err := r.Apply(ctx, depAC, client.FieldOwner(workerPoolFieldOwner), client.ForceOwnership); err != nil {
 		return fmt.Errorf("failed to apply Deployment: %w", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,17 +40,19 @@ func InClusterDiscoveryClient(caFile, issuer, tokenFile string) (*http.Client, e
 	return &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &discoveryTransport{
-			base:      &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}},
-			issuer:    strings.TrimSuffix(issuer, "/"),
-			tokenFile: tokenFile,
+			base:          &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}},
+			issuer:        strings.TrimSuffix(issuer, "/"),
+			apiServerHost: kubernetesServiceHost(),
+			tokenFile:     tokenFile,
 		},
 	}, nil
 }
 
 type discoveryTransport struct {
-	base      http.RoundTripper
-	issuer    string
-	tokenFile string
+	base          http.RoundTripper
+	issuer        string
+	apiServerHost string
+	tokenFile     string
 }
 
 func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -57,7 +60,7 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if err != nil {
 		return nil, err
 	}
-	if req.URL.Scheme != issuerURL.Scheme || (req.URL.Host != issuerURL.Host && req.URL.Path != "/openid/v1/jwks") {
+	if req.URL.Scheme != issuerURL.Scheme || (req.URL.Host != issuerURL.Host && req.URL.Host != t.apiServerHost) {
 		return t.base.RoundTrip(req)
 	}
 	token, err := os.ReadFile(t.tokenFile)
@@ -67,4 +70,16 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 	return t.base.RoundTrip(clone)
+}
+
+func kubernetesServiceHost() string {
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	port := os.Getenv("KUBERNETES_SERVICE_PORT_HTTPS")
+	if port == "" {
+		port = os.Getenv("KUBERNETES_SERVICE_PORT")
+	}
+	if host == "" || port == "" {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
 }

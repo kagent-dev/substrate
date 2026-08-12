@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
 
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/credbundle"
@@ -62,9 +63,11 @@ type AteletDialer struct {
 	// per-atelet mTLS; tests can override it with insecure credentials.
 	dialCredentials func(expectedPodUID string) (credentials.TransportCredentials, error)
 	tokenFile       string
+	dialMu          sync.Mutex
 }
 
 type AteletDialerConfig struct {
+	AuthMode         string
 	WorkerIndexer    cache.Indexer
 	AteletIndexer    cache.Indexer
 	ClientBundlePath string
@@ -78,21 +81,33 @@ func NewAteletDialer(cfg AteletDialerConfig) *AteletDialer {
 	return &AteletDialer{
 		workerIndexer: cfg.WorkerIndexer,
 		ateletIndexer: cfg.AteletIndexer,
-		ateletConns:   lru.New(1024),
-		tokenFile:     cfg.TokenFile,
+		ateletConns: lru.NewWithEvictionFunc(1024, func(_ lru.Key, value interface{}) {
+			_ = value.(*grpc.ClientConn).Close()
+		}),
+		tokenFile: cfg.TokenFile,
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			return ateletTransportCredentials(cfg.ClientBundlePath, cfg.ServerCAPath, cfg.ServerName, expectedPodUID)
+			return ateletTransportCredentials(cfg.AuthMode, cfg.ClientBundlePath, cfg.ServerCAPath, cfg.ServerName, cfg.TokenFile, expectedPodUID)
 		},
 	}
 }
 
-func ateletTransportCredentials(clientBundlePath, serverCAPath, serverName, expectedPodUID string) (credentials.TransportCredentials, error) {
-	if serverName == "" {
+func ateletTransportCredentials(authMode, clientBundlePath, serverCAPath, serverName, tokenFile, expectedPodUID string) (credentials.TransportCredentials, error) {
+	switch authMode {
+	case "", "mtls":
+		if clientBundlePath == "" || serverCAPath == "" || serverName != "" || tokenFile != "" {
+			return nil, fmt.Errorf("mTLS atelet auth requires a client bundle and CA, without a server name or token")
+		}
 		tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
 		if err != nil {
 			return nil, err
 		}
 		return credentials.NewTLS(tlsConfig), nil
+	case "token":
+		if clientBundlePath != "" || serverCAPath == "" || serverName == "" || tokenFile == "" {
+			return nil, fmt.Errorf("token atelet auth requires a CA, server name, and token, without a client bundle")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported atelet auth mode %q", authMode)
 	}
 	ca, err := os.ReadFile(serverCAPath)
 	if err != nil {
@@ -153,6 +168,9 @@ func (d *AteletDialer) DialForAteletOnNode(nodeName string) (*grpc.ClientConn, e
 	selectedAtelet := matchingAtelets[0].(*corev1.Pod)
 	ateletKey := string(selectedAtelet.ObjectMeta.UID)
 
+	// ponytail: one lock avoids duplicate connections; shard by node only if dialing contention is measured.
+	d.dialMu.Lock()
+	defer d.dialMu.Unlock()
 	ateletConnAny, ok := d.ateletConns.Get(ateletKey)
 	if ok {
 		return ateletConnAny.(*grpc.ClientConn), nil

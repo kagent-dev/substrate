@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestHandleRequestHeadersDoesNotLogSensitiveData(t *testing.T) {
 		resumeFn: func(ctx context.Context, in *ateapipb.ResumeActorRequest, opts ...grpc.CallOption) (*ateapipb.ResumeActorResponse, error) {
 			return &ateapipb.ResumeActorResponse{Actor: &ateapipb.Actor{WorkerAssignment: &ateapipb.WorkerAssignment{WorkerPodIp: "10.0.0.52"}}}, nil
 		},
-	}, ParkedRequestConfig{}, nil, false)
+	}, Config{})
 
 	md := requestMetadata(
 		&corev3.HeaderValue{Key: ":path", Value: "/api/v1/reset?token=" + secret},
@@ -201,7 +202,7 @@ func TestHandleRequestHeaders(t *testing.T) {
 			// errors (e.g. FailedPrecondition -> immediate 503). Parking behavior
 			// is covered separately in TestHandleRequestHeaders_ParkingLotFull and
 			// resumer_test.go.
-			h := New(clientMock, ParkedRequestConfig{}, nil, false)
+			h := New(clientMock, Config{})
 
 			md := requestMetadata(
 				&corev3.HeaderValue{Key: ":path", Value: "/v1/actors/invoke"},
@@ -272,7 +273,7 @@ func TestHandleRequestHeaders_ParkingLotFull(t *testing.T) {
 
 	// A 1-slot lot with the slot already occupied deterministically simulates a
 	// full lot without needing a concurrent in-flight request.
-	h := New(clientMock, ParkedRequestConfig{Budget: time.Second, Max: 1}, nil, false)
+	h := New(clientMock, Config{Parking: ParkedRequestConfig{Budget: time.Second, Max: 1}})
 	release, ok := h.parking.enter(context.Background())
 	if !ok {
 		t.Fatal("priming enter should be admitted")
@@ -321,5 +322,37 @@ func TestAddRoutingMutationsViaAuthority(t *testing.T) {
 	}
 	if got[extproc.AuthorityHeader] != "10.0.0.52:443" {
 		t.Errorf("%s = %q", extproc.AuthorityHeader, got[extproc.AuthorityHeader])
+	}
+}
+
+func TestHandleRequestHeadersAddsRotatingRouterToken(t *testing.T) {
+	tokenFile := t.TempDir() + "/token"
+	if err := os.WriteFile(tokenFile, []byte("first-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(&mockClient{resumeFn: func(context.Context, *ateapipb.ResumeActorRequest, ...grpc.CallOption) (*ateapipb.ResumeActorResponse, error) {
+		return &ateapipb.ResumeActorResponse{Actor: &ateapipb.Actor{WorkerAssignment: &ateapipb.WorkerAssignment{WorkerPodIp: "10.0.0.52"}}}, nil
+	}}, Config{RouterTokenFile: tokenFile})
+	md := requestMetadata(&corev3.HeaderValue{Key: ":authority", Value: "123e4567-e89b-12d3-a456-426614174000.team-a.actors.resources.substrate.ate.dev"})
+
+	for _, want := range []string{"Bearer first-token", "Bearer second-token"} {
+		if want == "Bearer second-token" {
+			if err := os.WriteFile(tokenFile, []byte("second-token"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := h.HandleRequestHeaders(context.Background(), md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		for _, header := range res.Response.GetResponse().GetHeaderMutation().GetSetHeaders() {
+			if strings.EqualFold(header.GetHeader().GetKey(), atunnel.RouterAuthorizationHeader) {
+				got = string(header.GetHeader().GetRawValue())
+			}
+		}
+		if got != want {
+			t.Errorf("router authorization = %q, want %q", got, want)
+		}
 	}
 }

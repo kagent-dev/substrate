@@ -35,6 +35,7 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 	"github.com/agent-substrate/substrate/internal/actorlog"
+	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/ateomnet"
 	"github.com/agent-substrate/substrate/internal/ateompath"
@@ -66,6 +67,13 @@ var (
 	workerCredentialBundle     = pflag.String("atunnel-credential-bundle", "/run/podidentity.podcert.ate.dev/credential-bundle.pem", "Worker Pod credential bundle used by atunnel for inbound serving and outbound mTLS")
 	podIdentityTrustBundle     = pflag.String("atunnel-trust-bundle", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "Pod identity trust bundle used for router clients and the node-local atelet")
 	atunnelClientIdentity      = pflag.String("atunnel-client-identity", "spiffe://cluster.local/ns/ate-system/sa/atenet-router", "SPIFFE identity allowed to call actor ingress HTTPS")
+	atunnelAuthMode            = pflag.String("atunnel-auth-mode", "mtls", "Actor ingress client authentication mode: mtls or token")
+	atunnelTokenIssuer         = pflag.String("atunnel-token-issuer", "", "Kubernetes token issuer accepted from the router")
+	atunnelTokenAudience       = pflag.String("atunnel-token-audience", "atunnel.ate-system.svc", "Audience accepted from the router token")
+	atunnelTokenSubject        = pflag.String("atunnel-token-subject", "system:serviceaccount:ate-system:atenet-router", "ServiceAccount subject accepted from the router token")
+	credentialBrokerAuthMode   = pflag.String("credential-broker-auth-mode", "mtls", "Credential broker client authentication mode: mtls or token")
+	credentialBrokerTokenFile  = pflag.String("credential-broker-token-file", "", "Projected worker token used with the credential broker")
+	credentialBrokerServerName = pflag.String("credential-broker-server-name", "", "DNS identity expected on the credential broker serving certificate")
 	atunnelEgressListenAddress = pflag.String("atunnel-egress-listen-address", "0.0.0.0:15001", "Address for transparently intercepted actor egress TCP")
 	egressGatewayTrustBundle   = pflag.String("atunnel-egress-trust-bundle", "/run/servicedns.podcert.ate.dev/trust-bundle.pem", "Service DNS trust bundle for the remote egress gateway")
 
@@ -214,10 +222,15 @@ func do(ctx context.Context) error {
 
 func runAtunnel(ctx context.Context, upstream *url.URL) (*atunnel.Server, *atunnel.Egress, uint16, error) {
 	atunnelIngress, err := atunnel.NewServer(atunnel.Config{
+		ClientAuthMode:       atunnel.ClientAuthMode(*atunnelAuthMode),
 		CredentialBundlePath: *workerCredentialBundle,
 		TrustBundlePath:      *podIdentityTrustBundle,
 		AllowedClientID:      *atunnelClientIdentity,
-		Upstream:             upstream,
+		TokenAuth: atunnel.TokenAuthConfig{
+			Issuer: *atunnelTokenIssuer, Audience: *atunnelTokenAudience, Subject: *atunnelTokenSubject,
+			CAFile: ateapiauth.DefaultServiceAccountCAFile, DiscoveryTokenFile: ateapiauth.DefaultServiceAccountTokenFile,
+		},
+		Upstream: upstream,
 	})
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("while configuring atunnel: %w", err)
@@ -992,6 +1005,9 @@ func (s *AteomService) prepareActorEgress(ctx context.Context, actorUID string, 
 		SocketPath:           ateompath.CredentialBrokerSocket,
 		CredentialBundlePath: s.workerCredentialBundlePath,
 		TrustBundlePath:      s.podIdentityTrustBundlePath,
+		AuthMode:             *credentialBrokerAuthMode,
+		TokenFile:            *credentialBrokerTokenFile,
+		ServerName:           *credentialBrokerServerName,
 		ExpectedActorUID:     actorUID,
 	})
 	if err != nil {

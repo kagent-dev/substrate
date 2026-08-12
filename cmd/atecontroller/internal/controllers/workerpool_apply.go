@@ -65,85 +65,95 @@ const (
 	atunnelIdentityMountPath    = "/run/podidentity.podcert.ate.dev"
 	atunnelEgressTrustVolume    = "atunnel-egress-trust"
 	atunnelEgressTrustMountPath = "/run/servicedns.podcert.ate.dev"
+	credentialBrokerTokenVolume = "credential-broker-token"
+	credentialBrokerTokenPath   = "/run/credential-broker-token"
 )
+
+// WorkerAuthConfig controls the transport identity and client authentication
+// projected into WorkerPool pods. The zero value preserves certificate mode.
+type WorkerAuthConfig struct {
+	Mode                    string
+	CredentialSecret        string
+	TrustConfigMap          string
+	TokenIssuer             string
+	AtunnelTokenAudience    string
+	AtunnelTokenSubject     string
+	CredentialTokenAudience string
+}
 
 // buildDeploymentApplyConfig constructs the SSA apply configuration for the
 // Deployment managed by a WorkerPool. Only fields owned by this controller
 // are declared here. otel, when it carries an endpoint, is propagated to the
 // ateom container so it pushes telemetry to that collector.
-func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettings) *appsv1ac.DeploymentApplyConfiguration {
+func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettings, auth WorkerAuthConfig) *appsv1ac.DeploymentApplyConfiguration {
+	trustBundlePath := atunnelIdentityMountPath + "/trust-bundle.pem"
+	egressTrustBundlePath := atunnelEgressTrustMountPath + "/trust-bundle.pem"
+	if auth.Mode == "token" {
+		trustBundlePath = atunnelEgressTrustMountPath + "/ca.crt"
+		egressTrustBundlePath = trustBundlePath
+	}
+	args := []string{
+		"--pod-uid=$(POD_UID)",
+		"--atunnel-listen-address=0.0.0.0:443",
+		"--atunnel-credential-bundle=" + atunnelIdentityMountPath + "/credential-bundle.pem",
+		"--atunnel-trust-bundle=" + trustBundlePath,
+		"--atunnel-egress-listen-address=0.0.0.0:15001",
+		"--atunnel-egress-trust-bundle=" + egressTrustBundlePath,
+	}
+	volumeMounts := []*corev1ac.VolumeMountApplyConfiguration{
+		corev1ac.VolumeMount().WithName("run-ateom").WithMountPath(ateompath.BasePath).WithMountPropagation(corev1.MountPropagationHostToContainer),
+		corev1ac.VolumeMount().WithName(atunnelIdentityVolume).WithMountPath(atunnelIdentityMountPath).WithReadOnly(true),
+		corev1ac.VolumeMount().WithName(atunnelEgressTrustVolume).WithMountPath(atunnelEgressTrustMountPath).WithReadOnly(true),
+	}
+	volumes := []*corev1ac.VolumeApplyConfiguration{
+		corev1ac.Volume().WithName("run-ateom").WithHostPath(corev1ac.HostPathVolumeSource().WithPath(ateompath.BasePath).WithType(corev1.HostPathDirectoryOrCreate)),
+	}
+	if auth.Mode == "token" {
+		args = append(args,
+			"--atunnel-auth-mode=token",
+			"--atunnel-token-issuer="+auth.TokenIssuer,
+			"--atunnel-token-audience="+auth.AtunnelTokenAudience,
+			"--atunnel-token-subject="+auth.AtunnelTokenSubject,
+			"--credential-broker-auth-mode=token",
+			"--credential-broker-token-file="+credentialBrokerTokenPath+"/token",
+			"--credential-broker-server-name=internal.ate-system.svc",
+		)
+		volumeMounts = append(volumeMounts, corev1ac.VolumeMount().WithName(credentialBrokerTokenVolume).WithMountPath(credentialBrokerTokenPath).WithReadOnly(true))
+		volumes = append(volumes,
+			corev1ac.Volume().WithName(atunnelIdentityVolume).WithSecret(corev1ac.SecretVolumeSource().WithSecretName(auth.CredentialSecret)),
+			corev1ac.Volume().WithName(atunnelEgressTrustVolume).WithConfigMap(corev1ac.ConfigMapVolumeSource().WithName(auth.TrustConfigMap)),
+			corev1ac.Volume().WithName(credentialBrokerTokenVolume).WithProjected(corev1ac.ProjectedVolumeSource().WithSources(
+				corev1ac.VolumeProjection().WithServiceAccountToken(corev1ac.ServiceAccountTokenProjection().WithAudience(auth.CredentialTokenAudience).WithExpirationSeconds(3600).WithPath("token")),
+			)),
+		)
+	} else {
+		volumes = append(volumes,
+			corev1ac.Volume().WithName(atunnelIdentityVolume).WithProjected(corev1ac.ProjectedVolumeSource().WithSources(
+				corev1ac.VolumeProjection().WithPodCertificate(corev1ac.PodCertificateProjection().WithSignerName("podidentity.podcert.ate.dev/identity").WithKeyType("ECDSAP256").WithCredentialBundlePath("credential-bundle.pem")),
+				corev1ac.VolumeProjection().WithClusterTrustBundle(corev1ac.ClusterTrustBundleProjection().WithSignerName("podidentity.podcert.ate.dev/identity").WithLabelSelector(metav1ac.LabelSelector().WithMatchLabels(map[string]string{"podcert.ate.dev/canarying": "live"})).WithPath("trust-bundle.pem")),
+			)),
+			corev1ac.Volume().WithName(atunnelEgressTrustVolume).WithProjected(corev1ac.ProjectedVolumeSource().WithSources(
+				corev1ac.VolumeProjection().WithClusterTrustBundle(corev1ac.ClusterTrustBundleProjection().WithSignerName("servicedns.podcert.ate.dev/identity").WithLabelSelector(metav1ac.LabelSelector().WithMatchLabels(map[string]string{"podcert.ate.dev/canarying": "live"})).WithPath("trust-bundle.pem")),
+			)),
+		)
+	}
 	containerAC := corev1ac.Container().
 		WithName("ateom").
 		WithImage(wp.Spec.AteomImage).
-		WithArgs(
-			"--pod-uid=$(POD_UID)",
-			"--atunnel-listen-address=0.0.0.0:443",
-			"--atunnel-credential-bundle="+atunnelIdentityMountPath+"/credential-bundle.pem",
-			"--atunnel-trust-bundle="+atunnelIdentityMountPath+"/trust-bundle.pem",
-			"--atunnel-egress-listen-address=0.0.0.0:15001",
-			"--atunnel-egress-trust-bundle="+atunnelEgressTrustMountPath+"/trust-bundle.pem",
-		).
+		WithArgs(args...).
 		WithPorts(corev1ac.ContainerPort().
 			WithName("https").
 			WithContainerPort(443).
 			WithProtocol(corev1.ProtocolTCP)).
 		WithSecurityContext(ateomSecurityContext(wp.Spec.SandboxClass)).
 		WithEnv(ateomContainerEnv(otel)...).
-		WithVolumeMounts(
-			corev1ac.VolumeMount().
-				WithName("run-ateom").
-				WithMountPath(ateompath.BasePath).
-				WithMountPropagation(corev1.MountPropagationHostToContainer),
-			corev1ac.VolumeMount().
-				WithName(atunnelIdentityVolume).
-				WithMountPath(atunnelIdentityMountPath).
-				WithReadOnly(true),
-			corev1ac.VolumeMount().
-				WithName(atunnelEgressTrustVolume).
-				WithMountPath(atunnelEgressTrustMountPath).
-				WithReadOnly(true),
-		)
+		WithVolumeMounts(volumeMounts...)
 
 	podSpecAC := corev1ac.PodSpec().
 		WithSecurityContext(corev1ac.PodSecurityContext().
 			WithRunAsUser(0).
 			WithRunAsGroup(0)).
-		WithVolumes(
-			corev1ac.Volume().
-				WithName("run-ateom").
-				WithHostPath(corev1ac.HostPathVolumeSource().
-					WithPath(ateompath.BasePath).
-					WithType(corev1.HostPathDirectoryOrCreate)),
-			corev1ac.Volume().
-				WithName(atunnelIdentityVolume).
-				WithProjected(corev1ac.ProjectedVolumeSource().
-					WithSources(
-						corev1ac.VolumeProjection().
-							WithPodCertificate(corev1ac.PodCertificateProjection().
-								WithSignerName("podidentity.podcert.ate.dev/identity").
-								WithKeyType("ECDSAP256").
-								WithCredentialBundlePath("credential-bundle.pem")),
-						corev1ac.VolumeProjection().
-							WithClusterTrustBundle(corev1ac.ClusterTrustBundleProjection().
-								WithSignerName("podidentity.podcert.ate.dev/identity").
-								WithLabelSelector(metav1ac.LabelSelector().
-									WithMatchLabels(map[string]string{"podcert.ate.dev/canarying": "live"})).
-								WithPath("trust-bundle.pem")),
-					),
-				),
-			corev1ac.Volume().
-				WithName(atunnelEgressTrustVolume).
-				WithProjected(corev1ac.ProjectedVolumeSource().
-					WithSources(
-						corev1ac.VolumeProjection().
-							WithClusterTrustBundle(corev1ac.ClusterTrustBundleProjection().
-								WithSignerName("servicedns.podcert.ate.dev/identity").
-								WithLabelSelector(metav1ac.LabelSelector().
-									WithMatchLabels(map[string]string{"podcert.ate.dev/canarying": "live"})).
-								WithPath("trust-bundle.pem")),
-					),
-				),
-		)
+		WithVolumes(volumes...)
 
 	applyWorkerPoolPodTemplate(podSpecAC, containerAC, wp.Spec.Template)
 	maybeApplyMicroVMPodShape(podSpecAC, containerAC, wp.Spec.SandboxClass)

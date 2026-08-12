@@ -92,9 +92,11 @@ var (
 	ateapiServerName        = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
 	ateapiUseTokenAuth      = pflag.Bool("ateapi-use-token-auth", false, "Authenticate to ateapi with a projected ServiceAccount token instead of mTLS.")
 	ateapiTokenFile         = pflag.String("ateapi-token-file", "", "Projected ServiceAccount token used to authenticate to ateapi.")
-	brokerTokenIssuer       = pflag.String("credential-broker-token-issuer", "", "Enable Kubernetes TokenReview authentication when non-empty. Empty uses mTLS.")
+	clientAuthMode          = pflag.String("client-auth-mode", "mtls", "Authenticate lifecycle and credential-broker clients with mtls or token.")
 	brokerTokenAudience     = pflag.String("credential-broker-token-audience", "atelet.ate-system.svc", "Audience required on worker Pod-bound tokens.")
 	managementTokenAudience = pflag.String("management-token-audience", "atelet.ate-system.svc", "Audience required on ateapi tokens for lifecycle RPCs.")
+	kubeAPIQPS              = pflag.Float32("kube-api-qps", 50, "Maximum sustained Kubernetes API requests per second.")
+	kubeAPIBurst            = pflag.Int("kube-api-burst", 100, "Maximum burst of Kubernetes API requests.")
 
 	gcpAuthForImagePulls         = pflag.Bool("gcp-auth-for-image-pulls", true, "Use GCP application default credentials mechanism.")
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
@@ -277,18 +279,30 @@ func main() {
 		serverboot.Fatal(ctx, "Failed to listen", err)
 	}
 
-	tlsCfg, err := ateletServerTLSConfig(*grpcServerCredBundle, *clientCACerts)
+	clientCA := *clientCACerts
+	switch *clientAuthMode {
+	case "token":
+		clientCA = ""
+	case "mtls":
+		if clientCA == "" {
+			serverboot.Fatal(ctx, "Invalid mTLS client authentication", fmt.Errorf("--client-ca-certs is required"))
+		}
+	default:
+		serverboot.Fatal(ctx, "Invalid --client-auth-mode", fmt.Errorf("unsupported mode %q", *clientAuthMode))
+	}
+	tlsCfg, err := ateletServerTLSConfig(*grpcServerCredBundle, clientCA)
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to build server TLS config", err)
 	}
 	brokerTLS := tlsCfg.Clone()
 	var workerAuth workerAuthenticator
-	if *brokerTokenIssuer != "" {
-		workerAuth, err = newJWTWorkerAuthenticator(ctx, *brokerTokenAudience)
+	switch *clientAuthMode {
+	case "token":
+		workerAuth, err = newJWTWorkerAuthenticator(ctx, k8sClient, *brokerTokenAudience)
 		if err != nil {
 			serverboot.Fatal(ctx, "Failed to configure credential broker token authentication", err)
 		}
-	} else {
+	case "mtls":
 		ateletCert, err := credbundle.Parse(*grpcServerCredBundle)
 		if err != nil {
 			serverboot.Fatal(ctx, "Failed to load atelet Pod identity", err)
@@ -324,17 +338,9 @@ func main() {
 	}()
 
 	serverOptions := []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsCfg)), grpc.StatsHandler(otelgrpc.NewServerHandler())}
-	if *brokerTokenIssuer != "" {
-		kubeConfig, err := rest.InClusterConfig()
-		if err != nil {
-			serverboot.Fatal(ctx, "Failed to build Kubernetes client config", err)
-		}
-		clientset, err := kubernetes.NewForConfig(kubeConfig)
-		if err != nil {
-			serverboot.Fatal(ctx, "Failed to build Kubernetes client", err)
-		}
+	if *clientAuthMode == "token" {
 		serverOptions = append(serverOptions, grpc.ChainUnaryInterceptor(
-			tokenReviewUnaryInterceptor(clientset, *managementTokenAudience, "system:serviceaccount:ate-system:ate-api-server"),
+			tokenReviewUnaryInterceptor(k8sClient, *managementTokenAudience, "system:serviceaccount:ate-system:ate-api-server"),
 			ateinterceptors.InternalServerUnaryInterceptor,
 		))
 	} else {
@@ -1886,8 +1892,8 @@ func resetActorDirs(actorUID string) error {
 }
 
 // ateletServerTLSConfig builds a *tls.Config for a gRPC server that presents the
-// credential bundle at servingBundlePath, requires a client certificate
-// chaining to a CA in clientCAPath.
+// credential bundle at servingBundlePath. A non-empty clientCAPath enables
+// client certificate authentication.
 func ateletServerTLSConfig(servingBundlePath, clientCAPath string) (*tls.Config, error) {
 	if clientCAPath == "" {
 		return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: credbundle.Loader(servingBundlePath)}, nil
@@ -1913,6 +1919,8 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("get cluster config: %w", err)
 	}
+	config.QPS = *kubeAPIQPS
+	config.Burst = *kubeAPIBurst
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create clientset: %w", err)
@@ -1924,21 +1932,13 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 	return clientset, ateClient, nil
 }
 
-func newJWTWorkerAuthenticator(ctx context.Context, audience string) (*jwtWorkerAuthenticator, error) {
+func newJWTWorkerAuthenticator(ctx context.Context, clientset kubernetes.Interface, audience string) (*jwtWorkerAuthenticator, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("credential broker token audience is required")
 	}
 	nodeName := os.Getenv("MY_NODE_NAME")
 	if nodeName == "" {
 		return nil, fmt.Errorf("MY_NODE_NAME is required for credential broker token authentication")
-	}
-	kubeConfig, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, fmt.Errorf("build Kubernetes client config: %w", err)
-	}
-	clientset, err := kubernetes.NewForConfig(kubeConfig)
-	if err != nil {
-		return nil, fmt.Errorf("build Kubernetes client: %w", err)
 	}
 	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {

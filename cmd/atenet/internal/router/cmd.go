@@ -63,6 +63,7 @@ func NewRouterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.UpstreamTrustBundlePath, "upstream-trust-bundle", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "PEM trust bundle used to validate the actor's atunnel ingress server certificate.")
 	cmd.Flags().StringVar(&cfg.UpstreamSpiffePrefix, "upstream-spiffe-prefix", "spiffe://cluster.local/", "SPIFFE URI SAN prefix (trust domain) the actor's atunnel server cert must match. Empty falls back to default SAN check against the dialed pod IP (which SPIFFE-only certs never match).")
 	cmd.Flags().StringVar(&cfg.UpstreamServerName, "upstream-server-name", "", "SNI / hostname expected on the actor's atunnel server certificate. Optional.")
+	cmd.Flags().StringVar(&cfg.UpstreamTokenFile, "upstream-token-file", "", "Projected router token added to worker requests. Empty keeps upstream mTLS authentication.")
 	cmd.Flags().StringVar(&cfg.ActorIdentityCAFile, "actor-identity-ca-file", "", "PEM trust bundle for the actor-identity CA, used to verify the actor client certificates presented on egress CONNECTs. Required by the egress gateway's ext_proc sidecar; empty (the default) leaves egress authentication unconfigured and every egress CONNECT is denied.")
 	// Envoy learns the collector over xDS rather than from its own environment,
 	// so the router has to carry the address for it. Defaulting to

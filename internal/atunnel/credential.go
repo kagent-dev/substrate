@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/credbundle"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/substratex509"
@@ -43,6 +44,7 @@ type BrokerCertificateSource struct {
 	socketPath       string
 	expectedActorUID string
 	tlsConfig        *tls.Config
+	tokenFile        string
 	privateKey       *ecdsa.PrivateKey
 
 	mu          sync.RWMutex
@@ -58,6 +60,12 @@ type BrokerConfig struct {
 	CredentialBundlePath string
 	// TrustBundlePath verifies atelet's Pod certificate.
 	TrustBundlePath string
+	// AuthMode is mtls (the default) or token.
+	AuthMode string
+	// TokenFile is reread for every broker RPC in token mode.
+	TokenFile string
+	// ServerName is the DNS identity expected on atelet's shared serving cert.
+	ServerName string
 	// ExpectedActorUID prevents a mint started for an old activation from
 	// receiving the newly assigned actor's certificate.
 	ExpectedActorUID string
@@ -67,16 +75,8 @@ type BrokerConfig struct {
 // is reused across renewals and never leaves atunnel; only its CSR crosses the
 // credential broker socket.
 func NewBrokerCertificateSource(cfg BrokerConfig) (*BrokerCertificateSource, error) {
-	if cfg.SocketPath == "" || cfg.CredentialBundlePath == "" || cfg.TrustBundlePath == "" || cfg.ExpectedActorUID == "" {
-		return nil, fmt.Errorf("atunnel: credential broker socket, credentials, trust bundle, and expected actor UID are required")
-	}
-	localCert, err := credbundle.Parse(cfg.CredentialBundlePath)
-	if err != nil {
-		return nil, fmt.Errorf("atunnel: load worker identity: %w", err)
-	}
-	localIdentity, err := substratex509.PodIdentityFromCertificate(localCert.Leaf)
-	if err != nil || localIdentity == nil {
-		return nil, fmt.Errorf("atunnel: worker certificate has no valid Pod identity")
+	if cfg.SocketPath == "" || cfg.TrustBundlePath == "" || cfg.ExpectedActorUID == "" {
+		return nil, fmt.Errorf("atunnel: credential broker socket, trust bundle, and expected actor UID are required")
 	}
 	trustPEM, err := os.ReadFile(cfg.TrustBundlePath)
 	if err != nil {
@@ -90,12 +90,24 @@ func NewBrokerCertificateSource(cfg BrokerConfig) (*BrokerCertificateSource, err
 	if err != nil {
 		return nil, fmt.Errorf("atunnel: generate actor private key: %w", err)
 	}
-	expectedURI := (&url.URL{Scheme: "spiffe", Host: "cluster.local", Path: path.Join("ns", "ate-system", "sa", "atelet")}).String()
-	tlsConfig := &tls.Config{
-		MinVersion:           tls.VersionTLS13,
-		InsecureSkipVerify:   true, // Verification below supports SPIFFE Pod certificates without a DNS name.
-		GetClientCertificate: credbundle.ClientLoader(cfg.CredentialBundlePath),
-		VerifyConnection: func(state tls.ConnectionState) error {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}
+	switch cfg.AuthMode {
+	case "", "mtls":
+		if cfg.CredentialBundlePath == "" {
+			return nil, fmt.Errorf("atunnel: credential broker client certificate is required in mTLS mode")
+		}
+		localCert, err := credbundle.Parse(cfg.CredentialBundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("atunnel: load worker identity: %w", err)
+		}
+		localIdentity, err := substratex509.PodIdentityFromCertificate(localCert.Leaf)
+		if err != nil || localIdentity == nil {
+			return nil, fmt.Errorf("atunnel: worker certificate has no valid Pod identity")
+		}
+		expectedURI := (&url.URL{Scheme: "spiffe", Host: "cluster.local", Path: path.Join("ns", "ate-system", "sa", "atelet")}).String()
+		tlsConfig.InsecureSkipVerify = true // Verification below supports SPIFFE Pod certificates without a DNS name.
+		tlsConfig.GetClientCertificate = credbundle.ClientLoader(cfg.CredentialBundlePath)
+		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 			// Verify both the normal server-auth chain and the identities that DNS
 			// verification cannot express: atelet's SPIFFE ID and exact node
 			// incarnation. This is why InsecureSkipVerify is set above.
@@ -118,10 +130,17 @@ func NewBrokerCertificateSource(cfg BrokerConfig) (*BrokerCertificateSource, err
 				return fmt.Errorf("credential broker is not on worker node %q (%s)", localIdentity.NodeName, localIdentity.NodeUID)
 			}
 			return nil
-		},
+		}
+	case "token":
+		if cfg.TokenFile == "" || cfg.ServerName == "" {
+			return nil, fmt.Errorf("atunnel: credential broker token file and server name are required in token mode")
+		}
+		tlsConfig.ServerName = cfg.ServerName
+	default:
+		return nil, fmt.Errorf("atunnel: unsupported credential broker auth mode %q", cfg.AuthMode)
 	}
 
-	return &BrokerCertificateSource{socketPath: cfg.SocketPath, expectedActorUID: cfg.ExpectedActorUID, tlsConfig: tlsConfig, privateKey: privateKey}, nil
+	return &BrokerCertificateSource{socketPath: cfg.SocketPath, expectedActorUID: cfg.ExpectedActorUID, tlsConfig: tlsConfig, tokenFile: cfg.TokenFile, privateKey: privateKey}, nil
 }
 
 // Mint requests and installs a fresh certificate for the source's existing
@@ -133,12 +152,16 @@ func (s *BrokerCertificateSource) Mint(ctx context.Context) (time.Time, error) {
 	}
 	// A fresh connection picks up rotated worker credentials and forces atelet's
 	// current certificate and node identity to be verified for every mint.
-	conn, err := grpc.NewClient("passthrough:///credential-broker",
+	dialOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(credentials.NewTLS(s.tlsConfig)),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", s.socketPath)
 		}),
-	)
+	}
+	if s.tokenFile != "" {
+		dialOptions = append(dialOptions, grpc.WithPerRPCCredentials(ateapiauth.FileTokenCredentials(s.tokenFile)))
+	}
+	conn, err := grpc.NewClient("passthrough:///credential-broker", dialOptions...)
 	if err != nil {
 		return time.Time{}, err
 	}

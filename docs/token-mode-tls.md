@@ -18,6 +18,12 @@ demos; the controller does not copy credentials across namespace boundaries.
 Anyone who can read that namespace's shared TLS Secret can impersonate a
 token-mode TLS endpoint; use only namespaces within the deployment's trust boundary.
 
+Router tokens are verified offline by worker atunnel servers to keep the
+Kubernetes API out of the actor request path. A deleted router Pod's projected
+token can therefore be replayed until its ten-minute expiry (plus clock skew).
+Keep the projected lifetime short and treat the router Pod as part of the
+control-plane trust boundary.
+
 The installer never replaces an existing CA or TLS Secret. To rotate them,
 create replacement resources, update the affected mounts, and roll out
 ate-api-server, atelet, atenet-router, atenet-egress, Valkey, and WorkerPool

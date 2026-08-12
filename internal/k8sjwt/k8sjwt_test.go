@@ -41,8 +41,10 @@ func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 // testIssuer serves the OIDC discovery document and a JWKS built from the keys
 // registered on it, standing in for a Kubernetes API server's OIDC endpoints.
 type testIssuer struct {
-	server *httptest.Server
-	jwks   jwkSetT
+	server            *httptest.Server
+	jwks              jwkSetT
+	discoveryRequests int
+	jwksRequests      int
 }
 
 func newTestIssuer(t *testing.T) *testIssuer {
@@ -50,14 +52,34 @@ func newTestIssuer(t *testing.T) *testIssuer {
 	ti := &testIssuer{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		ti.discoveryRequests++
 		writeJSON(t, w, oidcConfigT{JWKSURI: ti.server.URL + "/jwks"})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		ti.jwksRequests++
 		writeJSON(t, w, ti.jwks)
 	})
 	ti.server = httptest.NewServer(mux)
 	t.Cleanup(ti.server.Close)
 	return ti
+}
+
+func TestVerifyCachesIssuerKeys(t *testing.T) {
+	ti := newTestIssuer(t)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ti.addRSA("rsa-1", &key.PublicKey)
+	token := mintJWT(t, "RS256", "rsa-1", key, validClaims(ti.issuer()))
+	for range 2 {
+		if _, err := Verify(context.Background(), ti.server.Client(), token, ti.issuer(), testAudience, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ti.discoveryRequests != 1 || ti.jwksRequests != 1 {
+		t.Fatalf("discovery requests = %d, JWKS requests = %d; want 1 each", ti.discoveryRequests, ti.jwksRequests)
+	}
 }
 
 func (ti *testIssuer) issuer() string { return ti.server.URL }

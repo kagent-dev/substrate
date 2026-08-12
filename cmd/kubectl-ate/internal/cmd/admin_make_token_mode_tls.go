@@ -166,7 +166,7 @@ func issueTokenModeLeaf(ca *localca.CA, dnsNames []string) ([]byte, []byte, erro
 		NotBefore:    now.Add(-time.Minute),
 		NotAfter:     now.Add(365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.RootCertificate, &key.PublicKey, ca.SigningKey)
 	if err != nil {

@@ -25,8 +25,10 @@ package ingress
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -54,13 +56,22 @@ type Handler struct {
 	// data planes that dial it rather than OriginalDstHeader. See
 	// addRoutingMutations.
 	routeViaAuthority bool
+	routerTokenFile   string
 }
 
-func New(apiClient ateapipb.ControlClient, parkCfg ParkedRequestConfig, parkMetrics *ParkingMetrics, routeViaAuthority bool) *Handler {
+type Config struct {
+	Parking           ParkedRequestConfig
+	ParkingMetrics    *ParkingMetrics
+	RouteViaAuthority bool
+	RouterTokenFile   string
+}
+
+func New(apiClient ateapipb.ControlClient, cfg Config) *Handler {
 	return &Handler{
-		resumer:           NewActorResumer(apiClient, withParking(parkCfg)),
-		parking:           newParkingLot(parkCfg, parkMetrics),
-		routeViaAuthority: routeViaAuthority,
+		resumer:           NewActorResumer(apiClient, withParking(cfg.Parking)),
+		parking:           newParkingLot(cfg.Parking, cfg.ParkingMetrics),
+		routeViaAuthority: cfg.RouteViaAuthority,
+		routerTokenFile:   cfg.RouterTokenFile,
 	}
 }
 
@@ -138,6 +149,19 @@ func (h *Handler) HandleRequestHeaders(ctx context.Context, md *extproc.RequestM
 	// original Host (actor DNS name).
 	mutation := &extprocv3.HeaderMutation{}
 	addRoutingMutations(targetAddr, md.Host, h.routeViaAuthority, mutation)
+	if h.routerTokenFile != "" {
+		token, err := os.ReadFile(h.routerTokenFile)
+		if err != nil {
+			return extproc.Result{}, fmt.Errorf("reading router token: %w", err)
+		}
+		if token = []byte(strings.TrimSpace(string(token))); len(token) == 0 {
+			return extproc.Result{}, fmt.Errorf("router token is empty")
+		}
+		mutation.SetHeaders = append(mutation.SetHeaders, &corev3.HeaderValueOption{
+			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+			Header:       &corev3.HeaderValue{Key: atunnel.RouterAuthorizationHeader, RawValue: append([]byte("Bearer "), token...)},
+		})
+	}
 
 	res.Target = targetAddr
 	res.Response = &extprocv3.HeadersResponse{

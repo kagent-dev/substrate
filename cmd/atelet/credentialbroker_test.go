@@ -29,9 +29,16 @@ import (
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type brokerIdentityClient struct {
@@ -112,6 +119,97 @@ func TestValidateJWTWorkerClaims(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTokenReviewUnaryInterceptor(t *testing.T) {
+	const subject = "system:serviceaccount:ate-system:ate-api-server"
+	tests := []struct {
+		name       string
+		token      string
+		status     authenticationv1.TokenReviewStatus
+		wantCode   codes.Code
+		wantCalled bool
+	}{
+		{name: "missing", wantCode: codes.Unauthenticated},
+		{name: "expired", token: "token", status: authenticationv1.TokenReviewStatus{Authenticated: false}, wantCode: codes.Unauthenticated},
+		{name: "wrong audience", token: "token", status: tokenReviewStatus(subject, "other", true), wantCode: codes.Unauthenticated},
+		{name: "wrong role", token: "token", status: tokenReviewStatus("system:serviceaccount:ate-system:other", "atelet", true), wantCode: codes.PermissionDenied},
+		{name: "unbound pod", token: "token", status: tokenReviewStatus(subject, "atelet", false), wantCode: codes.PermissionDenied},
+		{name: "valid", token: "token", status: tokenReviewStatus(subject, "atelet", true), wantCalled: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tc.token != "" {
+				ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "Bearer "+tc.token))
+			}
+			called := false
+			_, err := tokenReviewUnaryInterceptor(tokenReviewClient(t, tc.status), "atelet", subject)(ctx, nil, nil, func(context.Context, any) (any, error) {
+				called = true
+				return nil, nil
+			})
+			if status.Code(err) != tc.wantCode || called != tc.wantCalled {
+				t.Fatalf("code/called = %v/%v, want %v/%v", status.Code(err), called, tc.wantCode, tc.wantCalled)
+			}
+		})
+	}
+}
+
+func TestJWTWorkerAuthenticator(t *testing.T) {
+	valid := tokenReviewStatus("system:serviceaccount:workers:default", "atelet", true)
+	valid.User.Extra["authentication.kubernetes.io/node-name"] = authenticationv1.ExtraValue{"node-a"}
+	valid.User.Extra["authentication.kubernetes.io/node-uid"] = authenticationv1.ExtraValue{"node-uid"}
+	tests := []struct {
+		name     string
+		token    string
+		status   authenticationv1.TokenReviewStatus
+		wantCode codes.Code
+	}{
+		{name: "missing", status: valid, wantCode: codes.Unauthenticated},
+		{name: "expired", token: "token", status: authenticationv1.TokenReviewStatus{Authenticated: false}, wantCode: codes.Unauthenticated},
+		{name: "wrong audience", token: "token", status: tokenReviewStatus("system:serviceaccount:workers:default", "other", true), wantCode: codes.Unauthenticated},
+		{name: "wrong node", token: "token", status: tokenReviewStatus("system:serviceaccount:workers:default", "atelet", true), wantCode: codes.PermissionDenied},
+		{name: "valid", token: "token", status: valid},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tc.token != "" {
+				ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "Bearer "+tc.token))
+			}
+			auth := jwtWorkerAuthenticator{client: tokenReviewClient(t, tc.status), audience: "atelet", nodeName: "node-a", nodeUID: "node-uid"}
+			_, err := auth.authenticate(ctx)
+			if status.Code(err) != tc.wantCode {
+				t.Fatalf("code = %v, want %v", status.Code(err), tc.wantCode)
+			}
+		})
+	}
+}
+
+func tokenReviewStatus(subject, audience string, podBound bool) authenticationv1.TokenReviewStatus {
+	extra := map[string]authenticationv1.ExtraValue{}
+	if podBound {
+		extra["authentication.kubernetes.io/pod-name"] = authenticationv1.ExtraValue{"pod"}
+		extra["authentication.kubernetes.io/pod-uid"] = authenticationv1.ExtraValue{"pod-uid"}
+	}
+	return authenticationv1.TokenReviewStatus{
+		Authenticated: true,
+		Audiences:     []string{audience},
+		User:          authenticationv1.UserInfo{Username: subject, UID: "sa-uid", Extra: extra},
+	}
+}
+
+func tokenReviewClient(t *testing.T, reviewStatus authenticationv1.TokenReviewStatus) *fake.Clientset {
+	t.Helper()
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "tokenreviews", func(action ktesting.Action) (bool, runtime.Object, error) {
+		review := action.(ktesting.CreateAction).GetObject().(*authenticationv1.TokenReview)
+		if review.Spec.Token != "token" || len(review.Spec.Audiences) != 1 || review.Spec.Audiences[0] != "atelet" {
+			t.Fatalf("unexpected TokenReview spec: %+v", review.Spec)
+		}
+		return true, &authenticationv1.TokenReview{Status: reviewStatus}, nil
+	})
+	return client
 }
 
 func workerCertificate(t *testing.T, podUID, nodeName string) *x509.Certificate {

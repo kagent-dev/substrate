@@ -446,18 +446,19 @@ deploy_ate_system() {
 
   ensure_apiserver_prerequisites
 
-  # Deploy podcertificate-controller first so it starts signing and creating trust bundles immediately
-  run_ko apply -f manifests/ate-install/pod-certificate-controller.yaml
-  run_kubectl rollout status deployment/podcertificate-controller -n podcertificate-controller-system --timeout=120s
+  if [[ "$(ateapi_client_auth)" == "cert" ]]; then
+    # Deploy podcertificate-controller first so it starts signing and creating trust bundles immediately.
+    run_ko apply -f manifests/ate-install/pod-certificate-controller.yaml
+    run_kubectl rollout status deployment/podcertificate-controller -n podcertificate-controller-system --timeout=120s
 
-  # Wait for both ClusterTrustBundles to be created by the controller
-  echo "Waiting for podcertificate ClusterTrustBundles to be ready..."
-  until run_kubectl get clustertrustbundles podidentity.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
-    sleep 1
-  done
-  until run_kubectl get clustertrustbundles servicedns.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
-    sleep 1
-  done
+    echo "Waiting for podcertificate ClusterTrustBundles to be ready..."
+    until run_kubectl get clustertrustbundles podidentity.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
+      sleep 1
+    done
+    until run_kubectl get clustertrustbundles servicedns.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
+      sleep 1
+    done
+  fi
 
   local manifests=""
   manifests="$(render_ate_system_manifests)"

@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -89,6 +90,53 @@ func TestBrokerCertificateSourceRejectsUnexpectedActor(t *testing.T) {
 	defer cancel()
 	if _, err := source.Mint(ctx); err == nil || !strings.Contains(err.Error(), "unexpected actor") {
 		t.Fatalf("Mint() error = %v, want actor UID rejection", err)
+	}
+}
+
+func TestBrokerCertificateSourceUsesRotatingToken(t *testing.T) {
+	ca := newTestCA(t)
+	serverCert := issueTestDNSCertificate(t, ca, "internal.ate-system.svc")
+	dir := t.TempDir()
+	trustPath, tokenPath := filepath.Join(dir, "trust.pem"), filepath.Join(dir, "token")
+	if err := os.WriteFile(trustPath, ca.certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(dir, "broker.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizations := make(chan string, 2)
+	server := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}})),
+		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+			md, _ := metadata.FromIncomingContext(ctx)
+			authorizations <- strings.Join(md.Get("authorization"), "")
+			return handler(ctx, req)
+		}),
+	)
+	broker := &credentialBrokerStub{ca: ca, lifetime: time.Hour, publicKeys: make(chan []byte, 2), actorUID: "actor-uid"}
+	ateletpb.RegisterCredentialBrokerServer(server, broker)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { server.Stop(); _ = listener.Close() })
+
+	source, err := NewBrokerCertificateSource(BrokerConfig{
+		SocketPath: socketPath, TrustBundlePath: trustPath, ExpectedActorUID: "actor-uid",
+		AuthMode: "token", TokenFile: tokenPath, ServerName: "internal.ate-system.svc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"first", "second"} {
+		if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := source.Mint(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := <-authorizations; got != "Bearer "+token {
+			t.Errorf("authorization = %q, want Bearer %s", got, token)
+		}
 	}
 }
 
@@ -210,6 +258,27 @@ func issueTestPodCertificate(t *testing.T, ca *testCA, identity *substratex509.P
 	if !ok {
 		t.Fatalf("private key has type %T", cert.PrivateKey)
 	}
+	der, err := x509.CreateCertificate(rand.Reader, template, ca.cert, &key.PublicKey, ca.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert.Certificate[0] = der
+	cert.Leaf, err = x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
+}
+
+func issueTestDNSCertificate(t *testing.T, ca *testCA, dnsName string) tls.Certificate {
+	t.Helper()
+	cert := ca.issue(t, "", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	template, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	template.DNSNames = []string{dnsName}
+	key := cert.PrivateKey.(*ecdsa.PrivateKey)
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.cert, &key.PublicKey, ca.key)
 	if err != nil {
 		t.Fatal(err)

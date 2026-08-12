@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -111,9 +112,24 @@ type KubernetesClaims struct {
 }
 
 var (
-	permittedSkew     = 5 * time.Minute
-	defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
+	permittedSkew      = 5 * time.Minute
+	defaultHTTPClient  = &http.Client{Timeout: 10 * time.Second}
+	verificationKeys   = map[keyCacheID]*keyCacheEntry{}
+	verificationKeysMu sync.Mutex
 )
+
+const verificationKeyTTL = 5 * time.Minute
+
+type keyCacheID struct {
+	client *http.Client
+	issuer string
+}
+
+type keyCacheEntry struct {
+	mu      sync.Mutex
+	keys    []*KeyAndID
+	expires time.Time
+}
 
 // Verify verifies and extracts claims from a Kubernetes JWT.
 //
@@ -174,16 +190,15 @@ func Verify(ctx context.Context, httpClient *http.Client, jwt string, expectedIs
 		return nil, fmt.Errorf("unexpected issuer %q", rawClaims.Issuer)
 	}
 
-	// TODO: Cache keys, and only fetch new keys if the JWT's key ID is not in the cache.
-	keys, err := discoverKeysForIssuer(ctx, httpClient, rawClaims.Issuer)
+	if header.KeyID == "" {
+		return nil, fmt.Errorf("key ID is required")
+	}
+	keys, err := verificationKeysForIssuer(ctx, httpClient, rawClaims.Issuer, header.KeyID)
 	if err != nil {
 		return nil, fmt.Errorf("while discovering keys from issuer: %w", err)
 	}
 
 	// Find the key we should use for verification based on the key ID in the JWT header.
-	if header.KeyID == "" {
-		return nil, fmt.Errorf("key ID is required")
-	}
 	selectedKeyIndex := slices.IndexFunc(keys, func(k *KeyAndID) bool {
 		return k.KeyID == header.KeyID
 	})
@@ -258,6 +273,34 @@ func Verify(ctx context.Context, httpClient *http.Client, jwt string, expectedIs
 
 		WarnAfter: time.Unix(int64(rawClaims.BoundClaims.WarnAfter), 0),
 	}, nil
+}
+
+// verificationKeysForIssuer caches issuer keys and refreshes immediately for
+// an unknown kid so Kubernetes signing-key rotation does not wait for expiry.
+func verificationKeysForIssuer(ctx context.Context, client *http.Client, issuer, kid string) ([]*KeyAndID, error) {
+	if client == nil {
+		client = defaultHTTPClient
+	}
+	id := keyCacheID{client: client, issuer: issuer}
+	verificationKeysMu.Lock()
+	entry := verificationKeys[id]
+	if entry == nil {
+		entry = &keyCacheEntry{}
+		verificationKeys[id] = entry
+	}
+	verificationKeysMu.Unlock()
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if time.Now().Before(entry.expires) && slices.ContainsFunc(entry.keys, func(key *KeyAndID) bool { return key.KeyID == kid }) {
+		return entry.keys, nil
+	}
+	keys, err := discoverKeysForIssuer(ctx, client, issuer)
+	if err != nil {
+		return nil, err
+	}
+	entry.keys, entry.expires = keys, time.Now().Add(verificationKeyTTL)
+	return keys, nil
 }
 
 func verifySignature(algorithm string, selectedKey crypto.PublicKey, toBeSignedBytes, signatureBytes []byte) error {

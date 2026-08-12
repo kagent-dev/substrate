@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -63,11 +64,18 @@ var (
 	otelTracesSamplerArg = pflag.String("otel-traces-sampler-arg", os.Getenv("OTEL_TRACES_SAMPLER_ARG"),
 		"Trace sampler argument set on ateom worker pods, ignored unless --otel-traces-sampler is set. Defaults to the controller's own OTEL_TRACES_SAMPLER_ARG.")
 
-	ateapiCAFile     = pflag.String("ateapi-ca-file", ateapiauth.DefaultServiceAccountCAFile, "PEM file with CAs trusted to verify the ateapi server cert.")
-	ateapiServerName = pflag.String("ateapi-server-name", "", "SNI / hostname expected on the ateapi server cert. Optional.")
-	ateapiTokenAuth  = pflag.Bool("ateapi-use-token-auth", false, "Authenticate to ateapi with the Bearer token from --ateapi-token-file instead of the client certificate from --ateapi-client-cert.")
-	ateapiTokenFile  = pflag.String("ateapi-token-file", "", "Projected SA token file used as Bearer credential. Required with --ateapi-use-token-auth, ignored otherwise.")
-	ateapiClientCert = pflag.String("ateapi-client-cert", "", "Credential bundle presented as the client certificate when dialing ateapi. Required unless --ateapi-use-token-auth is set, ignored otherwise.")
+	ateapiCAFile                  = pflag.String("ateapi-ca-file", ateapiauth.DefaultServiceAccountCAFile, "PEM file with CAs trusted to verify the ateapi server cert.")
+	ateapiServerName              = pflag.String("ateapi-server-name", "", "SNI / hostname expected on the ateapi server cert. Optional.")
+	ateapiTokenAuth               = pflag.Bool("ateapi-use-token-auth", false, "Authenticate to ateapi with the Bearer token from --ateapi-token-file instead of the client certificate from --ateapi-client-cert.")
+	ateapiTokenFile               = pflag.String("ateapi-token-file", "", "Projected SA token file used as Bearer credential. Required with --ateapi-use-token-auth, ignored otherwise.")
+	ateapiClientCert              = pflag.String("ateapi-client-cert", "", "Credential bundle presented as the client certificate when dialing ateapi. Required unless --ateapi-use-token-auth is set, ignored otherwise.")
+	workerAuthMode                = pflag.String("atunnel-auth-mode", "mtls", "Worker transport client authentication mode: mtls or token.")
+	workerCredentialSecret        = pflag.String("atunnel-credential-secret", "", "Secret projected into worker namespaces with the shared serving credential bundle in token mode.")
+	workerTrustConfigMap          = pflag.String("atunnel-trust-configmap", "", "ConfigMap projected into worker namespaces with the shared transport CA in token mode.")
+	workerTokenIssuer             = pflag.String("atunnel-token-issuer", "", "Kubernetes issuer accepted by worker atunnel servers in token mode.")
+	workerTokenAudience           = pflag.String("atunnel-token-audience", "atunnel.ate-system.svc", "Audience accepted by worker atunnel servers in token mode.")
+	workerTokenSubject            = pflag.String("atunnel-token-subject", "system:serviceaccount:ate-system:atenet-router", "ServiceAccount subject accepted by worker atunnel servers in token mode.")
+	workerCredentialTokenAudience = pflag.String("credential-broker-token-audience", "atelet.ate-system.svc", "Audience of projected worker tokens used with the credential broker.")
 )
 
 func init() {
@@ -150,6 +158,14 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	if *workerAuthMode != "mtls" && *workerAuthMode != "token" {
+		setupLog.Error(fmt.Errorf("unsupported mode %q", *workerAuthMode), "invalid --atunnel-auth-mode")
+		os.Exit(1)
+	}
+	if *workerAuthMode == "token" && (*workerCredentialSecret == "" || *workerTrustConfigMap == "" || *workerTokenIssuer == "") {
+		setupLog.Error(fmt.Errorf("credential secret, trust ConfigMap, and issuer are required"), "invalid token-mode worker configuration")
+		os.Exit(1)
+	}
 
 	if err = (&controllers.WorkerPoolReconciler{
 		Client:                   mgr.GetClient(),
@@ -159,6 +175,11 @@ func main() {
 		OTelMetricExportTimeout:  *otelMetricExportTimeout,
 		OTelTracesSampler:        *otelTracesSampler,
 		OTelTracesSamplerArg:     *otelTracesSamplerArg,
+		WorkerAuth: controllers.WorkerAuthConfig{
+			Mode: *workerAuthMode, CredentialSecret: *workerCredentialSecret, TrustConfigMap: *workerTrustConfigMap,
+			TokenIssuer: *workerTokenIssuer, AtunnelTokenAudience: *workerTokenAudience,
+			AtunnelTokenSubject: *workerTokenSubject, CredentialTokenAudience: *workerCredentialTokenAudience,
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "WorkerPool")
 		os.Exit(1)

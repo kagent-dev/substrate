@@ -33,6 +33,7 @@ spec:
         - --atunnel-token-issuer=$(ATE_JWT_ISSUER)
         - --atunnel-token-audience=atunnel.ate-system.svc
         - --atunnel-token-subject=system:serviceaccount:ate-system:atenet-router
+        - --credential-broker-token-audience=atelet.ate-system.svc
         env:
         - name: ATE_JWT_ISSUER
           valueFrom:
@@ -87,6 +88,7 @@ spec:
         - --actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json
         - --actor-id-ca-pool=/run/actor-id-ca-pool/pool.json
         - --atelet-server-name=internal.ate-system.svc
+        - --atelet-auth-mode=token
         - --atelet-token-file=/run/atelet-token/token
         - --atelet-client-cred-bundle=
         - --pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
@@ -161,18 +163,16 @@ spec:
         args:
         - --gcp-auth-for-image-pulls=true
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-        - --client-ca-certs=
         - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
         - --ateapi-use-token-auth=true
         - --ateapi-token-file=/run/ateapi-token/token
-        - --credential-broker-token-issuer=$(ATE_JWT_ISSUER)
+        - --client-auth-mode=token
         - --credential-broker-token-audience=atelet.ate-system.svc
         env:
-        - name: ATE_JWT_ISSUER
+        - name: MY_NODE_NAME
           valueFrom:
-            configMapKeyRef:
-              name: ate-api-server-envvars
-              key: ATE_API_K8SJWT_ISSUER
+            fieldRef:
+              fieldPath: spec.nodeName
         volumeMounts:
         - name: servicedns-ca
           mountPath: /run/servicedns.podcert.ate.dev
@@ -205,6 +205,88 @@ spec:
         hostPath:
           path: /var/lib/ateom-gvisor
           type: DirectoryOrCreate
+      - name: kubelet-plugins
+        hostPath:
+          path: /var/lib/kubelet/plugins
+          type: DirectoryOrCreate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atenet-egress
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: envoy
+        volumeMounts:
+        - $patch: replace
+        - name: config
+          mountPath: /etc/envoy
+          readOnly: true
+        - name: servicedns
+          mountPath: /run/servicedns.podcert.ate.dev
+          readOnly: true
+        - name: actor-id-ca-certs
+          mountPath: /run/actor-id-ca-certs
+          readOnly: true
+        - name: drain-signal
+          mountPath: /var/run/atenet
+          readOnly: true
+      - name: ext-proc
+        args:
+        - router
+        - --mode=egress
+        - --namespace=ate-system
+        - --port-extproc=50051
+        - --extproc-address=127.0.0.1
+        - --ateapi-address=dns:///api.ate-system.svc:443
+        - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
+        - --ateapi-use-token-auth=true
+        - --ateapi-token-file=/run/ateapi-token/token
+        - --actor-identity-ca-file=/run/actor-id-ca-certs/ca.crt
+        - --otlp-collector-address=
+        - --envoy-admin-address=127.0.0.1:15000
+        volumeMounts:
+        - $patch: replace
+        - name: servicedns-ca
+          mountPath: /run/servicedns-ca
+          readOnly: true
+        - name: ateapi-token
+          mountPath: /run/ateapi-token
+          readOnly: true
+        - name: actor-id-ca-certs
+          mountPath: /run/actor-id-ca-certs
+          readOnly: true
+        - name: drain-signal
+          mountPath: /var/run/atenet
+      volumes:
+      - $patch: replace
+      - name: config
+        configMap:
+          name: atenet-egress
+      - name: drain-signal
+        emptyDir: {}
+      - name: servicedns
+        secret:
+          secretName: token-mode-tls
+      - name: servicedns-ca
+        configMap:
+          name: token-mode-ca
+          items:
+          - key: ca.crt
+            path: trust-bundle.pem
+      - name: ateapi-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              audience: api.ate-system.svc
+              expirationSeconds: 3600
+              path: token
+      - name: actor-id-ca-certs
+        secret:
+          secretName: actor-id-ca-certs
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -287,7 +369,7 @@ spec:
           sources:
           - serviceAccountToken:
               audience: atunnel.ate-system.svc
-              expirationSeconds: 3600
+              expirationSeconds: 600
               path: token
 ---
 apiVersion: v1
@@ -333,10 +415,9 @@ spec:
             echo "cluster-announce-tls-port 6379"
             echo "cluster-announce-bus-port 16379"
             echo "cluster-preferred-endpoint-type hostname"
-            echo "requirepass $(cat /run/valkey-auth/password)"
-            echo "masterauth $(cat /run/valkey-auth/password)"
           } >> /tmp/valkey.conf
-          exec valkey-server /tmp/valkey.conf
+          VALKEY_PASSWORD=$(cat /run/valkey-auth/password)
+          exec valkey-server /tmp/valkey.conf --requirepass "${VALKEY_PASSWORD}" --masterauth "${VALKEY_PASSWORD}"
         volumeMounts:
         - name: config
           mountPath: /etc/valkey

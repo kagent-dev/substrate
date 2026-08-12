@@ -37,11 +37,10 @@ patches:
               - --gcp-auth-for-image-pulls=false
               - --localhost-registry-replacement=kind-registry:5000
               - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
-              - --client-ca-certs=
               - --ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem
               - --ateapi-use-token-auth=true
               - --ateapi-token-file=/run/ateapi-token/token
-              - --credential-broker-token-issuer=$(ATE_JWT_ISSUER)
+              - --client-auth-mode=token
               - --credential-broker-token-audience=atelet.ate-system.svc
               - --log-level=debug
               env:

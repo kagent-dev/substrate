@@ -34,6 +34,7 @@ demo-egress_deploy() {
   ensure_crds
   sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/egress/egress.yaml.tmpl \
     | run_ko apply -f -
+  KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}" hack/copy-token-mode-credentials.sh ate-demo-egress
 
   log_step "Waiting for egress demo to be ready..."
   # The WorkerPool controller names the Deployment after the WorkerPool

@@ -81,6 +81,7 @@ var (
 	actorIDCAPoolFile      = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
 	podIdentityCACerts     = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
 	ateletClientCredBundle = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
+	ateletAuthMode         = pflag.String("atelet-auth-mode", "mtls", "Authenticate to atelet with mtls or token.")
 	ateletServerName       = pflag.String("atelet-server-name", "", "DNS identity expected on atelet's ordinary TLS certificate. Empty uses Pod identity mTLS.")
 	ateletTokenFile        = pflag.String("atelet-token-file", "", "Projected ServiceAccount token sent to atelet management RPCs.")
 
@@ -190,6 +191,7 @@ func main() {
 
 	volPlugins := make(map[string]volume.VolumePluginControlPlane)
 	ateletDialer := controlapi.NewAteletDialer(controlapi.AteletDialerConfig{
+		AuthMode:         *ateletAuthMode,
 		WorkerIndexer:    workerPodInformer.GetIndexer(),
 		AteletIndexer:    ateletPodInformer.GetIndexer(),
 		ClientBundlePath: *ateletClientCredBundle,
@@ -212,17 +214,9 @@ func main() {
 
 	authCfg := ateapiauth.ServerConfig{
 		VerifyBearerToken: func(ctx context.Context, bearer string) (ateapiauth.VerifiedBearerToken, error) {
-			claims, err := k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
+			claims, err := k8sjwt.TokenReview(ctx, clientset, bearer, *clientJWTAudience)
 			if err != nil {
 				return ateapiauth.VerifiedBearerToken{}, err
-			}
-			// Offline JWT verification cannot tell whether a bound Pod still
-			// exists. Delegate that check to Kubernetes for Pod-bound callers.
-			if claims.PodName != "" || claims.PodUID != "" {
-				claims, err = k8sjwt.TokenReview(ctx, clientset, bearer, *clientJWTAudience)
-				if err != nil {
-					return ateapiauth.VerifiedBearerToken{}, err
-				}
 			}
 			return ateapiauth.VerifiedBearerToken{ID: claims.Subject, KubernetesClaims: claims}, nil
 		},
@@ -359,7 +353,7 @@ func connectRedis(ctx context.Context) (*redis.ClusterClient, error) {
 		}
 		clusterOpts.Password = strings.TrimSpace(string(password))
 		if clusterOpts.Password == "" {
-			return nil, fmt.Errorf("Redis password file %q is empty", *redisPasswordFile)
+			return nil, fmt.Errorf("redis password file %q is empty", *redisPasswordFile)
 		}
 	}
 
