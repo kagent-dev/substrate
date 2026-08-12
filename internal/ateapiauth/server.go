@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/principal"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,7 +36,7 @@ import (
 )
 
 func ValidateServerConfig(cfg ServerConfig) error {
-	if cfg.VerifyBearerToken == nil {
+	if cfg.VerifyBearerToken == nil && cfg.VerifyKubernetesToken == nil {
 		return fmt.Errorf("a bearer token verifier is required")
 	}
 	return nil
@@ -48,6 +49,9 @@ type ServerConfig struct {
 	// authenticates clients that did not present a certificate identity
 	// (e.g. kubectl-ate, which dials without a client certificate).
 	VerifyBearerToken func(context.Context, string) (string, error)
+	// VerifyKubernetesToken optionally preserves verified bound-token claims in
+	// the request principal. When set, it takes precedence over VerifyBearerToken.
+	VerifyKubernetesToken func(context.Context, string) (*k8sjwt.KubernetesClaims, error)
 }
 
 // UnaryServerInterceptor returns a gRPC unary interceptor enforcing cfg.
@@ -84,7 +88,8 @@ func (w *wrappedStream) Context() context.Context { return w.ctx }
 func newChainedAuthenticator(cfg ServerConfig) chainedServerAuthenticator {
 	return chainedServerAuthenticator{
 		jwt: jwtServerAuthenticator{
-			verifyBearerToken: cfg.VerifyBearerToken,
+			verifyBearerToken:     cfg.VerifyBearerToken,
+			verifyKubernetesToken: cfg.VerifyKubernetesToken,
 		},
 	}
 }
@@ -143,13 +148,21 @@ func mtlsPeerIdentity(ctx context.Context) (string, bool) {
 }
 
 type jwtServerAuthenticator struct {
-	verifyBearerToken func(context.Context, string) (string, error)
+	verifyBearerToken     func(context.Context, string) (string, error)
+	verifyKubernetesToken func(context.Context, string) (*k8sjwt.KubernetesClaims, error)
 }
 
 func (a jwtServerAuthenticator) authenticate(ctx context.Context) (context.Context, error) {
 	bearer, ok := bearerToken(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
+	}
+	if a.verifyKubernetesToken != nil {
+		claims, err := a.verifyKubernetesToken(ctx, bearer)
+		if err != nil {
+			return nil, status.Errorf(codes.Unauthenticated, "invalid bearer token: %v", err)
+		}
+		return principal.InjectContext(ctx, principal.PrincipalInfo{ID: claims.Subject, Kind: principal.KindJWT, KubernetesClaims: claims}), nil
 	}
 	id, err := a.verifyBearerToken(ctx, bearer)
 	if err != nil {

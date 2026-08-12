@@ -74,6 +74,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/api/validate/content"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -84,11 +85,18 @@ var (
 	port              = pflag.Int("port", 8085, "The port to listen on")
 	metricsListenAddr = pflag.String("metrics-listen-addr", ":9090", "Address and port the prometheus metrics server should listen on.")
 
-	grpcServerCredBundle = pflag.String("grpc-server-cred-bundle", "/run/podidentity.podcert.ate.dev/credential-bundle.pem", "Credential bundle atelet presents as its gRPC serving certificate.")
-	clientCACerts        = pflag.String("client-ca-certs", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify gRPC client certificates.")
-	ateapiAddress        = pflag.String("ateapi-address", "k8s:///api.ate-system.svc:443", "ateapi gRPC target used by the credential broker.")
-	ateapiCAFile         = pflag.String("ateapi-ca-file", "/run/servicedns.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify ateapi.")
-	ateapiServerName     = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
+	grpcServerCredBundle    = pflag.String("grpc-server-cred-bundle", "/run/podidentity.podcert.ate.dev/credential-bundle.pem", "Credential bundle atelet presents as its gRPC serving certificate.")
+	clientCACerts           = pflag.String("client-ca-certs", "/run/podidentity.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify gRPC client certificates.")
+	ateapiAddress           = pflag.String("ateapi-address", "k8s:///api.ate-system.svc:443", "ateapi gRPC target used by the credential broker.")
+	ateapiCAFile            = pflag.String("ateapi-ca-file", "/run/servicedns.podcert.ate.dev/trust-bundle.pem", "CA bundle used to verify ateapi.")
+	ateapiServerName        = pflag.String("ateapi-server-name", "api.ate-system.svc", "DNS name expected on the ateapi certificate.")
+	ateapiUseTokenAuth      = pflag.Bool("ateapi-use-token-auth", false, "Authenticate to ateapi with a projected ServiceAccount token instead of mTLS.")
+	ateapiTokenFile         = pflag.String("ateapi-token-file", "", "Projected ServiceAccount token used to authenticate to ateapi.")
+	brokerTokenIssuer       = pflag.String("credential-broker-token-issuer", "", "Kubernetes issuer accepted by the credential broker. Empty uses mTLS.")
+	brokerTokenAudience     = pflag.String("credential-broker-token-audience", "atelet.ate-system.svc", "Audience required on worker Pod-bound tokens.")
+	managementTokenAudience = pflag.String("management-token-audience", "atelet.ate-system.svc", "Audience required on ateapi tokens for lifecycle RPCs.")
+	brokerTokenCA           = pflag.String("credential-broker-token-ca", ateapiauth.DefaultServiceAccountCAFile, "CA used for Kubernetes issuer discovery.")
+	brokerDiscoveryToken    = pflag.String("credential-broker-discovery-token-file", ateapiauth.DefaultServiceAccountTokenFile, "ServiceAccount token used for Kubernetes issuer discovery.")
 
 	gcpAuthForImagePulls         = pflag.Bool("gcp-auth-for-image-pulls", true, "Use GCP application default credentials mechanism.")
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
@@ -254,6 +262,8 @@ func main() {
 		CAFile:           *ateapiCAFile,
 		ServerName:       *ateapiServerName,
 		ClientCredBundle: *grpcServerCredBundle,
+		UseTokenAuth:     *ateapiUseTokenAuth,
+		TokenFile:        *ateapiTokenFile,
 	})
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to build ateapi client credentials", err)
@@ -273,19 +283,27 @@ func main() {
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to build server TLS config", err)
 	}
-	ateletCert, err := credbundle.Parse(*grpcServerCredBundle)
-	if err != nil {
-		serverboot.Fatal(ctx, "Failed to load atelet Pod identity", err)
-	}
-	ateletIdentity, err := substratex509.PodIdentityFromCertificate(ateletCert.Leaf)
-	if err != nil {
-		serverboot.Fatal(ctx, "Failed to load atelet Pod identity", err)
-	}
-	if ateletIdentity == nil {
-		serverboot.Fatal(ctx, "Failed to load atelet Pod identity", fmt.Errorf("credential bundle has no Pod identity"))
-	}
 	brokerTLS := tlsCfg.Clone()
-	brokerTLS.VerifyConnection = verifyClientOnSameNode(ateletIdentity)
+	broker := &credentialBroker{actorIdentityClient: ateapipb.NewActorIdentityClient(ateapiConn)}
+	if *brokerTokenIssuer != "" {
+		broker.tokenAuth, err = newBrokerTokenAuthenticator(ctx, *brokerTokenIssuer, *brokerTokenAudience, *brokerTokenCA, *brokerDiscoveryToken)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to configure credential broker token authentication", err)
+		}
+	} else {
+		ateletCert, err := credbundle.Parse(*grpcServerCredBundle)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to load atelet Pod identity", err)
+		}
+		ateletIdentity, err := substratex509.PodIdentityFromCertificate(ateletCert.Leaf)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to load atelet Pod identity", err)
+		}
+		if ateletIdentity == nil {
+			serverboot.Fatal(ctx, "Failed to load atelet Pod identity", fmt.Errorf("credential bundle has no Pod identity"))
+		}
+		brokerTLS.VerifyConnection = verifyClientOnSameNode(ateletIdentity)
+	}
 	if err := os.Remove(ateompath.CredentialBrokerSocket); err != nil && !errors.Is(err, os.ErrNotExist) {
 		serverboot.Fatal(ctx, "Failed to remove stale credential broker socket", err)
 	}
@@ -298,20 +316,31 @@ func main() {
 		serverboot.Fatal(ctx, "Failed to restrict credential broker socket", err)
 	}
 	brokerServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(brokerTLS)))
-	ateletpb.RegisterCredentialBrokerServer(brokerServer, &credentialBroker{
-		actorIdentityClient: ateapipb.NewActorIdentityClient(ateapiConn),
-	})
+	ateletpb.RegisterCredentialBrokerServer(brokerServer, broker)
 	go func() {
 		if err := brokerServer.Serve(brokerLis); err != nil {
 			serverboot.Fatal(ctx, "Failed to serve credential broker", err)
 		}
 	}()
 
-	svr := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(tlsCfg)),
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.UnaryInterceptor(ateinterceptors.InternalServerUnaryInterceptor),
-	)
+	serverOptions := []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsCfg)), grpc.StatsHandler(otelgrpc.NewServerHandler())}
+	if *brokerTokenIssuer != "" {
+		kubeConfig, err := rest.InClusterConfig()
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to build Kubernetes client config", err)
+		}
+		clientset, err := kubernetes.NewForConfig(kubeConfig)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to build Kubernetes client", err)
+		}
+		serverOptions = append(serverOptions, grpc.ChainUnaryInterceptor(
+			tokenReviewUnaryInterceptor(clientset, *managementTokenAudience, "system:serviceaccount:ate-system:ate-api-server"),
+			ateinterceptors.InternalServerUnaryInterceptor,
+		))
+	} else {
+		serverOptions = append(serverOptions, grpc.UnaryInterceptor(ateinterceptors.InternalServerUnaryInterceptor))
+	}
+	svr := grpc.NewServer(serverOptions...)
 	ateletpb.RegisterAteomHerderServer(svr, wmService)
 	reflection.Register(svr)
 	slog.InfoContext(ctx, "WorkersManagerService listening", slog.Any("address", lis.Addr()))
@@ -1860,6 +1889,9 @@ func resetActorDirs(actorUID string) error {
 // credential bundle at servingBundlePath, requires a client certificate
 // chaining to a CA in clientCAPath.
 func ateletServerTLSConfig(servingBundlePath, clientCAPath string) (*tls.Config, error) {
+	if clientCAPath == "" {
+		return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: credbundle.Loader(servingBundlePath)}, nil
+	}
 	caBytes, err := os.ReadFile(clientCAPath)
 	if err != nil {
 		return nil, fmt.Errorf("read CA bundle %s: %w", clientCAPath, err)
@@ -1890,4 +1922,32 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 		return nil, nil, fmt.Errorf("create ate clientset: %w", err)
 	}
 	return clientset, ateClient, nil
+}
+
+func newBrokerTokenAuthenticator(ctx context.Context, issuer, audience, caFile, discoveryTokenFile string) (*brokerTokenAuthenticator, error) {
+	if issuer == "" || audience == "" {
+		return nil, fmt.Errorf("credential broker token issuer and audience are required")
+	}
+	nodeName := os.Getenv("MY_NODE_NAME")
+	if nodeName == "" {
+		return nil, fmt.Errorf("MY_NODE_NAME is required for credential broker token authentication")
+	}
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("build Kubernetes client config: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("build Kubernetes client: %w", err)
+	}
+	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get local node %q: %w", nodeName, err)
+	}
+	return &brokerTokenAuthenticator{
+		client:   clientset,
+		audience: audience,
+		nodeName: node.Name,
+		nodeUID:  string(node.UID),
+	}, nil
 }

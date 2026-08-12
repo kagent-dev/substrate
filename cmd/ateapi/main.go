@@ -32,12 +32,12 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/actoridentity"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/controlapi"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/debugapi"
-	"github.com/agent-substrate/substrate/cmd/ateapi/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/ateredis"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/credbundle"
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/agent-substrate/substrate/internal/volume"
@@ -71,6 +71,7 @@ var (
 	redisUseIAMAuth     = pflag.String("redis-use-iam-auth", "true", "Whether to use Google IAM authentication for Redis/Valkey.")
 	redisTLSServerName  = pflag.String("redis-tls-server-name", "", "The ServerName to use for Redis TLS hostname verification.")
 	redisClientCert     = pflag.String("redis-client-cert", "", "The file containing client TLS certificate/key credential bundle for Redis/Valkey.")
+	redisPasswordFile   = pflag.String("redis-password-file", "", "File containing the Redis/Valkey password.")
 
 	clientJWTIssuer      = pflag.String("client-jwt-issuer", "", "The expected issuer URL for client JWTs.")
 	clientJWTAudience    = pflag.String("client-jwt-audience", "", "The expected audience for client JWTs.")
@@ -80,6 +81,8 @@ var (
 	actorIDCAPoolFile      = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
 	podIdentityCACerts     = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
 	ateletClientCredBundle = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
+	ateletServerName       = pflag.String("atelet-server-name", "", "DNS identity expected on atelet's ordinary TLS certificate. Empty uses Pod identity mTLS.")
+	ateletTokenFile        = pflag.String("atelet-token-file", "", "Projected ServiceAccount token sent to atelet management RPCs.")
 
 	drainDelay   = pflag.Duration("drain-delay", 13*time.Second, "How long to keep accepting new work after SIGTERM, before starting the gRPC drain.")
 	drainTimeout = pflag.Duration("drain-timeout", 15*time.Second, "Deadline for the graceful gRPC drain on shutdown. In-flight RPCs still running past it are forcefully cancelled.")
@@ -186,12 +189,13 @@ func main() {
 	}
 
 	volPlugins := make(map[string]volume.VolumePluginControlPlane)
-	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts)
+	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts, *ateletServerName, *ateletTokenFile)
 	sm := controlapi.NewService(redisPersistence, workerCache, actorTemplateLister, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, storageClassLister, ateletDialer, instruments, *egressGatewayAddress, volPlugins)
 
 	jwtIssuerDiscoveryClient := buildK8sServiceAccountIssuerDiscoveryClient(ctx, *clientJWTCAFile, *clientJWTIssuer)
 
 	actorIdentitySrv := actoridentity.New(*clientJWTIssuer, *clientJWTAudience, *actorIDJWTPoolFile, *actorIDCAPoolFile, *podIdentityCACerts, jwtIssuerDiscoveryClient, redisPersistence, workerCache)
+	actorIdentitySrv.SetKubernetesClient(clientset)
 	debugSrv := debugapi.NewService(redisPersistence)
 
 	lisCfg := &net.ListenConfig{}
@@ -201,12 +205,8 @@ func main() {
 	}
 
 	authCfg := ateapiauth.ServerConfig{
-		VerifyBearerToken: func(ctx context.Context, bearer string) (string, error) {
-			claims, err := k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
-			if err != nil {
-				return "", err
-			}
-			return claims.Subject, nil
+		VerifyKubernetesToken: func(ctx context.Context, bearer string) (*k8sjwt.KubernetesClaims, error) {
+			return k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
 		},
 	}
 	if err := ateapiauth.ValidateServerConfig(authCfg); err != nil {
@@ -309,12 +309,15 @@ func logFlagValues(ctx context.Context) {
 		slog.String("redis-use-iam-auth", *redisUseIAMAuth),
 		slog.String("redis-tls-server-name", *redisTLSServerName),
 		slog.String("redis-client-cert", *redisClientCert),
+		slog.String("redis-password-file", *redisPasswordFile),
 		slog.String("client-jwt-issuer", *clientJWTIssuer),
 		slog.String("client-jwt-audience", *clientJWTAudience),
 		slog.String("actor-id-jwt-pool", *actorIDJWTPoolFile),
 		slog.String("actor-id-ca-pool", *actorIDCAPoolFile),
 		slog.String("pod-identity-ca-certs", *podIdentityCACerts),
 		slog.String("atelet-client-cred-bundle", *ateletClientCredBundle),
+		slog.String("atelet-server-name", *ateletServerName),
+		slog.String("atelet-token-file", *ateletTokenFile),
 		slog.Duration("drain-delay", *drainDelay),
 		slog.Duration("drain-timeout", *drainTimeout),
 	)
@@ -327,10 +330,19 @@ func connectRedis(ctx context.Context) (*redis.ClusterClient, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	clusterOpts := &redis.ClusterOptions{
 		Addrs:     []string{*redisClusterAddress},
 		TLSConfig: tlsConfig,
+	}
+	if *redisPasswordFile != "" {
+		password, err := os.ReadFile(*redisPasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("read Redis password: %w", err)
+		}
+		clusterOpts.Password = strings.TrimSpace(string(password))
+		if clusterOpts.Password == "" {
+			return nil, fmt.Errorf("Redis password file %q is empty", *redisPasswordFile)
+		}
 	}
 
 	if *redisUseIAMAuth != "false" {

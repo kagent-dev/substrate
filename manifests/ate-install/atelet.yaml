@@ -31,6 +31,12 @@ rules:
 - apiGroups: ["ate.dev"]
   resources: ["csidriverconfigs"]
   verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get"]
+- apiGroups: ["authentication.k8s.io"]
+  resources: ["tokenreviews"]
+  verbs: ["create"]
 ---
 # 3. Bind Identity to Permissions
 apiVersion: rbac.authorization.k8s.io/v1

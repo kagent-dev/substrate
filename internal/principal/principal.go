@@ -14,7 +14,11 @@
 
 package principal
 
-import "context"
+import (
+	"context"
+
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
+)
 
 // Kind values for PrincipalInfo, named after the authentication method that
 // established the identity.
@@ -25,8 +29,9 @@ const (
 
 // PrincipalInfo contains information about an authenticated principal.
 type PrincipalInfo struct {
-	ID   string
-	Kind string
+	ID               string
+	Kind             string
+	KubernetesClaims *k8sjwt.KubernetesClaims
 }
 
 type contextKey struct{}

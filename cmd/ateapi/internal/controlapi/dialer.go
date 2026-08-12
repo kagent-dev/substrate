@@ -22,6 +22,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/credbundle"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -60,15 +61,17 @@ type AteletDialer struct {
 	// atelet, keyed on the atelet's expected pod UID. Production wires this to
 	// per-atelet mTLS; tests can override it with insecure credentials.
 	dialCredentials func(expectedPodUID string) (credentials.TransportCredentials, error)
+	tokenFile       string
 }
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
 // are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath, serverName string) *AteletDialer {
+func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, clientBundlePath, serverCAPath, serverName, tokenFile string) *AteletDialer {
 	return &AteletDialer{
 		workerIndexer: workerIndexer,
 		ateletIndexer: ateletIndexer,
 		ateletConns:   lru.New(1024),
+		tokenFile:     tokenFile,
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
 			return ateletTransportCredentials(clientBundlePath, serverCAPath, serverName, expectedPodUID)
 		},
@@ -156,11 +159,11 @@ func (d *AteletDialer) DialForAteletOnNode(nodeName string) (*grpc.ClientConn, e
 		return nil, fmt.Errorf("while building atelet credentials: %w", err)
 	}
 
-	ateletConn, err := grpc.NewClient(
-		selectedAtelet.Status.PodIPs[0].IP+":8085",
-		grpc.WithTransportCredentials(creds),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-	)
+	dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(creds), grpc.WithStatsHandler(otelgrpc.NewClientHandler())}
+	if d.tokenFile != "" {
+		dialOptions = append(dialOptions, grpc.WithPerRPCCredentials(ateapiauth.FileTokenCredentials(d.tokenFile)))
+	}
+	ateletConn, err := grpc.NewClient(selectedAtelet.Status.PodIPs[0].IP+":8085", dialOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("while creating atelet gRPC client connection: %w", err)
 	}

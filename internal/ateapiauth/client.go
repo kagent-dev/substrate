@@ -133,6 +133,11 @@ type fileTokenCreds struct {
 	path string
 }
 
+// FileTokenCredentials returns rotating Bearer credentials backed by path.
+func FileTokenCredentials(path string) credentials.PerRPCCredentials {
+	return &fileTokenCreds{path: path}
+}
+
 func (c *fileTokenCreds) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
 	b, err := os.ReadFile(c.path)
 	if err != nil {

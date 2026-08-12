@@ -19,7 +19,12 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../base
+  - ../ate-api-server.yaml
+  - ../ate-controller.yaml
+  - ../atelet.yaml
+  - ../atenet-dns.yaml
+  - ../atenet-router.yaml
+  - ../valkey.yaml
 
 patches:
   - path: patches.yaml

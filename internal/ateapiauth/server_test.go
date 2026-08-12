@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/principal"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -199,6 +200,20 @@ func TestJWTServerAuthenticatorInjectsPrincipal(t *testing.T) {
 	want := principal.PrincipalInfo{ID: subject, Kind: principal.KindJWT}
 	if got != want {
 		t.Errorf("principal=%+v want %+v", got, want)
+	}
+}
+
+func TestJWTServerAuthenticatorPreservesKubernetesClaims(t *testing.T) {
+	claims := &k8sjwt.KubernetesClaims{Subject: "system:serviceaccount:ate-system:atelet", PodUID: "pod-uid"}
+	auth := jwtServerAuthenticator{verifyKubernetesToken: func(context.Context, string) (*k8sjwt.KubernetesClaims, error) { return claims, nil }}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer token"))
+	ctx, err := auth.authenticate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := principal.FromContext(ctx)
+	if !ok || got.KubernetesClaims != claims {
+		t.Fatalf("principal claims = %#v, want %#v", got.KubernetesClaims, claims)
 	}
 }
 

@@ -32,7 +32,9 @@ import (
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/storetest"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
+	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/localca"
+	"github.com/agent-substrate/substrate/internal/principal"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/substratex509"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -40,7 +42,34 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+func TestAuthenticateAteletJWTIsBoundToLivePod(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ateletNamespace, Name: "atelet-1", UID: types.UID("pod-uid")}, Spec: corev1.PodSpec{ServiceAccountName: ateletSA, NodeName: testNode}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testNode, UID: types.UID("node-uid")}}
+	srv := &Server{pods: fake.NewSimpleClientset(pod, node)}
+	claims := &k8sjwt.KubernetesClaims{
+		Subject: "system:serviceaccount:ate-system:atelet", Namespace: ateletNamespace, ServiceAccountName: ateletSA,
+		PodName: pod.Name, PodUID: string(pod.UID), NodeName: testNode, NodeUID: string(node.UID),
+	}
+	ctx := principal.InjectContext(context.Background(), principal.PrincipalInfo{ID: claims.Subject, Kind: principal.KindJWT, KubernetesClaims: claims})
+	caller, err := srv.authenticateAtelet(ctx)
+	if err != nil || caller.nodeName != testNode {
+		t.Fatalf("valid atelet token rejected: caller=%+v err=%v", caller, err)
+	}
+	claims.PodUID = "stale-pod-uid"
+	if _, err := srv.authenticateAtelet(ctx); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("stale Pod UID code = %v, want PermissionDenied", status.Code(err))
+	}
+	claims.PodUID, claims.NodeUID = string(pod.UID), "stale-node-uid"
+	if _, err := srv.authenticateAtelet(ctx); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("stale Node UID code = %v, want PermissionDenied", status.Code(err))
+	}
+}
 
 const (
 	testAtespace  = "team-alpha"

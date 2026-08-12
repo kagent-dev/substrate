@@ -37,6 +37,11 @@ fi
 
 # ATE_DEMOS is an array that registers the prefix name of the demo functions.
 ATE_DEMOS=()
+ATE_VALKEY_AUTH_SECRET_PROVIDED=false
+if [[ -n "${ATE_VALKEY_AUTH_SECRET:-}" ]]; then
+  ATE_VALKEY_AUTH_SECRET_PROVIDED=true
+fi
+ATE_VALKEY_AUTH_SECRET="${ATE_VALKEY_AUTH_SECRET:-valkey-auth}"
 
 # Include demos.
 source "${ROOT}"/hack/install-demo-counter.sh
@@ -68,6 +73,7 @@ function usage() {
   echo "  --delete-all                           Delete core system and all registered demos"
   echo "  --ateapi-client-auth=cert|token        Select how in-cluster clients authenticate to ateapi for --deploy-ate-system (default: cert; the server always accepts both)"
   echo "  --atenet-router=envoy|agentgateway     Select the atenet router dataplane (default: envoy)"
+  echo "  --valkey-auth-secret=NAME              Use an existing Valkey password Secret in token mode (key: password)"
   echo ""
   echo "Infrastructure components:"
   echo ""
@@ -180,7 +186,8 @@ render_ate_system_manifests() {
         overlay="manifests/ate-install/kind-agentgateway-token-client"
       fi
     fi
-    kubectl kustomize "${overlay}" --load-restrictor LoadRestrictionsNone | run_ko resolve -f -
+    kubectl kustomize "${overlay}" --load-restrictor LoadRestrictionsNone | run_ko resolve -f - \
+      | sed "s/secretName: valkey-auth$/secretName: ${ATE_VALKEY_AUTH_SECRET}/"
     return
   fi
 
@@ -189,7 +196,8 @@ render_ate_system_manifests() {
     if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
       overlay="manifests/ate-install/kind-token-client"
     fi
-    kubectl kustomize "${overlay}" --load-restrictor LoadRestrictionsNone | run_ko resolve -f -
+    kubectl kustomize "${overlay}" --load-restrictor LoadRestrictionsNone | run_ko resolve -f - \
+      | sed "s/secretName: valkey-auth$/secretName: ${ATE_VALKEY_AUTH_SECRET}/"
     return
   fi
 
@@ -272,6 +280,27 @@ create_jwt_authority_pool_secret() {
     --key-id="1" \
     --name="actor-id-jwt-pool" \
     --secret-namespace=ate-system
+}
+
+create_token_mode_tls() (
+  log_step "create_token_mode_tls"
+  run_kubectl_ate admin make-token-mode-tls \
+    --dns-names='api.ate-system.svc,internal.ate-system.svc,atenet-router.ate-system.svc,atenet-egress.ate-system.svc,valkey-cluster.ate-system.svc,*.valkey-cluster-service.ate-system.svc'
+)
+
+ensure_valkey_auth_secret() {
+  if run_kubectl get secret -n ate-system "${ATE_VALKEY_AUTH_SECRET}" >/dev/null 2>&1; then
+    run_kubectl get secret -n ate-system "${ATE_VALKEY_AUTH_SECRET}" -o jsonpath='{.data.password}' | grep -q . \
+      || { echo "Error: Valkey auth Secret ${ATE_VALKEY_AUTH_SECRET} has no password key" >&2; return 1; }
+    return
+  fi
+  if [[ "${ATE_VALKEY_AUTH_SECRET_PROVIDED}" == "true" ]]; then
+    echo "Error: requested Valkey auth Secret ate-system/${ATE_VALKEY_AUTH_SECRET} does not exist" >&2
+    return 1
+  fi
+  local password=""
+  password=$(openssl rand -base64 32)
+  run_kubectl create secret generic "${ATE_VALKEY_AUTH_SECRET}" -n ate-system --from-literal=password="${password}"
 }
 
 create_actor_id_ca_pool_secret() {
@@ -453,10 +482,19 @@ ensure_apiserver_prerequisites() {
   # Derived from actor-id-ca-pool above, so it must come after it.
   run_kubectl get secret -n ate-system actor-id-ca-certs >/dev/null 2>&1 \
     || create_actor_id_ca_certs_secret
-  run_kubectl get secret -n podcertificate-controller-system service-dns-ca-pool >/dev/null 2>&1 \
-    || create_podcertificate_controller_cas
-  run_kubectl get secret -n ate-system valkey-ca-certs >/dev/null 2>&1 \
-    || create_valkey_ca_certs_secret
+  if [[ "$(ateapi_client_auth)" == "cert" ]]; then
+    run_kubectl get secret -n podcertificate-controller-system service-dns-ca-pool >/dev/null 2>&1 \
+      || create_podcertificate_controller_cas
+    run_kubectl get secret -n ate-system valkey-ca-certs >/dev/null 2>&1 \
+      || create_valkey_ca_certs_secret
+  else
+    if ! run_kubectl get secret -n ate-system token-mode-ca >/dev/null 2>&1 \
+      || ! run_kubectl get secret -n ate-system token-mode-tls >/dev/null 2>&1 \
+      || ! run_kubectl get configmap -n ate-system token-mode-ca >/dev/null 2>&1; then
+      create_token_mode_tls
+    fi
+    ensure_valkey_auth_secret
+  fi
   run_kubectl get configmap -n ate-system ate-api-server-envvars >/dev/null 2>&1 \
     || create_api_server_env_vars
 }
@@ -713,6 +751,14 @@ for ((i = 0; i < ${#prescan_args[@]}; i++)); do
       fi
       ATE_ATENET_ROUTER="${prescan_args[$((i + 1))]}"
       ;;
+    --valkey-auth-secret=*)
+      ATE_VALKEY_AUTH_SECRET="${prescan_args[i]#*=}"
+      ATE_VALKEY_AUTH_SECRET_PROVIDED=true
+      ;;
+    --valkey-auth-secret)
+      ATE_VALKEY_AUTH_SECRET="${prescan_args[i+1]:-}"
+      ATE_VALKEY_AUTH_SECRET_PROVIDED=true
+      ;;
     --benchmark-worker-count)
       BENCHMARK_WORKER_COUNT="${prescan_args[i+1]:-1}"
       ;;
@@ -742,6 +788,10 @@ case "${BENCHMARK_SANDBOX_CLASS}" in
     exit 1
     ;;
 esac
+if [[ ! "${ATE_VALKEY_AUTH_SECRET}" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+  echo "Error: invalid --valkey-auth-secret name '${ATE_VALKEY_AUTH_SECRET}'" >&2
+  exit 1
+fi
 
 while [[ "$#" -gt 0 ]]; do
   # Run ${demo}_cmdline if it exists. If it returns 0, then we successfully
@@ -775,6 +825,8 @@ while [[ "$#" -gt 0 ]]; do
       fi
       ATE_ATENET_ROUTER="$1"
       ;;
+    --valkey-auth-secret=*) ;;
+    --valkey-auth-secret) shift ;;
 
     --deploy-ate-system) deploy_ate_system ;;
     --setup-csi)

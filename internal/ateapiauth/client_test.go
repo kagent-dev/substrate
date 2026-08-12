@@ -188,6 +188,24 @@ func TestDialOptionsTokenSendsBearer(t *testing.T) {
 	}
 }
 
+func TestFileTokenCredentialsReloadsRotatedToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	writeFile(t, path, []byte("first"))
+	creds := FileTokenCredentials(path)
+	first, err := creds.GetRequestMetadata(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, []byte("second\n"))
+	second, err := creds.GetRequestMetadata(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first["authorization"] != "Bearer first" || second["authorization"] != "Bearer second" {
+		t.Fatalf("authorization before/after rotation = %q/%q", first["authorization"], second["authorization"])
+	}
+}
+
 func healthCheckCode(ctx context.Context, t *testing.T, target string, opts []grpc.DialOption) codes.Code {
 	t.Helper()
 	conn, err := grpc.NewClient(target, opts...)

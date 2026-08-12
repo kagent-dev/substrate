@@ -78,13 +78,16 @@ spec:
         - --grpc-listen-addr=0.0.0.0:443
         - --grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem
         - --redis-cluster-address=@env
-        - --redis-no-tls=true
+        - --redis-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
+        - --redis-tls-server-name=valkey-cluster.ate-system.svc
+        - --redis-password-file=/run/valkey-auth/password
         - --redis-use-iam-auth=@env
         - --client-jwt-issuer=@env
         - --client-jwt-audience=api.ate-system.svc
         - --actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json
         - --actor-id-ca-pool=/run/actor-id-ca-pool/pool.json
         - --atelet-server-name=internal.ate-system.svc
+        - --atelet-token-file=/run/atelet-token/token
         - --atelet-client-cred-bundle=
         - --pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - --drain-delay=13s
@@ -101,6 +104,12 @@ spec:
           readOnly: true
         - name: valkey-ca-certs
           $patch: delete
+        - name: valkey-auth
+          mountPath: /run/valkey-auth
+          readOnly: true
+        - name: atelet-token
+          mountPath: /run/atelet-token
+          readOnly: true
       volumes:
       - $patch: replace
       - name: servicedns
@@ -128,6 +137,16 @@ spec:
               items:
               - key: pool
                 path: pool.json
+      - name: valkey-auth
+        secret:
+          secretName: valkey-auth
+      - name: atelet-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              audience: atelet.ate-system.svc
+              expirationSeconds: 3600
+              path: token
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -277,7 +296,14 @@ metadata:
   namespace: ate-system
 data:
   valkey.conf: |
-    port 6379
+    port 0
+    tls-port 6379
+    tls-cluster yes
+    tls-replication yes
+    tls-cert-file /run/token-mode-tls/tls.crt
+    tls-key-file /run/token-mode-tls/tls.key
+    tls-ca-cert-file /run/token-mode-ca/ca.crt
+    tls-auth-clients no
     cluster-enabled yes
     cluster-config-file nodes.conf
     cluster-node-timeout 5000
@@ -303,9 +329,11 @@ spec:
           cp /etc/valkey/valkey.conf /tmp/valkey.conf
           {
             echo "cluster-announce-hostname ${POD_DNS}"
-            echo "cluster-announce-port 6379"
+            echo "cluster-announce-tls-port 6379"
             echo "cluster-announce-bus-port 16379"
             echo "cluster-preferred-endpoint-type hostname"
+            echo "requirepass $(cat /run/valkey-auth/password)"
+            echo "masterauth $(cat /run/valkey-auth/password)"
           } >> /tmp/valkey.conf
           exec valkey-server /tmp/valkey.conf
         volumeMounts:
@@ -314,18 +342,29 @@ spec:
         - name: data
           mountPath: /data
         - name: servicedns
-          $patch: delete
+          mountPath: /run/token-mode-tls
         - name: podidentity
           $patch: delete
         - name: valkey-ca-certs
-          $patch: delete
+          mountPath: /run/token-mode-ca
+          readOnly: true
+        - name: valkey-auth
+          mountPath: /run/valkey-auth
+          readOnly: true
       volumes:
+      - $patch: replace
+      - name: config
+        configMap:
+          name: valkey-config
       - name: servicedns
-        $patch: delete
-      - name: podidentity
-        $patch: delete
+        secret:
+          secretName: token-mode-tls
       - name: valkey-ca-certs
-        $patch: delete
+        configMap:
+          name: token-mode-ca
+      - name: valkey-auth
+        secret:
+          secretName: valkey-auth
 ---
 apiVersion: batch/v1
 kind: Job
@@ -341,7 +380,11 @@ spec:
         - name: podidentity
           $patch: delete
         - name: valkey-ca-certs
-          $patch: delete
+          mountPath: /run/token-mode-ca
+          readOnly: true
+        - name: valkey-auth
+          mountPath: /run/valkey-auth
+          readOnly: true
         command:
         - /bin/sh
         - -c
@@ -354,13 +397,18 @@ spec:
           for i in 0 1 2 3 4 5; do
             VALKEY_NODES="${VALKEY_NODES} valkey-cluster-${i}.valkey-cluster-service.ate-system.svc:6379"
           done
-          until valkey-cli -h valkey-cluster-0.valkey-cluster-service.ate-system.svc ping >/dev/null 2>&1; do sleep 2; done
-          INIT_STATUS=$(valkey-cli -h valkey-cluster-0.valkey-cluster-service.ate-system.svc cluster info 2>/dev/null | grep cluster_state || true)
+          VALKEYCLI_AUTH=$(cat /run/valkey-auth/password)
+          export VALKEYCLI_AUTH
+          until valkey-cli --tls --cacert /run/token-mode-ca/ca.crt -h valkey-cluster-0.valkey-cluster-service.ate-system.svc ping >/dev/null 2>&1; do sleep 2; done
+          INIT_STATUS=$(valkey-cli --tls --cacert /run/token-mode-ca/ca.crt -h valkey-cluster-0.valkey-cluster-service.ate-system.svc cluster info 2>/dev/null | grep cluster_state || true)
           if [ -z "${INIT_STATUS}" ] || ! echo "${INIT_STATUS}" | grep -q "cluster_state:ok"; then
-            valkey-cli --cluster create ${VALKEY_NODES} --cluster-replicas 1 --cluster-yes
+            valkey-cli --tls --cacert /run/token-mode-ca/ca.crt --cluster create ${VALKEY_NODES} --cluster-replicas 1 --cluster-yes
           fi
       volumes:
-      - name: podidentity
-        $patch: delete
+      - $patch: replace
       - name: valkey-ca-certs
-        $patch: delete
+        configMap:
+          name: token-mode-ca
+      - name: valkey-auth
+        secret:
+          secretName: valkey-auth
