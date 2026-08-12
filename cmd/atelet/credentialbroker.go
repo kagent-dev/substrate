@@ -121,17 +121,12 @@ func (a *brokerTokenAuthenticator) authenticate(ctx context.Context) (*substrate
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
 	}
-	claims := &k8sjwt.KubernetesClaims{
-		Subject: reviewed.Subject, Namespace: reviewed.Namespace, ServiceAccountName: reviewed.ServiceAccountName,
-		ServiceAccountUID: reviewed.ServiceAccountUID, PodName: reviewed.PodName, PodUID: reviewed.PodUID,
-		NodeName: reviewed.NodeName, NodeUID: reviewed.NodeUID,
-	}
-	if err := validateBrokerTokenClaims(claims, a.nodeName, a.nodeUID); err != nil {
+	if err := validateBrokerTokenClaims(reviewed, a.nodeName, a.nodeUID); err != nil {
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 	return &substratex509.PodIdentity{
-		Namespace: claims.Namespace, ServiceAccountName: claims.ServiceAccountName, ServiceAccountUID: claims.ServiceAccountUID,
-		PodName: claims.PodName, PodUID: claims.PodUID, NodeName: claims.NodeName, NodeUID: claims.NodeUID,
+		Namespace: reviewed.Namespace, ServiceAccountName: reviewed.ServiceAccountName, ServiceAccountUID: reviewed.ServiceAccountUID,
+		PodName: reviewed.PodName, PodUID: reviewed.PodUID, NodeName: reviewed.NodeName, NodeUID: reviewed.NodeUID,
 	}, nil
 }
 

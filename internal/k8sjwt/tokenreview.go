@@ -32,13 +32,9 @@ const (
 	nodeUIDExtra  = "authentication.kubernetes.io/node-uid"
 )
 
-// ReviewedClaims is the identity Kubernetes authenticated through TokenReview.
-type ReviewedClaims struct {
-	Subject, Namespace, ServiceAccountName, ServiceAccountUID string
-	PodName, PodUID, NodeName, NodeUID                        string
-}
-
-func TokenReview(ctx context.Context, client kubernetes.Interface, token, audience string) (*ReviewedClaims, error) {
+// TokenReview asks Kubernetes to authenticate a token and returns its live
+// ServiceAccount and object-bound identity.
+func TokenReview(ctx context.Context, client kubernetes.Interface, token, audience string) (*KubernetesClaims, error) {
 	review, err := client.AuthenticationV1().TokenReviews().Create(ctx, &authenticationv1.TokenReview{
 		Spec: authenticationv1.TokenReviewSpec{Token: token, Audiences: []string{audience}},
 	}, metav1.CreateOptions{})
@@ -58,7 +54,7 @@ func TokenReview(ctx context.Context, client kubernetes.Interface, token, audien
 		}
 		return ""
 	}
-	return &ReviewedClaims{
+	return &KubernetesClaims{
 		Subject: review.Status.User.Username, Namespace: parts[2], ServiceAccountName: parts[3], ServiceAccountUID: review.Status.User.UID,
 		PodName: first(podNameExtra), PodUID: first(podUIDExtra), NodeName: first(nodeNameExtra), NodeUID: first(nodeUIDExtra),
 	}, nil

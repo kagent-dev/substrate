@@ -45,3 +45,18 @@ func TestTokenReviewExtractsBoundIdentity(t *testing.T) {
 		t.Fatalf("claims = %+v", claims)
 	}
 }
+
+func TestTokenReviewRejectsUnacceptedStatus(t *testing.T) {
+	for _, status := range []authenticationv1.TokenReviewStatus{
+		{Authenticated: false},
+		{Authenticated: true, Audiences: []string{"other"}},
+	} {
+		client := fake.NewSimpleClientset()
+		client.PrependReactor("create", "tokenreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+			return true, &authenticationv1.TokenReview{Status: status}, nil
+		})
+		if _, err := TokenReview(t.Context(), client, "token", "atelet"); err == nil {
+			t.Fatalf("TokenReview accepted status %+v", status)
+		}
+	}
+}

@@ -44,8 +44,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 // Server implements ateapipb.ActorIdentityServer
@@ -66,10 +64,7 @@ type Server struct {
 	// is entitled to the actor it is asking for a credential for.
 	store   store.Interface
 	workers *workercache.Cache
-	pods    kubernetes.Interface
 }
-
-func (s *Server) SetKubernetesClient(client kubernetes.Interface) { s.pods = client }
 
 var _ ateapipb.ActorIdentityServer = (*Server)(nil)
 
@@ -175,7 +170,7 @@ func (s *Server) MintJWT(ctx context.Context, req *ateapipb.MintJWTRequest) (*at
 }
 
 func (s *Server) MintCert(ctx context.Context, req *ateapipb.MintCertRequest) (*ateapipb.MintCertResponse, error) {
-	caller, err := s.authenticateAtelet(ctx)
+	caller, err := authenticateAtelet(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -280,31 +275,20 @@ type ateletCaller struct {
 	nodeName string
 }
 
-// authenticateAtelet verifies that the RPC arrived over mTLS from an atelet,
-// and returns the identity that atelet's certificate asserts.
-//
-// The certificate chain is already verified by the TLS layer against the
-// pod-identity CA (see buildServerCreds in cmd/ateapi/main.go), so the
-// extensions read here are trustworthy: only the pod-identity signer can mint
-// a certificate carrying a given pod's node name.
-func (s *Server) authenticateAtelet(ctx context.Context) (*ateletCaller, error) {
+// authenticateAtelet extracts an atelet identity established by the server
+// authentication interceptor or by the verified mTLS client certificate.
+func authenticateAtelet(ctx context.Context) (*ateletCaller, error) {
 	if p, ok := principal.FromContext(ctx); ok && p.Kind == principal.KindJWT {
 		claims := p.KubernetesClaims
-		if claims == nil || claims.Subject != "system:serviceaccount:ate-system:atelet" || claims.Namespace != ateletNamespace || claims.ServiceAccountName != ateletSA || claims.PodName == "" || claims.PodUID == "" || claims.NodeName == "" || claims.NodeUID == "" {
+		if claims == nil ||
+			claims.Namespace != ateletNamespace ||
+			claims.ServiceAccountName != ateletSA ||
+			claims.Subject != "system:serviceaccount:"+ateletNamespace+":"+ateletSA ||
+			claims.PodName == "" || claims.PodUID == "" ||
+			claims.NodeName == "" || claims.NodeUID == "" {
 			return nil, status.Error(codes.PermissionDenied, "caller is not permitted to mint actor credentials")
 		}
-		if s.pods == nil {
-			return nil, status.Error(codes.Internal, "Kubernetes client is not configured")
-		}
-		pod, err := s.pods.CoreV1().Pods(claims.Namespace).Get(ctx, claims.PodName, metav1.GetOptions{})
-		if err != nil || string(pod.UID) != claims.PodUID || pod.Spec.ServiceAccountName != ateletSA || pod.Spec.NodeName != claims.NodeName {
-			return nil, status.Error(codes.PermissionDenied, "caller is not permitted to mint actor credentials")
-		}
-		node, err := s.pods.CoreV1().Nodes().Get(ctx, claims.NodeName, metav1.GetOptions{})
-		if err != nil || string(node.UID) != claims.NodeUID {
-			return nil, status.Error(codes.PermissionDenied, "caller is not permitted to mint actor credentials")
-		}
-		return &ateletCaller{podName: claims.PodName, nodeName: pod.Spec.NodeName}, nil
+		return &ateletCaller{podName: claims.PodName, nodeName: claims.NodeName}, nil
 	}
 	p, ok := peer.FromContext(ctx)
 	if !ok {

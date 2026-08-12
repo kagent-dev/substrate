@@ -68,3 +68,15 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/args/-
         value: --ateapi-token-file=/run/ateapi-token/token
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRole
+      name: ate-api-server
+    patch: |-
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups: ["authentication.k8s.io"]
+          resources: ["tokenreviews"]
+          verbs: ["create"]

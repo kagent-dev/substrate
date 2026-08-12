@@ -195,7 +195,6 @@ func main() {
 	jwtIssuerDiscoveryClient := buildK8sServiceAccountIssuerDiscoveryClient(ctx, *clientJWTCAFile, *clientJWTIssuer)
 
 	actorIdentitySrv := actoridentity.New(*clientJWTIssuer, *clientJWTAudience, *actorIDJWTPoolFile, *actorIDCAPoolFile, *podIdentityCACerts, jwtIssuerDiscoveryClient, redisPersistence, workerCache)
-	actorIdentitySrv.SetKubernetesClient(clientset)
 	debugSrv := debugapi.NewService(redisPersistence)
 
 	lisCfg := &net.ListenConfig{}
@@ -209,6 +208,14 @@ func main() {
 			claims, err := k8sjwt.Verify(ctx, jwtIssuerDiscoveryClient, bearer, *clientJWTIssuer, *clientJWTAudience, time.Now())
 			if err != nil {
 				return ateapiauth.VerifiedBearerToken{}, err
+			}
+			// Offline JWT verification cannot tell whether a bound Pod still
+			// exists. Delegate that check to Kubernetes for Pod-bound callers.
+			if claims.PodName != "" || claims.PodUID != "" {
+				claims, err = k8sjwt.TokenReview(ctx, clientset, bearer, *clientJWTAudience)
+				if err != nil {
+					return ateapiauth.VerifiedBearerToken{}, err
+				}
 			}
 			return ateapiauth.VerifiedBearerToken{ID: claims.Subject, KubernetesClaims: claims}, nil
 		},
