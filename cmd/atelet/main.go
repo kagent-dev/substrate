@@ -282,9 +282,9 @@ func main() {
 		serverboot.Fatal(ctx, "Failed to build server TLS config", err)
 	}
 	brokerTLS := tlsCfg.Clone()
-	broker := &credentialBroker{actorIdentityClient: ateapipb.NewActorIdentityClient(ateapiConn)}
+	var workerAuth workerAuthenticator
 	if *brokerTokenIssuer != "" {
-		broker.tokenAuth, err = newBrokerTokenAuthenticator(ctx, *brokerTokenAudience)
+		workerAuth, err = newJWTWorkerAuthenticator(ctx, *brokerTokenAudience)
 		if err != nil {
 			serverboot.Fatal(ctx, "Failed to configure credential broker token authentication", err)
 		}
@@ -301,7 +301,9 @@ func main() {
 			serverboot.Fatal(ctx, "Failed to load atelet Pod identity", fmt.Errorf("credential bundle has no Pod identity"))
 		}
 		brokerTLS.VerifyConnection = verifyClientOnSameNode(ateletIdentity)
+		workerAuth = mtlsWorkerAuthenticator{}
 	}
+	broker := &credentialBroker{actorIdentityClient: ateapipb.NewActorIdentityClient(ateapiConn), workerAuth: workerAuth}
 	if err := os.Remove(ateompath.CredentialBrokerSocket); err != nil && !errors.Is(err, os.ErrNotExist) {
 		serverboot.Fatal(ctx, "Failed to remove stale credential broker socket", err)
 	}
@@ -1922,7 +1924,7 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 	return clientset, ateClient, nil
 }
 
-func newBrokerTokenAuthenticator(ctx context.Context, audience string) (*brokerTokenAuthenticator, error) {
+func newJWTWorkerAuthenticator(ctx context.Context, audience string) (*jwtWorkerAuthenticator, error) {
 	if audience == "" {
 		return nil, fmt.Errorf("credential broker token audience is required")
 	}
@@ -1942,7 +1944,7 @@ func newBrokerTokenAuthenticator(ctx context.Context, audience string) (*brokerT
 	if err != nil {
 		return nil, fmt.Errorf("get local node %q: %w", nodeName, err)
 	}
-	return &brokerTokenAuthenticator{
+	return &jwtWorkerAuthenticator{
 		client:   clientset,
 		audience: audience,
 		nodeName: node.Name,

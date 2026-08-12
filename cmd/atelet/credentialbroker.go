@@ -54,10 +54,16 @@ type credentialBroker struct {
 	// actorIdentityClient resolves the authenticated worker's current assignment
 	// and signs its actor certificate.
 	actorIdentityClient ateapipb.ActorIdentityClient
-	tokenAuth           *brokerTokenAuthenticator
+	workerAuth          workerAuthenticator
 }
 
-type brokerTokenAuthenticator struct {
+type workerAuthenticator interface {
+	authenticate(context.Context) (*substratex509.PodIdentity, error)
+}
+
+type mtlsWorkerAuthenticator struct{}
+
+type jwtWorkerAuthenticator struct {
 	client            kubernetes.Interface
 	audience          string
 	nodeName, nodeUID string
@@ -66,9 +72,9 @@ type brokerTokenAuthenticator struct {
 func (b *credentialBroker) MintActorCertificate(ctx context.Context, req *ateletpb.MintActorCertificateRequest) (*ateletpb.MintActorCertificateResponse, error) {
 	// TODO: Before release, require the egress PEP to reject actor certificates
 	// whose ActorIdentity purpose is not atunnel.
-	// Worker identity comes only from the mTLS certificate. The expected actor
-	// UID is a stale-activation guard; ateapi derives the actor authoritatively.
-	workerIdentity, err := b.authenticatedWorkerIdentity(ctx)
+	// Worker identity comes only from the configured authenticator. The expected
+	// actor UID is a stale-activation guard; ateapi derives the actor authoritatively.
+	workerIdentity, err := b.workerAuth.authenticate(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -86,10 +92,7 @@ func (b *credentialBroker) MintActorCertificate(ctx context.Context, req *atelet
 	return &ateletpb.MintActorCertificateResponse{ActorCertificates: resp.GetActorCertificates()}, nil
 }
 
-func (b *credentialBroker) authenticatedWorkerIdentity(ctx context.Context) (*substratex509.PodIdentity, error) {
-	if b.tokenAuth != nil {
-		return b.tokenAuth.authenticate(ctx)
-	}
+func (mtlsWorkerAuthenticator) authenticate(ctx context.Context) (*substratex509.PodIdentity, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing peer credentials")
@@ -105,7 +108,7 @@ func (b *credentialBroker) authenticatedWorkerIdentity(ctx context.Context) (*su
 	return identity, nil
 }
 
-func (a *brokerTokenAuthenticator) authenticate(ctx context.Context) (*substratex509.PodIdentity, error) {
+func (a *jwtWorkerAuthenticator) authenticate(ctx context.Context) (*substratex509.PodIdentity, error) {
 	token, ok := ateapiauth.BearerToken(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
@@ -114,7 +117,7 @@ func (a *brokerTokenAuthenticator) authenticate(ctx context.Context) (*substrate
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
 	}
-	if err := validateBrokerTokenClaims(claims, a.nodeName, a.nodeUID); err != nil {
+	if err := validateJWTWorkerClaims(claims, a.nodeName, a.nodeUID); err != nil {
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 	return &substratex509.PodIdentity{
@@ -123,7 +126,7 @@ func (a *brokerTokenAuthenticator) authenticate(ctx context.Context) (*substrate
 	}, nil
 }
 
-func validateBrokerTokenClaims(claims *k8sjwt.KubernetesClaims, nodeName, nodeUID string) error {
+func validateJWTWorkerClaims(claims *k8sjwt.KubernetesClaims, nodeName, nodeUID string) error {
 	if claims.PodUID == "" || claims.NodeUID == "" || claims.ServiceAccountUID == "" {
 		return fmt.Errorf("token is not bound to a Pod, node, and ServiceAccount")
 	}

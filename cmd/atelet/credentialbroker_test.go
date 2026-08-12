@@ -46,7 +46,7 @@ func (c *brokerIdentityClient) MintCert(_ context.Context, req *ateapipb.MintCer
 
 func TestCredentialBrokerForwardsAuthenticatedWorkerIdentity(t *testing.T) {
 	identity := &brokerIdentityClient{}
-	broker := &credentialBroker{actorIdentityClient: identity}
+	broker := &credentialBroker{actorIdentityClient: identity, workerAuth: mtlsWorkerAuthenticator{}}
 	csr := []byte{4, 5, 6}
 	resp, err := broker.MintActorCertificate(workerContext(t, "worker-uid"), &ateletpb.MintActorCertificateRequest{
 		CertificateSigningRequest: csr,
@@ -84,7 +84,7 @@ func TestVerifyClientOnSameNode(t *testing.T) {
 	}
 }
 
-func TestValidateBrokerTokenClaims(t *testing.T) {
+func TestValidateJWTWorkerClaims(t *testing.T) {
 	valid := &k8sjwt.KubernetesClaims{
 		Subject:            "system:serviceaccount:workers:default",
 		Namespace:          "workers",
@@ -94,7 +94,7 @@ func TestValidateBrokerTokenClaims(t *testing.T) {
 		NodeName:           "node-a",
 		NodeUID:            "node-uid",
 	}
-	if err := validateBrokerTokenClaims(valid, "node-a", "node-uid"); err != nil {
+	if err := validateJWTWorkerClaims(valid, "node-a", "node-uid"); err != nil {
 		t.Fatalf("valid claims rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*k8sjwt.KubernetesClaims){
@@ -107,7 +107,7 @@ func TestValidateBrokerTokenClaims(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			claims := *valid
 			mutate(&claims)
-			if err := validateBrokerTokenClaims(&claims, "node-a", "node-uid"); err == nil {
+			if err := validateJWTWorkerClaims(&claims, "node-a", "node-uid"); err == nil {
 				t.Fatal("invalid claims accepted")
 			}
 		})
