@@ -221,26 +221,28 @@ func TestJWTServerAuthenticatorPreservesKubernetesClaims(t *testing.T) {
 
 func TestBearerToken(t *testing.T) {
 	cases := []struct {
-		name  string
-		hdr   string
-		want  string
-		found bool
+		name    string
+		headers []string
+		want    string
+		found   bool
 	}{
-		{"missing", "", "", false},
-		{"no prefix", "abc", "", false},
-		{"prefix", "Bearer abc", "abc", true},
-		{"prefix with spaces", "Bearer    abc  ", "abc", true},
-		{"empty after prefix", "Bearer ", "", false},
+		{name: "missing"},
+		{name: "multiple", headers: []string{"Bearer abc", "Bearer def"}},
+		{name: "no prefix", headers: []string{"abc"}},
+		{name: "prefix", headers: []string{"Bearer abc"}, want: "abc", found: true},
+		{name: "case insensitive", headers: []string{"bearer abc"}, want: "abc", found: true},
+		{name: "prefix with spaces", headers: []string{"Bearer    abc  "}, want: "abc", found: true},
+		{name: "empty after prefix", headers: []string{"Bearer "}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			if tc.hdr != "" {
-				ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", tc.hdr))
+			if len(tc.headers) != 0 {
+				ctx = metadata.NewIncomingContext(ctx, metadata.MD{"authorization": tc.headers})
 			}
-			got, ok := bearerToken(ctx)
+			got, ok := BearerToken(ctx)
 			if ok != tc.found || got != tc.want {
-				t.Errorf("bearerToken=(%q,%v) want (%q,%v)", got, ok, tc.want, tc.found)
+				t.Errorf("BearerToken=(%q,%v) want (%q,%v)", got, ok, tc.want, tc.found)
 			}
 		})
 	}

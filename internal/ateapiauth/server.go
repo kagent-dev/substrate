@@ -154,7 +154,7 @@ type jwtServerAuthenticator struct {
 }
 
 func (a jwtServerAuthenticator) authenticate(ctx context.Context) (context.Context, error) {
-	bearer, ok := bearerToken(ctx)
+	bearer, ok := BearerToken(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
@@ -169,21 +169,22 @@ func (a jwtServerAuthenticator) authenticate(ctx context.Context) (context.Conte
 	}), nil
 }
 
-func bearerToken(ctx context.Context) (string, bool) {
+// BearerToken returns the single non-empty Bearer token in the incoming gRPC metadata.
+func BearerToken(ctx context.Context) (string, bool) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return "", false
 	}
 	vals := md.Get("authorization")
-	if len(vals) == 0 {
+	if len(vals) != 1 {
 		return "", false
 	}
 	const prefix = "Bearer "
 	v := vals[0]
-	if !strings.HasPrefix(v, prefix) {
+	if len(v) <= len(prefix) || !strings.EqualFold(v[:len(prefix)], prefix) {
 		return "", false
 	}
-	tok := strings.TrimSpace(strings.TrimPrefix(v, prefix))
+	tok := strings.TrimSpace(v[len(prefix):])
 	if tok == "" {
 		return "", false
 	}

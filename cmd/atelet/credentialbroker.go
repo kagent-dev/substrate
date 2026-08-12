@@ -18,8 +18,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"strings"
 
+	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/k8sjwt"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/substratex509"
@@ -27,7 +27,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/client-go/kubernetes"
@@ -35,12 +34,11 @@ import (
 
 func tokenReviewUnaryInterceptor(client kubernetes.Interface, audience, subject string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		md, _ := metadata.FromIncomingContext(ctx)
-		values := md.Get("authorization")
-		if len(values) != 1 || !strings.HasPrefix(values[0], "Bearer ") {
+		token, ok := ateapiauth.BearerToken(ctx)
+		if !ok {
 			return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 		}
-		claims, err := k8sjwt.TokenReview(ctx, client, strings.TrimSpace(strings.TrimPrefix(values[0], "Bearer ")), audience)
+		claims, err := k8sjwt.TokenReview(ctx, client, token, audience)
 		if err != nil {
 			return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
 		}
@@ -108,25 +106,20 @@ func (b *credentialBroker) authenticatedWorkerIdentity(ctx context.Context) (*su
 }
 
 func (a *brokerTokenAuthenticator) authenticate(ctx context.Context) (*substratex509.PodIdentity, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok || len(md.Get("authorization")) != 1 {
+	token, ok := ateapiauth.BearerToken(ctx)
+	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
-	authorization := md.Get("authorization")[0]
-	const prefix = "Bearer "
-	if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) {
-		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
-	}
-	reviewed, err := k8sjwt.TokenReview(ctx, a.client, strings.TrimSpace(authorization[len(prefix):]), a.audience)
+	claims, err := k8sjwt.TokenReview(ctx, a.client, token, a.audience)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
 	}
-	if err := validateBrokerTokenClaims(reviewed, a.nodeName, a.nodeUID); err != nil {
+	if err := validateBrokerTokenClaims(claims, a.nodeName, a.nodeUID); err != nil {
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 	return &substratex509.PodIdentity{
-		Namespace: reviewed.Namespace, ServiceAccountName: reviewed.ServiceAccountName, ServiceAccountUID: reviewed.ServiceAccountUID,
-		PodName: reviewed.PodName, PodUID: reviewed.PodUID, NodeName: reviewed.NodeName, NodeUID: reviewed.NodeUID,
+		Namespace: claims.Namespace, ServiceAccountName: claims.ServiceAccountName, ServiceAccountUID: claims.ServiceAccountUID,
+		PodName: claims.PodName, PodUID: claims.PodUID, NodeName: claims.NodeName, NodeUID: claims.NodeUID,
 	}, nil
 }
 
