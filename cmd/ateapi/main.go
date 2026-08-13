@@ -436,6 +436,10 @@ func newKubeClients() (*kubernetes.Clientset, versioned.Interface, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("get cluster config: %w", err)
 	}
+	// JWT mode performs a live TokenReview per RPC; client-go's 5 QPS default
+	// self-throttles concurrent router requests into their deadlines.
+	config.QPS = 50
+	config.Burst = 100
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create clientset: %w", err)

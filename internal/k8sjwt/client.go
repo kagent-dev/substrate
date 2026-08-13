@@ -60,7 +60,8 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if err != nil {
 		return nil, err
 	}
-	if req.URL.Scheme != issuerURL.Scheme || (req.URL.Host != issuerURL.Host && req.URL.Host != t.apiServerHost) {
+	isJWKS := req.URL.Path == "/openid/v1/jwks" && t.apiServerHost != ""
+	if req.URL.Scheme != issuerURL.Scheme || (req.URL.Host != issuerURL.Host && !isJWKS) {
 		return t.base.RoundTrip(req)
 	}
 	token, err := os.ReadFile(t.tokenFile)
@@ -68,6 +69,11 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, fmt.Errorf("reading discovery token: %w", err)
 	}
 	clone := req.Clone(req.Context())
+	if isJWKS {
+		// Kubernetes may advertise a node IP here. Route the fixed JWKS path
+		// through the trusted API Service rather than sending a token to that host.
+		clone.URL.Host = t.apiServerHost
+	}
 	clone.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 	return t.base.RoundTrip(clone)
 }

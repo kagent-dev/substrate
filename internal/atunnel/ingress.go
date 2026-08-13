@@ -265,8 +265,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.tokenVerifier != nil {
 		const prefix = "Bearer "
 		authorization := r.Header.Get(RouterAuthorizationHeader)
-		if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) ||
-			s.tokenVerifier(r.Context(), strings.TrimSpace(authorization[len(prefix):])) != nil {
+		if len(authorization) <= len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if err := s.tokenVerifier(r.Context(), strings.TrimSpace(authorization[len(prefix):])); err != nil {
+			slog.WarnContext(r.Context(), "atunnel router token rejected", slog.Any("err", err))
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

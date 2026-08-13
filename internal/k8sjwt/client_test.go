@@ -33,23 +33,27 @@ func TestDiscoveryTransportOnlySendsTokenToTrustedOrigins(t *testing.T) {
 	transport := &discoveryTransport{
 		issuer: "https://issuer.example", apiServerHost: "10.0.0.1:443", tokenFile: tokenFile,
 		base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: req.Header.Clone()}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: req.Header.Clone(), Request: req}, nil
 		}),
 	}
 	for _, tc := range []struct {
-		url, want string
+		url, wantHost, wantAuth string
 	}{
-		{"https://issuer.example/.well-known/openid-configuration", "Bearer secret"},
-		{"https://10.0.0.1:443/openid/v1/jwks", "Bearer secret"},
-		{"https://attacker.example/openid/v1/jwks", ""},
+		{"https://issuer.example/.well-known/openid-configuration", "issuer.example", "Bearer secret"},
+		{"https://10.0.0.1:443/openid/v1/jwks", "10.0.0.1:443", "Bearer secret"},
+		{"https://172.18.0.4:6443/openid/v1/jwks", "10.0.0.1:443", "Bearer secret"},
+		{"https://attacker.example/keys", "attacker.example", ""},
 	} {
 		req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 		resp, err := transport.RoundTrip(req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := resp.Header.Get("Authorization"); got != tc.want {
-			t.Errorf("%s authorization = %q, want %q", tc.url, got, tc.want)
+		if got := resp.Header.Get("Authorization"); got != tc.wantAuth {
+			t.Errorf("%s authorization = %q, want %q", tc.url, got, tc.wantAuth)
+		}
+		if got := resp.Request.URL.Host; got != tc.wantHost {
+			t.Errorf("%s host = %q, want %q", tc.url, got, tc.wantHost)
 		}
 	}
 }
