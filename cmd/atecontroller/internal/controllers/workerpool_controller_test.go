@@ -144,6 +144,26 @@ func TestWorkerPoolCreatesDeployment(t *testing.T) {
 	})
 }
 
+func TestWorkerPoolCreatesDedicatedServiceAccount(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	wp := makeWorkerPool("test-service-account", "default", 1, "ateom:v1")
+	if err := k8sClient.Create(ctx, wp); err != nil {
+		t.Fatalf("create WorkerPool: %v", err)
+	}
+	deleteOnCleanup(t, wp)
+
+	eventually(t, func(ctx context.Context) (bool, error) {
+		sa := &corev1.ServiceAccount{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: wp.Name, Namespace: wp.Namespace}, sa); err != nil {
+			return false, nil
+		}
+		return len(sa.OwnerReferences) == 1 &&
+			sa.OwnerReferences[0].Kind == "WorkerPool" &&
+			sa.OwnerReferences[0].Name == wp.Name, nil
+	})
+}
+
 // TestWorkerPoolReplicasUpdate verifies that changing spec.replicas on a
 // WorkerPool propagates to the managed Deployment.
 func TestWorkerPoolReplicasUpdate(t *testing.T) {

@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	networkingv1ac "k8s.io/client-go/applyconfigurations/networking/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,6 +37,10 @@ const (
 	networkPolicyFieldOwner = "ate-networkpolicy"
 	ateSystemNamespace      = "ate-system"
 	atenetRouterAppName     = "atenet-router"
+	atenetEgressAppName     = "atenet-egress"
+	dnsAppName              = "dns"
+	kubeSystemNamespace     = "kube-system"
+	kubeDNSAppName          = "kube-dns"
 )
 
 type NetworkPolicyReconciler struct {
@@ -99,28 +105,53 @@ func buildNetworkPolicyApplyConfig(wp *atev1alpha1.WorkerPool) *networkingv1ac.N
 			WithController(true).
 			WithBlockOwnerDeletion(true))
 
-	// Ingress policy: only accept connections from the atenet-router, all ports.
-	np.
-		WithSpec(networkingv1ac.NetworkPolicySpec().
-			WithPodSelector(metav1ac.LabelSelector().
-				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
-			WithPolicyTypes(networkingv1.PolicyTypeIngress).
-			WithIngress(
-				networkingv1ac.NetworkPolicyIngressRule().
-					WithFrom(
-						networkingv1ac.NetworkPolicyPeer().
-							WithNamespaceSelector(metav1ac.LabelSelector().
-								WithMatchLabels(map[string]string{"kubernetes.io/metadata.name": ateSystemNamespace})).
-							WithPodSelector(metav1ac.LabelSelector().
-								WithMatchLabels(map[string]string{"app": atenetRouterAppName})),
-					),
-			))
-
-	// Egress is left unmanaged by Kubernetes NetworkPolicy for now while waiting for
-	// further progress on Egress API designs and because some egress rules may not be
-	// expressible at the Kubernetes layer.
+	// Ingress accepts connections only from the atenet-router. Egress is denied
+	// except for cluster DNS, Substrate DNS, and the authenticated egress gateway.
+	policySpec := networkingv1ac.NetworkPolicySpec().
+		WithPodSelector(metav1ac.LabelSelector().
+			WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
+		WithPolicyTypes(networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress).
+		WithIngress(
+			networkingv1ac.NetworkPolicyIngressRule().
+				WithFrom(
+					networkingv1ac.NetworkPolicyPeer().
+						WithNamespaceSelector(metav1ac.LabelSelector().
+							WithMatchLabels(map[string]string{"kubernetes.io/metadata.name": ateSystemNamespace})).
+						WithPodSelector(metav1ac.LabelSelector().
+							WithMatchLabels(map[string]string{"app": atenetRouterAppName})),
+				),
+		).
+		WithEgress(
+			dnsEgressRule(kubeSystemNamespace, "k8s-app", kubeDNSAppName),
+			dnsEgressRule(ateSystemNamespace, "app", dnsAppName),
+			namespacedPodEgressRule(ateSystemNamespace, "app", atenetEgressAppName, 443, corev1.ProtocolTCP),
+		)
+	np.WithSpec(policySpec)
 
 	return np
+}
+
+func dnsEgressRule(namespace, labelKey, labelValue string) *networkingv1ac.NetworkPolicyEgressRuleApplyConfiguration {
+	return networkingv1ac.NetworkPolicyEgressRule().
+		WithTo(namespacedPodPeer(namespace, labelKey, labelValue)).
+		WithPorts(
+			networkingv1ac.NetworkPolicyPort().WithProtocol(corev1.ProtocolUDP).WithPort(intstr.FromInt32(53)),
+			networkingv1ac.NetworkPolicyPort().WithProtocol(corev1.ProtocolTCP).WithPort(intstr.FromInt32(53)),
+		)
+}
+
+func namespacedPodEgressRule(namespace, labelKey, labelValue string, port int32, protocol corev1.Protocol) *networkingv1ac.NetworkPolicyEgressRuleApplyConfiguration {
+	return networkingv1ac.NetworkPolicyEgressRule().
+		WithTo(namespacedPodPeer(namespace, labelKey, labelValue)).
+		WithPorts(networkingv1ac.NetworkPolicyPort().WithProtocol(protocol).WithPort(intstr.FromInt32(port)))
+}
+
+func namespacedPodPeer(namespace, labelKey, labelValue string) *networkingv1ac.NetworkPolicyPeerApplyConfiguration {
+	return networkingv1ac.NetworkPolicyPeer().
+		WithNamespaceSelector(metav1ac.LabelSelector().
+			WithMatchLabels(map[string]string{"kubernetes.io/metadata.name": namespace})).
+		WithPodSelector(metav1ac.LabelSelector().
+			WithMatchLabels(map[string]string{labelKey: labelValue}))
 }
 
 func (r *NetworkPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {

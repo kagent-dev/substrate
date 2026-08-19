@@ -110,9 +110,19 @@ func TestNetworkPolicyLifecycleAndReconciliation(t *testing.T) {
 		t.Errorf("expected pod selector for %s, got %v", atenetRouterAppName, fromPeer.PodSelector)
 	}
 
-	// Validate Egress Rule is unmanaged (empty)
-	if len(np.Spec.Egress) != 0 {
-		t.Errorf("expected Egress to be empty/unmanaged, got %v", np.Spec.Egress)
+	// Validate that egress is isolated and has only the three controller-owned
+	// DNS and authenticated-gateway destinations.
+	hasEgressPolicy := false
+	for _, policyType := range np.Spec.PolicyTypes {
+		if policyType == networkingv1.PolicyTypeEgress {
+			hasEgressPolicy = true
+		}
+	}
+	if !hasEgressPolicy {
+		t.Error("expected NetworkPolicy to isolate egress")
+	}
+	if len(np.Spec.Egress) != 3 {
+		t.Errorf("expected exactly 3 egress rules, got %d", len(np.Spec.Egress))
 	}
 
 	// Verify Garbage Collection upon deletion
