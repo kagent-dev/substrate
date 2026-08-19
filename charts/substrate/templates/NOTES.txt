@@ -1,21 +1,7 @@
-substrate {{ .Chart.AppVersion }} installed in mode: {{ .Values.auth.mode }}
+substrate {{ .Chart.AppVersion }} installed with mTLS and PostgreSQL
 
-{{ if eq .Values.auth.mode "mtls" -}}
-NOTE: mtls mode REQUIRES the following Kubernetes feature gates to be enabled:
+REQUIRED Kubernetes feature gates:
   - ClusterTrustBundle
   - ClusterTrustBundleProjection
   - PodCertificateRequest
-plus the v1beta1 certificates API. On vanilla clusters (kind, EKS, etc.) you
-must enable these explicitly. To install without them, pick auth.mode=jwt.
-{{- else }}
-JWT mode is active.
-
-{{- if .Values.auth.jwt.bootstrap.enabled }}
-JWT bootstrap resources are managed by this chart. Existing key material is
-reused on upgrade.
-{{- else }}
-JWT bootstrap is disabled. Provide {{ .Values.auth.jwt.serverCertSecret }},
-{{ .Values.auth.jwt.caBundleConfigMap }}, actor-id-jwt-pool, and
-actor-id-ca-pool before pods become healthy.
-{{- end }}
-{{- end }}
+The certificates.k8s.io/v1beta1 API must also be enabled.

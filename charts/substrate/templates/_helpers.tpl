@@ -103,17 +103,3 @@ are emitted without a tag, letting `ko resolve` supply the digest at build time.
 {{- printf "%s/%s" $registry $name -}}
 {{- end -}}
 {{- end -}}
-
-{{/*
-Validate auth.mode at template time.
-*/}}
-{{- define "substrate.validateAuthMode" -}}
-{{- if not (or (eq .Values.auth.mode "mtls") (eq .Values.auth.mode "jwt")) -}}
-{{- fail (printf "auth.mode must be 'mtls' or 'jwt', got %q" .Values.auth.mode) -}}
-{{- end -}}
-{{- if eq .Values.auth.mode "jwt" -}}
-{{- if not .Values.auth.jwt.issuer -}}
-{{- fail "auth.jwt.issuer is required when auth.mode=jwt" -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
