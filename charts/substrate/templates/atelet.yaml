@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-# atelet — identical across auth modes (does not dial ateapi).
+# atelet
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -28,6 +28,9 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["ate.dev"]
+  resources: ["csidriverconfigs"]
   verbs: ["get", "watch", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -68,12 +71,9 @@ spec:
         image: {{ include "substrate.componentImage" (list "atelet" .) }}
         args:
         - --gcp-auth-for-image-pulls={{ .Values.atelet.gcpAuthForImagePulls }}
-{{- if eq .Values.auth.mode "mtls" }}
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
-{{- else }}
-        - --grpc-insecure=true
-{{- end }}
+        - --ateapi-ca-file=/run/servicedns.podcert.ate.dev/trust-bundle.pem
 {{- with .Values.atelet.extraArgs }}
 {{ toYaml . | indent 8 }}
 {{- end }}
@@ -116,17 +116,17 @@ spec:
         volumeMounts:
         - name: run-ateom
           mountPath: /var/lib/ateom-gvisor
-{{- if eq .Values.auth.mode "mtls" }}
         - name: podidentity
           mountPath: /run/podidentity.podcert.ate.dev
           readOnly: true
-{{- end }}
+        - name: servicedns-ca
+          mountPath: /run/servicedns.podcert.ate.dev
+          readOnly: true
       volumes:
       - name: run-ateom
         hostPath:
           path: /var/lib/ateom-gvisor
           type: DirectoryOrCreate
-{{- if eq .Values.auth.mode "mtls" }}
       - name: podidentity
         projected:
           sources:
@@ -140,4 +140,12 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
-{{- end }}
+      - name: servicedns-ca
+        projected:
+          sources:
+          - clusterTrustBundle:
+              signerName: servicedns.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: trust-bundle.pem

@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if eq .Values.auth.mode "mtls" -}}
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -197,4 +196,3 @@ spec:
       securityContext: {}
       serviceAccountName: default
       terminationGracePeriodSeconds: 30
-{{- end }}
