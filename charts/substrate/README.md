@@ -69,3 +69,4 @@ See `values.yaml` for the full set; the important keys:
 | `redis.useIAMAuth` | `false` | Google IAM auth |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces/metrics |
+| `images.pause` | `registry.k8s.io/pause:3.10.2@sha256:f548e...` | Root sandbox container image for the `gvisor-default` SandboxConfig; must stay digest-pinned.|

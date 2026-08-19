@@ -26,6 +26,7 @@ metadata:
 spec:
   sandboxClass: gvisor
   default: true
+  pauseImage: {{ .Values.images.pause | quote }}
   assets:
     amd64:
       runsc:
