@@ -20,8 +20,5 @@ metadata:
   name: {{ .Values.ateApiServerEnvVarsConfigMap }}
   namespace: {{ .Release.Namespace }}
 data:
-  ATE_API_REDIS_ADDRESS: {{ .Values.redis.clusterAddress | default (printf "%s.%s.svc:6379" (include "substrate.fullname" (list "valkey-cluster" .)) .Release.Namespace) | quote }}
-  ATE_API_REDIS_USE_IAM_AUTH: {{ .Values.redis.useIAMAuth | toString | quote }}
-  ATE_API_REDIS_TLS_SERVER_NAME: {{ .Values.redis.tlsServerName | quote }}
-  ATE_API_REDIS_CLIENT_CERT: {{ .Values.redis.clientCert | default "" | quote }}
-  ATE_API_K8SJWT_ISSUER: {{ .Values.auth.jwt.issuer | quote }}
+  ATE_API_STORE_BACKEND: "postgres"
+  ATE_API_POSTGRES_CONNECTION_STRING: {{ .Values.postgres.connectionString | default (printf "postgresql://postgres@%s.%s.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem" (include "substrate.fullname" (list "postgres" .)) .Release.Namespace) | quote }}

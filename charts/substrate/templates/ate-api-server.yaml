@@ -23,7 +23,10 @@ rules:
   resources: ["pods"]
   verbs: ["get", "watch", "list"]
 - apiGroups: ["ate.dev"]
-  resources: ["actortemplates", "workerpools", "sandboxconfigs"]
+  resources: ["actortemplates", "workerpools", "sandboxconfigs", "csidriverconfigs"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
   verbs: ["get", "watch", "list"]
 # Secret reads for env source resolution are intentionally NOT granted
 # cluster-wide here. Each demo / tenant is responsible for granting
@@ -74,48 +77,19 @@ spec:
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-api-server" .) }}
       terminationGracePeriodSeconds: 40
-{{- if eq .Values.auth.mode "jwt" }}
-      initContainers:
-      - name: assemble-cred-bundle
-        image: {{ .Values.images.busybox }}
-        command:
-        - sh
-        - -c
-        - cat /run/ateapi-tls-src/tls.crt /run/ateapi-tls-src/tls.key > /run/ateapi-tls/credential-bundle.pem
-        volumeMounts:
-        - { name: ateapi-tls-src, mountPath: /run/ateapi-tls-src, readOnly: true }
-        - { name: ateapi-tls,     mountPath: /run/ateapi-tls }
-{{- end }}
       containers:
       - name: ate-api-server
         image: {{ include "substrate.componentImage" (list "ateapi" .) }}
         args:
         - "--grpc-listen-addr=0.0.0.0:443"
-{{- if eq .Values.auth.mode "mtls" }}
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
-        - "--redis-cluster-address=@env"
-        - "--redis-ca-certs=/etc/valkey-ca/ca.crt"
-        - "--redis-use-iam-auth=@env"
-        - "--redis-tls-server-name=@env"
-        - "--redis-client-cert=@env"
-        - "--client-jwt-issuer=@env"
-        - "--client-jwt-audience={{ .Values.auth.jwt.audience }}"
+        - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
+        - "--store-backend=@env"
+        - "--postgres-connection-string=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--atelet-client-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
         - "--pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem"
-{{- else }}
-        - "--grpc-server-cred-bundle=/run/ateapi-tls/credential-bundle.pem"
-        - "--atelet-insecure=true"
-        - "--redis-cluster-address=@env"
-        - "--redis-no-tls=true"
-        - "--redis-use-iam-auth=@env"
-        - "--client-jwt-issuer={{ .Values.auth.jwt.issuer }}"
-        - "--client-jwt-audience={{ .Values.auth.jwt.audience }}"
-        - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
-        - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
-        - "--client-jwt-ca-cert=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-{{- end }}
         - "--drain-delay=13s"
         - "--drain-timeout=15s"
         env:
@@ -142,17 +116,11 @@ spec:
             name: {{ .Values.ateApiServerEnvVarsConfigMap }}
             optional: true
         volumeMounts:
-{{- if eq .Values.auth.mode "mtls" }}
         - { name: servicedns,          mountPath: /run/servicedns.podcert.ate.dev }
         - { name: actor-id-jwt-pool,   mountPath: /run/actor-id-jwt-pool }
-        - { name: valkey-ca-certs,     mountPath: /etc/valkey-ca, readOnly: true }
         - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
         - { name: podidentity,         mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
-{{- else }}
-        - { name: ateapi-tls,          mountPath: /run/ateapi-tls, readOnly: true }
-        - { name: actor-id-jwt-pool,   mountPath: /run/actor-id-jwt-pool }
-        - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
-{{- end }}
+        - { name: authentication-config, mountPath: /etc/ateapi/authentication, readOnly: true }
         ports:
         - containerPort: 443
         - name: prometheus
@@ -171,7 +139,6 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
       volumes:
-{{- if eq .Values.auth.mode "mtls" }}
       - name: servicedns
         projected:
           sources:
@@ -179,6 +146,12 @@ spec:
               signerName: servicedns.podcert.ate.dev/identity
               keyType: ECDSAP256
               credentialBundlePath: credential-bundle.pem
+          - clusterTrustBundle:
+              signerName: servicedns.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: trust-bundle.pem
       - name: actor-id-jwt-pool
         projected:
           sources:
@@ -186,13 +159,6 @@ spec:
               name: actor-id-jwt-pool
               items:
               - { key: pool, path: pool.json }
-      - name: valkey-ca-certs
-        projected:
-          sources:
-          - secret:
-              name: valkey-ca-certs
-              items:
-              - { key: ca.crt, path: ca.crt }
       - name: actor-id-ca-pool
         projected:
           sources:
@@ -200,6 +166,9 @@ spec:
               name: actor-id-ca-pool
               items:
               - { key: pool, path: pool.json }
+      - name: authentication-config
+        configMap:
+          name: ate-api-authentication
       - name: podidentity
         projected:
           sources:
@@ -213,27 +182,6 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
-{{- else }}
-      - name: ateapi-tls-src
-        secret:
-          secretName: {{ .Values.auth.jwt.serverCertSecret }}
-      - name: ateapi-tls
-        emptyDir: {}
-      - name: actor-id-jwt-pool
-        projected:
-          sources:
-          - secret:
-              name: actor-id-jwt-pool
-              items:
-              - { key: pool, path: pool.json }
-      - name: actor-id-ca-pool
-        projected:
-          sources:
-          - secret:
-              name: actor-id-ca-pool
-              items:
-              - { key: pool, path: pool.json }
-{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
