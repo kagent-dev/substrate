@@ -67,6 +67,18 @@ const (
 	atunnelEgressTrustMountPath = "/run/servicedns.podcert.ate.dev"
 )
 
+func buildServiceAccountApplyConfig(wp *atev1alpha1.WorkerPool) *corev1ac.ServiceAccountApplyConfiguration {
+	return corev1ac.ServiceAccount(wp.Name, wp.Namespace).
+		WithAutomountServiceAccountToken(false).
+		WithOwnerReferences(metav1ac.OwnerReference().
+			WithAPIVersion(atev1alpha1.GroupVersion.String()).
+			WithKind("WorkerPool").
+			WithName(wp.Name).
+			WithUID(wp.UID).
+			WithController(true).
+			WithBlockOwnerDeletion(true))
+}
+
 // buildDeploymentApplyConfig constructs the SSA apply configuration for the
 // Deployment managed by a WorkerPool. Only fields owned by this controller
 // are declared here. otel, when it carries an endpoint, is propagated to the
@@ -105,6 +117,8 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 		)
 
 	podSpecAC := corev1ac.PodSpec().
+		WithServiceAccountName(wp.Name).
+		WithAutomountServiceAccountToken(false).
 		WithSecurityContext(corev1ac.PodSecurityContext().
 			WithRunAsUser(0).
 			WithRunAsGroup(0)).

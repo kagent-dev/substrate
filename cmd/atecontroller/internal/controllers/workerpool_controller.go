@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +62,7 @@ type WorkerPoolReconciler struct {
 //+kubebuilder:rbac:groups=ate.dev,resources=workerpools/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=ate.dev,resources=workerpools/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -94,6 +96,10 @@ func (r *WorkerPoolReconciler) reconcileWorkerPool(ctx context.Context, wp *atev
 	log := log.FromContext(ctx)
 	log.Info("Reconciling worker pool")
 
+	if err := r.applyServiceAccount(ctx, wp); err != nil {
+		return err
+	}
+
 	if err := r.applyDeployment(ctx, wp); err != nil {
 		return err
 	}
@@ -107,6 +113,13 @@ func (r *WorkerPoolReconciler) reconcileWorkerPool(ctx context.Context, wp *atev
 	}
 
 	return r.syncStatus(ctx, wp, dep)
+}
+
+func (r *WorkerPoolReconciler) applyServiceAccount(ctx context.Context, wp *atev1alpha1.WorkerPool) error {
+	if err := r.Apply(ctx, buildServiceAccountApplyConfig(wp), client.FieldOwner(workerPoolFieldOwner), client.ForceOwnership); err != nil {
+		return fmt.Errorf("failed to apply ServiceAccount: %w", err)
+	}
+	return nil
 }
 
 func (r *WorkerPoolReconciler) applyDeployment(ctx context.Context, wp *atev1alpha1.WorkerPool) error {
@@ -203,6 +216,7 @@ func (r *WorkerPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&atev1alpha1.WorkerPool{}).
+		Owns(&corev1.ServiceAccount{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
 }

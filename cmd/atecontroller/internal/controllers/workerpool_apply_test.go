@@ -309,6 +309,18 @@ func TestAteomSecurityContextByClass(t *testing.T) {
 	}
 }
 
+func TestBuildDeploymentApplyConfigUsesDedicatedTokenlessServiceAccount(t *testing.T) {
+	wp := testWorkerPoolApplyConfig(nil)
+	podSpec := buildDeploymentApplyConfig(wp, ateomOTelSettings{}).Spec.Template.Spec
+
+	if podSpec.ServiceAccountName == nil || *podSpec.ServiceAccountName != wp.Name {
+		t.Errorf("ServiceAccountName = %v, want %q", podSpec.ServiceAccountName, wp.Name)
+	}
+	if podSpec.AutomountServiceAccountToken == nil || *podSpec.AutomountServiceAccountToken {
+		t.Errorf("AutomountServiceAccountToken = %v, want false", podSpec.AutomountServiceAccountToken)
+	}
+}
+
 // TestTerminationGracePeriodSeconds asserts the pod's grace period is hardcoded to 3600s.
 func TestTerminationGracePeriodSeconds(t *testing.T) {
 	wp := testWorkerPoolApplyConfig(nil)
@@ -690,6 +702,8 @@ func expectedDeploymentApplyConfig(mutatePodSpec func(*corev1ac.PodSpecApplyConf
 	wp := testWorkerPoolApplyConfig(nil)
 
 	podSpecAC := corev1ac.PodSpec().
+		WithServiceAccountName(wp.Name).
+		WithAutomountServiceAccountToken(false).
 		WithSecurityContext(corev1ac.PodSecurityContext().
 			WithRunAsUser(0).
 			WithRunAsGroup(0)).
