@@ -1,0 +1,161 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- $name := include "substrate.fullname" (list "postgres" .) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+    ssl = on
+    ssl_cert_file = '/run/tls/credential-bundle.pem'
+    ssl_key_file = '/run/tls/credential-bundle.pem'
+    ssl_ca_file = '/run/podidentity.podcert.ate.dev/trust-bundle.pem'
+    hba_file = '/etc/postgresql/pg_hba.conf'
+  pg_hba.conf: |
+    local all all trust
+    hostssl all all all trust clientcert=verify-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: {{ $name }}
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      initContainers:
+      - name: fix-tls-perms
+        image: {{ .Values.images.postgres }}
+        securityContext:
+          runAsUser: 70
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          cp /run/servicedns.podcert.ate.dev/credential-bundle.pem /run/tls/credential-bundle.pem
+          chmod 600 /run/tls/credential-bundle.pem
+        volumeMounts:
+        - name: servicedns
+          mountPath: /run/servicedns.podcert.ate.dev
+        - name: tls
+          mountPath: /run/tls
+      containers:
+      - name: postgres
+        image: {{ .Values.images.postgres }}
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -ec
+              - |
+                until psql -U postgres -d postgres -Atc 'SELECT 1' >/dev/null 2>&1; do
+                  sleep 1
+                done
+                if ! psql -U postgres -d postgres -Atc \
+                  "SELECT 1 FROM pg_database WHERE datname = 'atepg'" | grep -qx 1; then
+                  createdb -U postgres atepg
+                fi
+        env:
+        - name: POSTGRES_DB
+          value: atepg
+        - name: POSTGRES_HOST_AUTH_METHOD
+          value: trust
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        ports:
+        - name: postgres
+          containerPort: 5432
+        readinessProbe:
+          exec:
+            command: ["/bin/sh", "-ec", "psql -U postgres -d atepg -Atc 'SELECT 1' >/dev/null"]
+          initialDelaySeconds: 2
+          periodSeconds: 2
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        args: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/postgresql
+        - name: tls
+          mountPath: /run/tls
+        - name: podidentity-ca
+          mountPath: /run/podidentity.podcert.ate.dev
+          readOnly: true
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        resources:
+{{ toYaml .Values.postgres.resources | indent 10 }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ $name }}-config
+      - name: servicedns
+        projected:
+          sources:
+          - podCertificate:
+              signerName: servicedns.podcert.ate.dev/identity
+              keyType: ECDSAP256
+              credentialBundlePath: credential-bundle.pem
+      - name: tls
+        emptyDir: {}
+      - name: podidentity-ca
+        projected:
+          sources:
+          - clusterTrustBundle:
+              signerName: podidentity.podcert.ate.dev/identity
+              labelSelector:
+                matchLabels:
+                  podcert.ate.dev/canarying: live
+              path: trust-bundle.pem
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.postgres.storageSize }}
