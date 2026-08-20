@@ -30,6 +30,7 @@ resources:
   - ../valkey.yaml
   - ../pod-certificate-controller.yaml
   - ate-otel-config.yaml
+  - ../role.yaml
   - rustfs.yaml
   - ./otel-collector.yaml
   - ./prometheus.yaml
