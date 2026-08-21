@@ -248,18 +248,30 @@ func createAndResumeActor(t *testing.T, ctx context.Context, clients *e2e.Client
 
 func whoami(t *testing.T, ctx context.Context, rc *e2e.RouterClient, id string) whoamiResponse {
 	t.Helper()
-	resp, err := rc.Get(ctx, resources.ActorRef{Atespace: probeNamespace, Name: id}, "/whoami")
-	if err != nil {
-		t.Fatalf("GET /whoami for %q: %v", id, err)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := rc.Get(ctx, resources.ActorRef{Atespace: probeNamespace, Name: id}, "/whoami")
+		if err != nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("GET /whoami for %q did not become ready: %v", id, err)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if time.Now().After(deadline) {
+				t.Fatalf("GET /whoami for %q: status %d, body %q", id, resp.StatusCode, body)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+		var out whoamiResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decoding /whoami for %q: %v", id, err)
+		}
+		return out
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET /whoami for %q: status %d, body %q", id, resp.StatusCode, body)
-	}
-	var out whoamiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decoding /whoami for %q: %v", id, err)
-	}
-	return out
 }
