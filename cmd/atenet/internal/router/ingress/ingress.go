@@ -47,15 +47,20 @@ import (
 // defaultActorPort is the actor's port when a request names no other one.
 const defaultActorPort = 80
 
+const connectProxyPort = "444"
+
 const (
 	// OriginalDstMetadataKey is the dynamic-metadata namespace carrying the
-	// resolved worker address and port. xds.go's ORIGINAL_DST cluster reads
-	// it to pick the upstream.
+	// resolved Envoy and AgentGateway routing targets.
 	OriginalDstMetadataKey = "envoy.filters.listener.original_dst"
 	// OriginalDstAddressKey is the resolved worker atunnel address (IP:443).
 	OriginalDstAddressKey = "local"
 	// OriginalDstPortKey is the actor's target port.
 	OriginalDstPortKey = "port"
+	// ConnectProxyAddressKey is the worker atunnel CONNECT endpoint.
+	ConnectProxyAddressKey = "connect_proxy"
+	// ConnectDestinationAddressKey is the actor authority reached through the CONNECT proxy.
+	ConnectDestinationAddressKey = "connect_destination"
 
 	// AuthorityFilterStateKey is the filter-state key holding the request's
 	// :authority, set by xds.go's authorityFilterStateFilter.
@@ -156,15 +161,19 @@ func (h *Handler) HandleRequestHeaders(ctx context.Context, md *extproc.RequestM
 	// targetPort on the actor; the router's client cert comes from the
 	// ORIGINAL_DST cluster's upstream TLS context (xds.go).
 	targetAddr := net.JoinHostPort(workerIP, "443")
+	connectProxyAddr := net.JoinHostPort(workerIP, connectProxyPort)
+	connectDestinationAddr := net.JoinHostPort(resources.ActorDNSName(actorRef), strconv.Itoa(targetPort))
 
 	slog.InfoContext(ctx, "Route ok", slog.Any("actor", actorRef), slog.String("targetAddr", targetAddr))
 
-	// Envoy and agentgateway both pick the upstream from dynamic metadata,
-	// so the resolved address and port go there.
+	// Envoy reads local and port; AgentGateway reads the CONNECT proxy and
+	// destination targets.
 	dynamicMetadata, err := structpb.NewStruct(map[string]any{
 		OriginalDstMetadataKey: map[string]any{
-			OriginalDstAddressKey: targetAddr,
-			OriginalDstPortKey:    strconv.Itoa(targetPort),
+			OriginalDstAddressKey:        targetAddr,
+			OriginalDstPortKey:           strconv.Itoa(targetPort),
+			ConnectProxyAddressKey:       connectProxyAddr,
+			ConnectDestinationAddressKey: connectDestinationAddr,
 		},
 	})
 	if err != nil {

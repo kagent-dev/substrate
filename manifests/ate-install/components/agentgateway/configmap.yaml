@@ -34,6 +34,17 @@ data:
         # OTEL_TRACES_SAMPLER override must adjust it in step.
         randomSampling: 0.01
 
+    backends:
+    - name: worker-connect-proxy
+      dynamic:
+        target: extproc["envoy.filters.listener.original_dst"]["connect_proxy"]
+      policies:
+        backendTLS:
+          cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+          key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+          root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
+          insecureHost: true
+
     # http/https serve direct (non-CONNECT) actor traffic only. connect.mode is
     # a single global setting with no per-gateway override, and Tunnel mode's
     # CONNECT interception happens below the per-request pipeline (at raw
@@ -80,23 +91,12 @@ data:
             "filter_state['dev.ate.authority']": request.host
       backends:
       - dynamic:
-          # The router reports the resolved worker atunnel address (host:443)
-          # as dynamic metadata rather than rewriting :authority -- see
-          # OriginalDstMetadataKey/OriginalDstAddressKey in xds.go. Reading it
-          # here means :authority/Host stays the actor's real DNS name the
-          # whole way through, so atunnel authorizes it directly with no
-          # restore-the-original-Host header needed.
-          target: extproc["envoy.filters.listener.original_dst"]["local"]
+          target: extproc["envoy.filters.listener.original_dst"]["connect_destination"]
         policies:
-          # atunnel serves HTTPS on each worker pod IP. Verify its certificate
-          # against the podidentity CA and present the router's podidentity
-          # credential. Worker SPIFFE IDs vary with their workload namespace,
-          # so skip DNS/IP hostname matching while retaining CA verification.
-          backendTLS:
-            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-            root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
-            insecureHost: true
+          backendTunnel:
+            proxy:
+              backend: /worker-connect-proxy
+            mode: connect
 
     # CONNECT ingress, on its own dedicated ports (matching Envoy's
     # connect/connect-tls listeners) because tunnelProtocol only applies to a
@@ -160,14 +160,12 @@ data:
                 "filter_state['dev.ate.authority']": source.connectHeaders["host"]
           backends:
           - dynamic:
-              # See substrate-actors' backend above.
-              target: extproc["envoy.filters.listener.original_dst"]["local"]
+              target: extproc["envoy.filters.listener.original_dst"]["connect_destination"]
             policies:
-              backendTLS:
-                cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
-                insecureHost: true
+              backendTunnel:
+                proxy:
+                  backend: /worker-connect-proxy
+                mode: connect
 ---
 apiVersion: v1
 kind: ConfigMap
