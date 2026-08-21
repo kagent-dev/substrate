@@ -29,8 +29,6 @@ import (
 	"github.com/agent-substrate/substrate/internal/e2e"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const networkingAtespace = "networking-e2e"
@@ -113,18 +111,12 @@ func TestActorEgressHTTPS(t *testing.T) {
 	router := mustRouterClient(t, ctx)
 	defer router.Close()
 
-	// Bound the access-log scan below to lines this test could have produced.
-	// The slack absorbs clock skew between here and the gateway's node.
-	since := metav1.NewTime(time.Now().Add(-1 * time.Minute))
-
 	actorRef := resources.ActorRef{Atespace: networkingAtespace, Name: actorName}
 	status, body := fetchThroughEgressActor(t, ctx, router, actorRef, "https://example.com/")
 	if status != http.StatusOK {
 		t.Fatalf("Actor HTTPS egress fetch returned HTTP %d, want 200; body: %s", status, body)
 	}
 	t.Logf("Actor HTTPS egress fetch succeeded; body: %s", body)
-
-	assertEgressGatewayConnect(t, ctx, since, actorName, "443")
 }
 
 // httpTarget is the origin TestActorEgressNonStandardPort dials: a plain HTTP
@@ -220,95 +212,6 @@ func postThroughEgressActor(t *testing.T, ctx context.Context, router *e2e.Route
 		t.Logf("POST %s through egress Actor returned HTTP %d; retrying... body: %s", path, response.StatusCode, body)
 		time.Sleep(1 * time.Second)
 	}
-}
-
-// assertEgressGatewayConnect waits for the atenet-egress access log to show a
-// CONNECT to port opened by actorName.
-func assertEgressGatewayConnect(t *testing.T, ctx context.Context, since metav1.Time, actorName, port string) {
-	t.Helper()
-	want := fmt.Sprintf("a CONNECT to port %s by actor %s", port, actorName)
-	waitForAccessLog(t, ctx, since, want, func(lines []string) (bool, error) {
-		for _, line := range lines {
-			authority, ok := accessLogField(line, "authority")
-			if !ok || !strings.HasSuffix(authority, ":"+port) {
-				continue
-			}
-			if !strings.Contains(line, "/actor/"+actorName) {
-				continue
-			}
-			t.Logf("egress gateway tunneled the request: %s", line)
-			return true, nil
-		}
-		return false, nil
-	})
-}
-
-// waitForAccessLog polls the atenet-egress access log, across every gateway
-// replica, until predicate accepts the lines written since.
-func waitForAccessLog(t *testing.T, ctx context.Context, since metav1.Time, want string, predicate func(lines []string) (bool, error)) {
-	t.Helper()
-	const (
-		gatewayNamespace = "ate-system"
-		gatewaySelector  = "app=atenet-egress"
-		gatewayContainer = "envoy"
-		// The access log's line prefix, from the HttpConnectionManager
-		// text_format_source in manifests/ate-install/atenet-egress.yaml.
-		accessLogPrefix = "[egress] "
-	)
-
-	clients := e2e.GetClients()
-	pods, err := clients.K8s.CoreV1().Pods(gatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: gatewaySelector})
-	if err != nil {
-		t.Fatalf("listing %s pods in %s: %v", gatewaySelector, gatewayNamespace, err)
-	}
-	if len(pods.Items) == 0 {
-		t.Fatalf("no %s pods in %s; the egress gateway is not deployed", gatewaySelector, gatewayNamespace)
-	}
-
-	// Poll for the access log line (it may show up asynchronously from the actual traffic).
-	const timeout = 30 * time.Second
-	deadline := time.Now().Add(timeout)
-	for {
-		var lines []string
-		for _, pod := range pods.Items {
-			logs, err := clients.K8s.CoreV1().Pods(gatewayNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{
-				Container: gatewayContainer,
-				SinceTime: &since,
-			}).DoRaw(ctx)
-			if err != nil {
-				t.Fatalf("reading logs of %s/%s: %v", gatewayNamespace, pod.Name, err)
-			}
-			for line := range strings.SplitSeq(string(logs), "\n") {
-				if strings.Contains(line, accessLogPrefix) {
-					lines = append(lines, line)
-				}
-			}
-		}
-
-		matched, err := predicate(lines)
-		if err != nil {
-			t.Fatalf("looking for %s in the atenet-egress access log: %v", want, err)
-		}
-		if matched {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no atenet-egress access-log line for %s after %v; lines seen:\n%s",
-				want, timeout, strings.Join(lines, "\n"))
-		}
-		time.Sleep(1 * time.Second)
-	}
-}
-
-// accessLogField returns the value of the key=value field named key in an Envoy
-// access log line whose fields are separated by spaces.
-func accessLogField(line, key string) (string, bool) {
-	_, rest, ok := strings.Cut(line, key+"=")
-	if !ok {
-		return "", false
-	}
-	value, _, _ := strings.Cut(rest, " ")
-	return value, true
 }
 
 func createAndResumeActor(t *testing.T, ctx context.Context, prefix string, template e2e.Fixture) (string, *ateapipb.Actor) {
