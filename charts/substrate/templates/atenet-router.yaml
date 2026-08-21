@@ -71,6 +71,17 @@ data:
         randomSampling: 0.01
 {{- end }}
 
+    backends:
+    - name: worker-connect-proxy
+      dynamic:
+        target: extproc["envoy.filters.listener.original_dst"]["connect_proxy"]
+      policies:
+        backendTLS:
+          cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+          key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+          root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
+          insecureHost: true
+
     gateways:
       http:
         port: 8080
@@ -105,13 +116,12 @@ data:
             "filter_state['dev.ate.authority']": request.host
       backends:
       - dynamic:
-          target: extproc["envoy.filters.listener.original_dst"]["local"]
+          target: extproc["envoy.filters.listener.original_dst"]["connect_destination"]
         policies:
-          backendTLS:
-            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-            root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
-            insecureHost: true
+          backendTunnel:
+            proxy:
+              backend: /worker-connect-proxy
+            mode: connect
 
     binds:
     - port: 8081
@@ -150,13 +160,12 @@ data:
                 "filter_state['dev.ate.authority']": source.connectHeaders["host"]
           backends:
           - dynamic:
-              target: extproc["envoy.filters.listener.original_dst"]["local"]
+              target: extproc["envoy.filters.listener.original_dst"]["connect_destination"]
             policies:
-              backendTLS:
-                cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
-                insecureHost: true
+              backendTunnel:
+                proxy:
+                  backend: /worker-connect-proxy
+                mode: connect
 ---
 apiVersion: apps/v1
 kind: Deployment
