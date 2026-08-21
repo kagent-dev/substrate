@@ -85,6 +85,10 @@ func dynamicMetadataPort(dynamicMetadata *structpb.Struct) string {
 	return dynamicMetadata.GetFields()[OriginalDstMetadataKey].GetStructValue().GetFields()[OriginalDstPortKey].GetStringValue()
 }
 
+func dynamicMetadataAddress(dynamicMetadata *structpb.Struct, key string) string {
+	return dynamicMetadata.GetFields()[OriginalDstMetadataKey].GetStructValue().GetFields()[key].GetStringValue()
+}
+
 func TestHandleRequestHeadersDoesNotLogSensitiveData(t *testing.T) {
 	const testUUID = "123e4567-e89b-12d3-a456-426614174000"
 	const secret = "do-not-log-me"
@@ -292,6 +296,12 @@ func TestHandleRequestHeaders(t *testing.T) {
 			if got := dynamicMetadataPort(res.DynamicMetadata); got != tc.expectedTargetPort {
 				t.Errorf("dynamic metadata port = %q, want %q", got, tc.expectedTargetPort)
 			}
+			if got, want := dynamicMetadataAddress(res.DynamicMetadata, ConnectProxyAddressKey), "10.0.0.52:444"; got != want {
+				t.Errorf("CONNECT proxy = %q, want %q", got, want)
+			}
+			if got, want := dynamicMetadataAddress(res.DynamicMetadata, ConnectDestinationAddressKey), tc.authority+":"+tc.expectedTargetPort; got != want {
+				t.Errorf("CONNECT destination = %q, want %q", got, want)
+			}
 		})
 	}
 }
@@ -335,6 +345,12 @@ func TestHandleRequestHeadersHandlesConnectMethod(t *testing.T) {
 	}
 	if got := dynamicMetadataPort(res.DynamicMetadata); got != "9090" {
 		t.Errorf("dynamic metadata port = %q, want %q", got, "9090")
+	}
+	if got, want := dynamicMetadataAddress(res.DynamicMetadata, ConnectProxyAddressKey), "10.0.0.52:444"; got != want {
+		t.Errorf("CONNECT proxy = %q, want %q", got, want)
+	}
+	if got := dynamicMetadataAddress(res.DynamicMetadata, ConnectDestinationAddressKey); got != authority {
+		t.Errorf("CONNECT destination = %q, want %q", got, authority)
 	}
 }
 
