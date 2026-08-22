@@ -12,8 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.
-# Run `make helm-template` to regenerate.
+# Keep this RBAC synchronized with charts/substrate/templates/role.yaml.
 
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
