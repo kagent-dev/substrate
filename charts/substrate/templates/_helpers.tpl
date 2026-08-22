@@ -20,10 +20,9 @@ Qualified resource name for a chart component.
 Usage:
   {{ include "substrate.fullname" (list "ate-api-server" .) }}
 
-When the release name is "substrate" (the canonical render in
-hack/render-manifests.sh — `helm template substrate charts/substrate`), this
-returns the bare component name, so the generated manifests/ate-install/
-files keep their historical names ("ate-api-server", "ate-controller", ...).
+When the release name is "substrate", this returns the bare component name so
+the chart matches the historical names in manifests/ate-install/
+("ate-api-server", "ate-controller", ...).
 
 Otherwise resources are prefixed with the release name in the standard Helm
 style ("foo-ate-api-server", ...) so multiple releases coexist without
@@ -89,8 +88,9 @@ Produces  {image.registry}/{name}:{tag}  where tag is resolved as:
   2. .Chart.AppVersion, if image.tag is empty
   3. no tag (no colon) when image.tag is the sentinel "<none>"
 
-The "<none>" sentinel is used by hack/render-manifests.sh so that ko:// refs
-are emitted without a tag, letting `ko resolve` supply the digest at build time.
+The "<none>" sentinel emits ko:// refs without a tag, letting `ko resolve`
+supply the digest at build time and verification compare chart resources with
+their manifests.
 */}}
 {{- define "substrate.componentImage" -}}
 {{- $name := index . 0 -}}

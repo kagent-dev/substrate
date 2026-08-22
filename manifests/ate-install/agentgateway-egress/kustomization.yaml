@@ -20,3 +20,31 @@ resources:
 
 components:
   - ../components/agentgateway
+
+# The shared component also carries ingress and legacy Envoy configuration;
+# neither belongs in the final AgentGateway-only egress bundle.
+patches:
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: atenet-egress
+      namespace: ate-system
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: atenet-egress
+        namespace: ate-system
+      $patch: delete
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: atenet-router-agentgateway-config
+      namespace: ate-system
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: atenet-router-agentgateway-config
+        namespace: ate-system
+      $patch: delete

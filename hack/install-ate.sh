@@ -70,7 +70,7 @@ function usage() {
   echo "  --setup-csi                            Setup CSI hostpath and NFS drivers (Kind only)"
   echo "  --delete-ate-system                    Delete core system"
   echo "  --delete-all                           Delete core system and all registered demos"
-  echo "  --atenet-router=envoy|agentgateway     Select the ingress and egress dataplane (default: envoy)"
+  echo "  --atenet-router=envoy|agentgateway     Select the ingress and egress dataplane (default: agentgateway)"
   echo "  --store-backend=redis|postgres         Configure the ateapi store backend (default: redis)"
   echo "  --podcert-workers-per-signer N         Concurrent workers per podcertificate-controller signer (default: 1)"
   echo "  --rollout-timeout DURATION             Per-workload readiness wait timeout, kubectl-style Go duration (default: 60s)"
@@ -175,9 +175,9 @@ run_ko() {
 }
 
 atenet_router() {
-  case "${ATE_ATENET_ROUTER:-envoy}" in
+  case "${ATE_ATENET_ROUTER:-agentgateway}" in
     envoy|agentgateway)
-      echo "${ATE_ATENET_ROUTER:-envoy}"
+      echo "${ATE_ATENET_ROUTER:-agentgateway}"
       ;;
     *)
       echo "Error: --atenet-router must be envoy or agentgateway, got '${ATE_ATENET_ROUTER}'" >&2
