@@ -84,7 +84,6 @@ spec:
         - "--grpc-listen-addr=0.0.0.0:443"
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
-        - "--store-backend=@env"
         - "--postgres-connection-string=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"

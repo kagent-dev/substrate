@@ -20,17 +20,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/ateredis"
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/resources"
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 )
 
+type lockStore struct{ store.Interface }
+
+func (lockStore) AcquireLock(ctx context.Context, _ string) (*store.Lock, error) {
+	return store.NewLock(ctx, func() {}), nil
+}
+
 func TestAcquireActorLockWorkflowDeadline(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{mr.Addr()}})
-	t.Cleanup(func() { _ = rdb.Close() })
-	w := &ActorWorkflow{store: ateredis.NewPersistence(rdb), workflowDeadline: 20 * time.Millisecond}
+	w := &ActorWorkflow{store: lockStore{}, workflowDeadline: 20 * time.Millisecond}
 
 	ctx, lock, err := w.acquireActorLock(context.Background(), resources.ActorRef{Atespace: "space", Name: "actor"})
 	if err != nil {

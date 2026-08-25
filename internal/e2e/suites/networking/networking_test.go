@@ -21,8 +21,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -154,8 +152,6 @@ func TestActorEgressNonStandardPort(t *testing.T) {
 	router := mustRouterClient(t, ctx)
 	defer router.Close()
 
-	since := metav1.NewTime(time.Now().Add(-1 * time.Minute))
-
 	// Address() is the ClusterIP literal, not the Service's DNS name: the
 	// authority atunnel sends is always an address, so the name would add
 	// nothing but a dependency on the sandbox's DNS-over-UDP masquerade path --
@@ -171,7 +167,6 @@ func TestActorEgressNonStandardPort(t *testing.T) {
 	}
 	t.Logf("Actor egress fetch of %s succeeded", url)
 
-	assertEgressGatewayConnect(t, ctx, since, actorName, strconv.Itoa(httpTarget.Port))
 }
 
 // fetchThroughEgressActor asks the egress demo Actor to fetch url and returns

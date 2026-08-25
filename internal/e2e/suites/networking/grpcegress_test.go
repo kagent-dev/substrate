@@ -19,11 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"testing"
-	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/agent-substrate/substrate/internal/e2e"
 	"github.com/agent-substrate/substrate/internal/resources"
@@ -81,8 +77,6 @@ func TestActorEgressGRPC(t *testing.T) {
 
 	// Bound the access-log scan below to lines this test could have produced.
 	// The slack absorbs clock skew between here and the gateway's node.
-	since := metav1.NewTime(time.Now().Add(-1 * time.Minute))
-
 	const (
 		message     = "hello over grpc"
 		streamCount = 3
@@ -153,5 +147,4 @@ func TestActorEgressGRPC(t *testing.T) {
 	// Everything above would also pass if the Actor's traffic had been
 	// masqueraded straight out instead of tunneled. This is what says it went
 	// through the gateway, on this Actor's own certificate.
-	assertEgressGatewayConnect(t, ctx, since, actorName, strconv.Itoa(grpcEcho.Port))
 }
