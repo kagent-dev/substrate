@@ -7,7 +7,6 @@ configured with the file passed to `--authentication-config`:
 actorIdentityJWTProvider: kubernetes
 jwtProviders:
 - name: kubernetes
-  issuer: https://kubernetes.default.svc.cluster.local
   audiences:
   - api.ate-system.svc
   certificateAuthorityFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
@@ -22,6 +21,8 @@ Provider names and issuers must be unique. `issuer` must be an HTTPS URL and
 `audiences` must be non-empty; a token is accepted when any configured audience
 matches. `certificateAuthorityFile` and `discoveryTokenFile` are optional and
 are needed for OIDC discovery against some private Kubernetes API servers.
+When `issuer` is omitted, ate-api derives it from the trusted JWT at
+`discoveryTokenFile`.
 
 `actorIdentityJWTProvider` identifies the provider allowed to call
 `ActorIdentity.MintJWT`. Other authenticated providers can call every RPC.

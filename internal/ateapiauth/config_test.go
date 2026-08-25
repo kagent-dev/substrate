@@ -15,11 +15,56 @@
 package ateapiauth
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoadAuthenticationConfigDerivesIssuer(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://kubernetes.default.svc.cluster.local"}`))
+	if err := os.WriteFile(tokenPath, []byte("header."+payload+".signature"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "authentication.yaml")
+	config := "actorIdentityJWTProvider: kubernetes\njwtProviders:\n- name: kubernetes\n  audiences: [api.ate-system.svc]\n  discoveryTokenFile: " + tokenPath + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAuthenticationConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.JWTProviders[0].Issuer, "https://kubernetes.default.svc.cluster.local"; got != want {
+		t.Fatalf("Issuer = %q, want %q", got, want)
+	}
+}
+
+func TestLoadAuthenticationConfigKeepsExplicitIssuer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "authentication.yaml")
+	if err := os.WriteFile(path, []byte(`
+actorIdentityJWTProvider: explicit
+jwtProviders:
+- name: explicit
+  issuer: https://issuer.example
+  audiences: [audience]
+  certificateAuthorityFile: /does/not/exist
+  discoveryTokenFile: /does/not/exist
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAuthenticationConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.JWTProviders[0].Issuer; got != "https://issuer.example" {
+		t.Fatalf("Issuer = %q, want explicit issuer", got)
+	}
+}
 
 func TestLoadAuthenticationConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "authentication.yaml")

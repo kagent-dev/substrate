@@ -15,6 +15,14 @@ helm upgrade --install substrate-crds ./charts/substrate-crds
 helm upgrade --install substrate ./charts/substrate
 ```
 
+The chart derives the ServiceAccount token issuer from ateapi's projected
+token. To override it explicitly:
+
+```bash
+helm upgrade --install substrate ./charts/substrate \
+  --set-string auth.jwt.issuer="$(kubectl get --raw /.well-known/openid-configuration | jq -r .issuer)"
+```
+
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
 using the chart `appVersion` as the tag. Override `image.registry` and
 `image.tag` to install from a different image repository or tag.
@@ -35,6 +43,8 @@ See `values.yaml` for the full set; the important keys:
 
 | Key | Default | Notes |
 |-----|---------|-------|
+| `auth.jwt.issuer` | `""` (detected) | Explicit ServiceAccount token issuer override |
+| `auth.jwt.audience` | `api.ate-system.svc` | Expected ServiceAccount token audience |
 | `postgres.connectionString` | `""` (in-cluster) | Override to use external PostgreSQL |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |

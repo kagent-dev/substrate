@@ -31,6 +31,8 @@ jobs:
         go-version-file: go.mod
     - name: Setup Helm
       uses: azure/setup-helm@v4
+    - name: Verify authentication chart render
+      run: hack/verify-helm-authentication.sh
     - name: Cache micro-VM assets
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
@@ -74,13 +76,18 @@ jobs:
         hack/install-ate-kind.sh --create-jwt-authority-pool-secret
         hack/install-ate-kind.sh --create-actor-id-ca-pool-secret
         hack/install-ate-kind.sh --create-actor-id-ca-certs-secret
-        hack/install-ate-kind.sh --create-api-authentication-config
     - name: Wait for Helm install
       run: |
         helm upgrade substrate charts/substrate \
           --namespace ate-system \
           --reuse-values \
           --wait --timeout=10m
+    - name: Verify ServiceAccount bearer authentication
+      run: |
+        make build-atectl
+        export PATH="${PWD}/bin:${PATH}"
+        kubectl -n ate-system create token ate-client --audience=api.ate-system.svc \
+          | kubectl-ate --token-file - get actors -A
     - name: Deploy micro-VM counter demo
       run: hack/run-microvm-demo-kind.sh --skip-control-plane
     - name: Deploy gVisor counter demo
