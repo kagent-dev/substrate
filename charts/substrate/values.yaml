@@ -23,6 +23,12 @@
 # manifests/ate-install/ install path (kubectl apply).
 createNamespace: false
 
+auth:
+  jwt:
+    # ServiceAccount token issuer. Empty derives it from the projected token.
+    issuer: ""
+    audience: api.ate-system.svc
+
 postgres:
   storageSize: 1Gi
   connectionString: ""

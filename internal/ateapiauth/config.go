@@ -47,6 +47,21 @@ func LoadAuthenticationConfig(path string) (*AuthenticationConfig, error) {
 	if err := yaml.UnmarshalStrict(b, &cfg); err != nil {
 		return nil, fmt.Errorf("parse authentication config: %w", err)
 	}
+	for i := range cfg.JWTProviders {
+		provider := &cfg.JWTProviders[i]
+		if provider.Issuer == "" && provider.DiscoveryTokenFile != "" {
+			// discoveryTokenFile is trusted local configuration; client tokens are
+			// still verified against the issuer derived from it.
+			token, readErr := os.ReadFile(provider.DiscoveryTokenFile)
+			if readErr != nil {
+				return nil, fmt.Errorf("derive jwtProviders[%d].issuer: read discovery token file: %w", i, readErr)
+			}
+			provider.Issuer, err = unverifiedIssuer(string(token))
+			if err != nil {
+				return nil, fmt.Errorf("derive jwtProviders[%d].issuer: %w", i, err)
+			}
+		}
+	}
 	if err := ValidateAuthenticationConfig(&cfg); err != nil {
 		return nil, err
 	}
