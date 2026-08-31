@@ -32,6 +32,12 @@ rules:
 - apiGroups: ["ate.dev"]
   resources: ["csidriverconfigs"]
   verbs: ["get", "watch", "list"]
+# ClusterTrustBundles referenced by SystemInfo trustBundle data sources are
+# resolved on the node: atelet reads them through an informer and projects
+# the sanitized PEM into actors (see cmd/atelet/trustbundle.go).
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["clustertrustbundles"]
+  verbs: ["get", "watch", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -146,11 +152,30 @@ spec:
         - name: servicedns-ca
           mountPath: /run/servicedns.podcert.ate.dev
           readOnly: true
+        - name: kubelet-plugins
+          mountPath: /var/lib/kubelet/plugins
+        - name: device-plugins
+          mountPath: /var/lib/kubelet/device-plugins
+        - name: host-dev
+          mountPath: /host/dev
+          readOnly: true
       volumes:
       - name: run-ateom
         hostPath:
           path: /var/lib/ateom-gvisor
           type: DirectoryOrCreate
+      - name: kubelet-plugins
+        hostPath:
+          path: /var/lib/kubelet/plugins
+          type: DirectoryOrCreate
+      - name: device-plugins
+        hostPath:
+          path: /var/lib/kubelet/device-plugins
+          type: DirectoryOrCreate
+      - name: host-dev
+        hostPath:
+          path: /dev
+          type: Directory
       - name: podidentity
         projected:
           sources:

@@ -20,23 +20,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/ateredis"
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/resources"
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 )
 
-func TestAcquireActorLockWorkflowDeadline(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{mr.Addr()}})
-	t.Cleanup(func() { _ = rdb.Close() })
-	w := &ActorWorkflow{store: ateredis.NewPersistence(rdb), workflowDeadline: 20 * time.Millisecond}
+type leaseStore struct{ store.Interface }
 
-	ctx, lock, err := w.acquireActorLock(context.Background(), resources.ActorRef{Atespace: "space", Name: "actor"})
+func (leaseStore) AcquireLease(ctx context.Context, _ string) (*store.Lease, error) {
+	return store.NewLease(ctx, func() {}), nil
+}
+
+func TestAcquireActorLeaseWorkflowDeadline(t *testing.T) {
+	w := &ActorWorkflow{store: leaseStore{}, workflowDeadline: 20 * time.Millisecond}
+
+	ctx, lease, err := w.acquireActorLease(context.Background(), resources.ActorRef{Atespace: "space", Name: "actor"})
 	if err != nil {
-		t.Fatalf("acquireActorLock: %v", err)
+		t.Fatalf("acquireActorLease: %v", err)
 	}
-	t.Cleanup(lock.Close)
+	t.Cleanup(lease.Close)
 
 	select {
 	case <-ctx.Done():

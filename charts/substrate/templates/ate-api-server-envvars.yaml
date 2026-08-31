@@ -20,5 +20,4 @@ metadata:
   name: {{ .Values.ateApiServerEnvVarsConfigMap }}
   namespace: {{ .Release.Namespace }}
 data:
-  ATE_API_STORE_BACKEND: "postgres"
   ATE_API_POSTGRES_CONNECTION_STRING: {{ .Values.postgres.connectionString | default (printf "postgresql://postgres@%s.%s.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem" (include "substrate.fullname" (list "postgres" .)) .Release.Namespace) | quote }}
