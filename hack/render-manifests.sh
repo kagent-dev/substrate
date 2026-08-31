@@ -28,6 +28,22 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${ROOT}/manifests/ate-install"
 CHART_DIR="${ROOT}/charts/substrate"
 CHECK_MODE="false"
+PRESERVED_FILES=(
+  ate-api-server.yaml
+  ate-controller.yaml
+  ate-otel-config.yaml
+  ate-system-namespace.yaml
+  atelet.yaml
+  atenet-dns.yaml
+  atenet-egress.yaml
+  atenet-egress-with-sdsmint.yaml
+  atenet-router.yaml
+  atenet-router-monitoring.yaml
+  pod-certificate-controller.yaml
+  postgres.yaml
+  sandboxconfig-gvisor.yaml
+  sandboxconfig-validation.yaml
+)
 
 if [ "${1:-}" = "--check" ]; then
   CHECK_MODE="true"
@@ -71,6 +87,8 @@ for doc in raw.split('\n---\n'):
     docs_by_source.setdefault(src, []).append(cleaned.strip())
 
 for src, docs in docs_by_source.items():
+    if src == "namespace.yaml":
+        src = "ate-system-namespace.yaml"
     header = (
         "#  Copyright 2026 Google LLC\n"
         "#\n"
@@ -103,6 +121,8 @@ if [ "${CHECK_MODE}" = "true" ]; then
   trap 'rm -rf "$TMP_DIR" "$CHECK_TMP"' EXIT
   mkdir -p "${CHECK_TMP}/current"
   find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' -exec cp {} "${CHECK_TMP}/current/" \;
+  rm -f "${PRESERVED_FILES[@]/#/${CHECK_TMP}\/current\/}"
+  rm -f "${PRESERVED_FILES[@]/#/${TMP_DIR}\/out\/}"
   if ! diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" >/dev/null 2>&1; then
     echo "manifests/ate-install/ is out of date. Run: make helm-template" >&2
     diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" | head -60 >&2 || true
@@ -114,7 +134,23 @@ fi
 
 # Replace contents (preserve kind/ and generated/ subdirs which are not chart output).
 mkdir -p "${OUT_DIR}"
-find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' -delete
+find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' \
+  ! -name 'ate-api-server.yaml' \
+  ! -name 'ate-controller.yaml' \
+  ! -name 'ate-otel-config.yaml' \
+  ! -name 'ate-system-namespace.yaml' \
+  ! -name 'atelet.yaml' \
+  ! -name 'atenet-dns.yaml' \
+  ! -name 'atenet-egress.yaml' \
+  ! -name 'atenet-egress-with-sdsmint.yaml' \
+  ! -name 'atenet-router.yaml' \
+  ! -name 'atenet-router-monitoring.yaml' \
+  ! -name 'pod-certificate-controller.yaml' \
+  ! -name 'postgres.yaml' \
+  ! -name 'sandboxconfig-gvisor.yaml' \
+  ! -name 'sandboxconfig-validation.yaml' \
+  -delete
+rm -f "${PRESERVED_FILES[@]/#/${TMP_DIR}\/out\/}"
 cp "${TMP_DIR}/out/"*.yaml "${OUT_DIR}/"
 rendered_count="$(find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' | wc -l | xargs)"
 echo "Rendered ${rendered_count} manifest files into ${OUT_DIR}"

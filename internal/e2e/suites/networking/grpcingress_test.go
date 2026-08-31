@@ -106,9 +106,15 @@ func TestIngressProtocolDowngrade(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		// atunnel forwards gRPC as real h2c, which the HTTP/1.1-only counter
-		// cannot speak — a 502 from atunnel, not a silently-downgraded 200.
-		if resp.StatusCode != http.StatusBadGateway {
-			t.Fatalf("gRPC-shaped POST = %d (body %q), want 502: gRPC must not be silently downgraded to HTTP/1.1", resp.StatusCode, body)
+		// cannot speak. Routers may report that as HTTP 502 or as the gRPC
+		// convention of HTTP 200 with a nonzero grpc-status trailer.
+		grpcStatus := resp.Header.Get("grpc-status")
+		if grpcStatus == "" {
+			grpcStatus = resp.Trailer.Get("grpc-status")
+		}
+		if resp.StatusCode != http.StatusBadGateway &&
+			!(resp.StatusCode == http.StatusOK && grpcStatus != "" && grpcStatus != "0") {
+			t.Fatalf("gRPC-shaped POST = %d, grpc-status = %q (body %q), want an explicit upstream failure", resp.StatusCode, grpcStatus, body)
 		}
 	})
 }

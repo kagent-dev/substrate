@@ -42,7 +42,7 @@ patches:
         path: /spec/template/spec/containers/0
         value:
           name: agentgateway
-          image: cr.agentgateway.dev/agentgateway:v1.5.0
+          image: ghcr.io/kagent-dev/substrate/agentgateway:c0f5597c7cb8
           args:
           - -f
           - /etc/agentgateway/config.yaml
@@ -115,7 +115,7 @@ patches:
         path: /spec/template/spec/containers/0
         value:
           name: agentgateway
-          image: cr.agentgateway.dev/agentgateway:v1.5.0
+          image: ghcr.io/kagent-dev/substrate/agentgateway:c0f5597c7cb8
           args:
           - -f
           - /etc/agentgateway/config.yaml
@@ -144,11 +144,11 @@ patches:
           - name: servicedns
             mountPath: /run/servicedns.podcert.ate.dev
             readOnly: true
-          - name: actor-id-ca-certs
-            mountPath: /run/actor-id-ca-certs
-            readOnly: true
           - name: podidentity
             mountPath: /run/podidentity.podcert.ate.dev
+            readOnly: true
+          - name: actor-id-ca-certs
+            mountPath: /run/actor-id-ca-certs
             readOnly: true
           - name: servicedns-ca
             mountPath: /run/servicedns-ca

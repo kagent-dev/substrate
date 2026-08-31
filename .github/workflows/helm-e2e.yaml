@@ -81,17 +81,10 @@ jobs:
           --namespace ate-system \
           --reuse-values \
           --wait --timeout=10m
-    - name: Deploy egress gateway fixture
-      env:
-        KO_DOCKER_REPO: localhost:5001
-        KO_DEFAULTPLATFORMS: linux/amd64
-      run: |
-        ./hack/run-tool.sh ko apply -f manifests/ate-install/atenet-egress.yaml -- --context=kind-kind
-        kubectl --context kind-kind rollout status deployment/atenet-egress -n ate-system --timeout=120s
     - name: Deploy micro-VM counter demo
       run: hack/run-microvm-demo-kind.sh --skip-control-plane
     - name: Deploy gVisor counter demo
-      run: hack/install-ate-kind.sh --deploy-demo-counter
+      run: hack/install-ate-kind.sh --deploy-demo-counter-substrate
     - name: Deploy egress demo
       run: hack/install-ate-kind.sh --deploy-demo-egress
     - name: Wait for micro-VM golden snapshot
