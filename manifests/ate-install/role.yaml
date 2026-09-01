@@ -23,23 +23,11 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - configmaps
+  - pods
   - secrets
   verbs:
   - get
   - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - apps
@@ -56,7 +44,6 @@ rules:
 - apiGroups:
   - ate.dev
   resources:
-  - actortemplates
   - workerpools
   verbs:
   - create
@@ -69,14 +56,12 @@ rules:
 - apiGroups:
   - ate.dev
   resources:
-  - actortemplates/finalizers
   - workerpools/finalizers
   verbs:
   - update
 - apiGroups:
   - ate.dev
   resources:
-  - actortemplates/status
   - workerpools/status
   verbs:
   - get
