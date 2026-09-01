@@ -35,3 +35,9 @@ bash "${ROOT}/hack/run-tool.sh" controller-gen \
 # Templatize the ClusterRole name. controller-gen emits `  name: ate-controller`
 # at column 0; the substitution is exact-match to stay robust.
 sed -i 's|^  name: ate-controller$|  name: {{ include "substrate.fullname" (list "ate-controller" .) }}|' "${OUT}"
+
+# Templatize the namespaced Role's namespace. A kubebuilder rbac marker has to
+# name a literal namespace, so controller-gen emits the canonical one; the
+# chart installs into whatever namespace the release targets, and a Role left
+# in ate-system would leave ate-controller without the permission there.
+sed -i 's|^  namespace: ate-system$|  namespace: {{ .Release.Namespace }}|' "${OUT}"
