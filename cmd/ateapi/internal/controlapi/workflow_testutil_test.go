@@ -55,7 +55,7 @@ func newTestActorWorkflow(t *testing.T, st store.Interface, tmplAtespace, tmplNa
 	}); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("create test ActorTemplate: %v", err)
 	}
-	return NewActorWorkflow(st, nil, nil, nil, nil, nil, nil, "", nil)
+	return NewActorWorkflow(st, nil, nil, nil, nil, nil, nil, "", nil, time.Minute)
 }
 
 // seedWorkflowActor stores an actor with the given state, bound to the given
