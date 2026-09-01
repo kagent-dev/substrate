@@ -20,6 +20,8 @@ package controllers
 //   - internal/k8sresolver watches ateapi's EndpointSlices to dial it.
 //
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// The marker must name a literal namespace, so it carries the canonical one.
+// hack/gen-rbac.sh rewrites it to the chart's release namespace on the way out.
 //+kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch,namespace=ate-system
 
 //go:generate bash ../../../../hack/gen-rbac.sh
