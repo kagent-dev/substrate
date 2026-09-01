@@ -92,6 +92,9 @@ jobs:
     - name: Install CSI NFS driver
       run: hack/install-ate-kind.sh --setup-csi=nfs
     - name: Deploy micro-VM counter demo
+      # The deploy creates the substrate ActorTemplate and waits for its golden
+      # snapshot internally; the ActorTemplate CRD (and its Ready condition)
+      # no longer exists to wait on.
       run: hack/run-microvm-demo-kind.sh --skip-control-plane
     - name: Deploy gVisor counter demo
       run: hack/install-ate-kind.sh --deploy-demo-counter
@@ -101,9 +104,7 @@ jobs:
       run: hack/run-e2e-kind.sh -v -args --no-color
     - name: Run E2E tests (micro-VM)
       env:
-        E2E_TEMPLATE_NAMESPACE: ate-demo-counter-microvm
-        E2E_TEMPLATE_NAME: counter-microvm
-        E2E_TEMPLATE_READY_TIMEOUT: 600s
+        E2E_SANDBOX_CLASS: microvm
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
     - name: Dump diagnostics on failure
       if: failure()
