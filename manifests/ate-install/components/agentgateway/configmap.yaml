@@ -181,6 +181,16 @@ data:
       accessLog:
         add:
           substrate.connect.authority: source.connectHeaders["host"]
+      # Authorize the actor identity at CONNECT-accept, before any tunnel
+      # (HTTP, TLS, or opaque TCP) is terminated. Fails closed when the
+      # control plane is unreachable.
+      substrateEgress:
+        host: api.ate-system.svc:443
+        policies:
+          backendTLS:
+            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+            root: /run/servicedns-ca/trust-bundle.pem
 
     binds:
     # Authenticate the actor before accepting CONNECT.
@@ -207,15 +217,7 @@ data:
               target: source.connectHeaders["host"]
       - protocol: HTTP
         routes:
-        - policies:
-            substrateEgress:
-              host: api.ate-system.svc:443
-              policies:
-                backendTLS:
-                  cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                  key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                  root: /run/servicedns-ca/trust-bundle.pem
-          backends:
+        - backends:
           - dynamic:
               target: source.connectHeaders["host"]
       - protocol: TCP
