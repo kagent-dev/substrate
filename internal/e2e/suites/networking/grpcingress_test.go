@@ -56,6 +56,9 @@ var grpcEchoFixtureManifests = e2e.SubstrateFixtureManifests{
 // actor that really does speak gRPC.
 func TestIngressProtocolDowngrade(t *testing.T) {
 	ctx := context.Background()
+	if e2e.RouterIsAgentgateway(ctx, t) {
+		t.Skip("the downgrade contract is Envoy's protocol mirroring to atunnel (xds.go); agentgateway does not implement it")
+	}
 	actorName, _ := createAndResumeSubstrateActor(t, ctx, "protodowngrade", e2e.SubstrateCounterFixture())
 	actorRef := resources.ActorRef{Atespace: networkingAtespace, Name: actorName}
 
