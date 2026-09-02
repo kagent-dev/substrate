@@ -42,6 +42,17 @@ func TestPlatformMetricsEmitted(t *testing.T) {
 	clients := e2e.GetClients()
 	tmpl := e2e.SubstrateCounterFixture()
 	actorID := fmt.Sprintf("metrics-probe-%d", time.Now().UnixNano())
+	metricPrefixes := append([]string(nil), e2e.PlatformMetricPrefixes...)
+	router, err := clients.K8s.AppsV1().Deployments("ate-system").Get(ctx, "atenet-router", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get atenet-router deployment: %v", err)
+	}
+	for _, container := range router.Spec.Template.Spec.Containers {
+		if container.Name == "envoy" {
+			metricPrefixes = append(metricPrefixes, "atenet_router_route_duration")
+			break
+		}
+	}
 
 	// CreateActor requires the atespace to exist first; ignore AlreadyExists.
 	_, _ = clients.SubstrateAPI.CreateAtespace(ctx, &ateapipb.CreateAtespaceRequest{
@@ -64,7 +75,7 @@ func TestPlatformMetricsEmitted(t *testing.T) {
 	// they add the drive steps their instruments need.
 	resume(t, ctx, clients, actorID)
 
-	// Drive request through the router so Envoy ext_proc emits atenet_router_route_duration.
+	// Drive request through the router so Envoy ext_proc emits its route metric when installed.
 	rClient, err := e2e.NewRouterClient(ctx)
 	if err != nil {
 		t.Fatalf("NewRouterClient: %v", err)
@@ -96,7 +107,7 @@ func TestPlatformMetricsEmitted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ScrapeCollectorMetrics: %v", err)
 		}
-		missing = e2e.MissingPlatformMetrics(scrape, e2e.PlatformMetricPrefixes)
+		missing = e2e.MissingPlatformMetrics(scrape, metricPrefixes)
 		ateomSeen = e2e.CollectorHasService(scrape, "ateom-gvisor", "ateom-microvm")
 		// atecontroller bridges controller-runtime's Prometheus registry onto its OTLP
 		// reader, so the reconcile families are what prove the bridge, not just that

@@ -47,7 +47,6 @@ var PlatformMetricPrefixes = []string{
 	"ate_scheduler_assignment_duration",
 	"ate_actor_restore_duration",
 	"ate_actor_checkpoint_duration",
-	"atenet_router_route_duration",
 	"ate_scheduler_eligible_workers",
 }
 
