@@ -16,7 +16,7 @@ This skill applies only to synchronizing the fork's `main` branch. Do not invoke
 7. Run the real Kind E2E matrix from `.github/workflows/pr-workflow.yaml`, but use agentgateway for all fork testing:
    - Recreate the cluster with `hack/create-kind-cluster.sh`.
    - Install the control plane with `hack/install-ate-kind.sh --deploy-ate-system --atenet-router=agentgateway`.
-   - Deploy the micro-VM demo with `hack/run-microvm-demo-kind.sh --substrate --skip-control-plane` so it does not reinstall the control plane.
+   - Deploy the micro-VM demo with `hack/run-microvm-demo-kind.sh --skip-control-plane` so it does not reinstall the control plane.
    - Deploy the gVisor counter demo and both standard egress demos.
    - The full gVisor suite: `hack/run-e2e-kind.sh -v -args --no-color`
    - The full micro-VM suite with the CI environment: `E2E_SANDBOX_CLASS=microvm hack/run-e2e-kind.sh -v -args --no-color`

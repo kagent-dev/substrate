@@ -84,7 +84,7 @@ jobs:
     - name: Deploy micro-VM counter demo
       run: hack/run-microvm-demo-kind.sh --skip-control-plane
     - name: Deploy gVisor counter demo
-      run: hack/install-ate-kind.sh --deploy-demo-counter-substrate
+      run: hack/install-ate-kind.sh --deploy-demo-counter
     - name: Deploy egress demo
       run: hack/install-ate-kind.sh --deploy-demo-egress
     - name: Wait for micro-VM golden snapshot
