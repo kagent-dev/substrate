@@ -41,17 +41,17 @@ import (
 
 // Persistence is a service that stores ate state in PostgreSQL.
 // watchPoolMaxConns sizes the dedicated outbox watch pool: one connection
-// for the WatchWorkers poller, one for the maintenance loop, and one of headroom
+// for the WatchWorkers poller, one for the maintenance loop,
+// one for actor agress policy polling, and one of headroom
 // so a transiently slow poll can never gate a maintenance pass.
 const (
-	watchPoolMaxConns = 3
+	watchPoolMaxConns = 4
 	watchPoolMinConns = 1
 )
 
 type Persistence struct {
 	pool *pgxpool.Pool
-	// watchPool serves the outbox side only: the WatchWorkers pollers
-	// and the partition-maintenance loop.
+	// watchPool serves the outbox pollers and partition-maintenance loop only.
 	watchPool             *pgxpool.Pool
 	ownsWatchPool         bool
 	leaseTTL              time.Duration
@@ -159,6 +159,10 @@ func newPersistence(ctx context.Context, pool, watchPool *pgxpool.Pool) (*Persis
 		return nil, err
 	}
 	if err := p.createWorkerOutboxPartitions(ctx, outboxPartitionLeadTimes(bootNow)...); err != nil {
+		stopMaintenance()
+		return nil, err
+	}
+	if err := p.createOutboxPartitions(ctx, effectiveEgressPolicyOutboxSpec, outboxPartitionLeadTimes(bootNow)...); err != nil {
 		stopMaintenance()
 		return nil, err
 	}
@@ -587,6 +591,7 @@ func (p *Persistence) DeleteActorTemplate(ctx context.Context, templateRef resou
 func (p *Persistence) CreateActor(ctx context.Context, actor *ateapipb.Actor) (*ateapipb.Actor, error) {
 	atespace := actor.GetMetadata().GetAtespace()
 	name := actor.GetMetadata().GetName()
+	actorRef := resources.ActorRef{Atespace: atespace, Name: name}
 
 	// TODO: doing a full clone here is wasteful - the caller already has to
 	// make modifications to the actor before passing it in, so we can safely
@@ -600,10 +605,13 @@ func (p *Persistence) CreateActor(ctx context.Context, actor *ateapipb.Actor) (*
 		return nil, fmt.Errorf("marshaling actor: %w", err)
 	}
 
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO actors (atespace, name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`,
-		atespace, name, dbActor.GetMetadata().GetUid(), dbActor.GetMetadata().GetVersion(), protoBytes)
+	err = p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO actors (atespace, name, uid, version, proto)
+			VALUES ($1, $2, $3, $4, $5)`,
+			atespace, name, dbActor.GetMetadata().GetUid(), dbActor.GetMetadata().GetVersion(), protoBytes)
+		return err
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, store.ErrAlreadyExists
@@ -639,93 +647,90 @@ func (p *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 		return nil, err
 	}
 	atespace, name := actorRef.Atespace, actorRef.Name
-	var currentUID string
-	var currentVersion int64
-	var currentBytes []byte
-	if err := p.pool.QueryRow(ctx, `
+	var dbActor *ateapipb.Actor
+	err := p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		var currentUID string
+		var currentVersion int64
+		var currentBytes []byte
+		if err := tx.QueryRow(ctx, `
 			SELECT uid, version, proto FROM actors
 			WHERE atespace = $1 AND name = $2`, atespace, name).Scan(&currentUID, &currentVersion, &currentBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
+			if errors.Is(err, pgx.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			return fmt.Errorf("getting actor %s/%s for update: %w", atespace, name, err)
 		}
-		return nil, fmt.Errorf("getting actor %s/%s for update: %w", atespace, name, err)
-	}
 
-	dbActor := &ateapipb.Actor{}
-	if err := proto.Unmarshal(currentBytes, dbActor); err != nil {
-		return nil, fmt.Errorf("unmarshaling actor for update: %w", err)
-	}
-	if err := validateProtoMetadataMatchesColumns("actor "+actorRef.String(), dbActor.GetMetadata(), currentUID, currentVersion); err != nil {
-		return nil, err
-	}
-	if err := precondition.Check(dbActor.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbActor.Metadata)
-	if err := mutate(dbActor); err != nil {
-		return nil, err
-	}
-	// Stored metadata is authoritative; discard any metadata edits made by the
-	// closure and derive the next revision from the state this attempt read.
-	setUpdateMetadata(dbActor.Metadata, oldMeta)
+		dbActor = &ateapipb.Actor{}
+		if err := proto.Unmarshal(currentBytes, dbActor); err != nil {
+			return fmt.Errorf("unmarshaling actor for update: %w", err)
+		}
+		if err := validateProtoMetadataMatchesColumns("actor "+actorRef.String(), dbActor.GetMetadata(), currentUID, currentVersion); err != nil {
+			return err
+		}
+		if err := precondition.Check(dbActor.GetMetadata()); err != nil {
+			return err
+		}
+		oldMeta := proto.CloneOf(dbActor.Metadata)
+		if err := mutate(dbActor); err != nil {
+			return err
+		}
+		setUpdateMetadata(dbActor.Metadata, oldMeta)
 
-	updatedBytes, err := proto.Marshal(dbActor)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling actor: %w", err)
-	}
-	commandTag, err := p.pool.Exec(ctx, `
+		updatedBytes, err := proto.Marshal(dbActor)
+		if err != nil {
+			return fmt.Errorf("marshaling actor: %w", err)
+		}
+		commandTag, err := tx.Exec(ctx, `
 			UPDATE actors
 			SET version = $1, proto = $2
 			WHERE atespace = $3 AND name = $4 AND uid = $5 AND version = $6`,
-		dbActor.GetMetadata().GetVersion(), updatedBytes, atespace, name, currentUID, currentVersion)
-	if err != nil {
-		return nil, fmt.Errorf("updating actor %s/%s: %w", atespace, name, err)
-	}
-	if commandTag.RowsAffected() == 0 {
-		return nil, store.ErrVersionConflict
-	}
-	if commandTag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("updating actor %s/%s affected %d rows, want 1", atespace, name, commandTag.RowsAffected())
-	}
-	return dbActor, nil
+			dbActor.GetMetadata().GetVersion(), updatedBytes, atespace, name, currentUID, currentVersion)
+		if err != nil {
+			return fmt.Errorf("updating actor %s/%s: %w", atespace, name, err)
+		}
+		if commandTag.RowsAffected() == 0 {
+			return store.ErrVersionConflict
+		}
+		if commandTag.RowsAffected() != 1 {
+			return fmt.Errorf("updating actor %s/%s affected %d rows, want 1", atespace, name, commandTag.RowsAffected())
+		}
+		return nil
+	})
+	return dbActor, err
 }
 
 func (p *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorRef) (*ateapipb.Actor, error) {
 	atespace, name := actorRef.Atespace, actorRef.Name
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning actor delete: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	var out *ateapipb.Actor
+	err := p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		var protoBytes []byte
+		err := tx.QueryRow(ctx, `
+			SELECT proto FROM actors
+			WHERE atespace = $1 AND name = $2
+			FOR UPDATE`,
+			atespace, name,
+		).Scan(&protoBytes)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("locking actor %s/%s for deletion: %w", atespace, name, err)
+		}
 
-	var protoBytes []byte
-	err = tx.QueryRow(ctx, `
-		SELECT proto FROM actors
-		WHERE atespace = $1 AND name = $2
-		FOR UPDATE`,
-		atespace, name,
-	).Scan(&protoBytes)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("locking actor %s/%s for deletion: %w", atespace, name, err)
-	}
-
-	out := &ateapipb.Actor{}
-	if err := proto.Unmarshal(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling actor for deletion: %w", err)
-	}
-	if out.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_DELETING {
-		return nil, store.ErrFailedPrecondition
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM actors WHERE atespace = $1 AND name = $2`, atespace, name); err != nil {
-		return nil, fmt.Errorf("deleting actor %s/%s: %w", atespace, name, err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing actor delete: %w", err)
-	}
-	return out, nil
+		out = &ateapipb.Actor{}
+		if err := proto.Unmarshal(protoBytes, out); err != nil {
+			return fmt.Errorf("unmarshaling actor for deletion: %w", err)
+		}
+		if out.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_DELETING {
+			return store.ErrFailedPrecondition
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM actors WHERE atespace = $1 AND name = $2`, atespace, name); err != nil {
+			return fmt.Errorf("deleting actor %s/%s: %w", atespace, name, err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (p *Persistence) ListActors(ctx context.Context, atespace string, opts store.ListOptions) (store.ListResponse[*ateapipb.Actor], error) {
@@ -851,9 +856,12 @@ func (p *Persistence) CreateEgressPolicy(ctx context.Context, actorRef resources
 	if err != nil {
 		return nil, fmt.Errorf("marshaling egress policy: %w", err)
 	}
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO actor_egress_policies (atespace, actor_name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`, actorRef.Atespace, actorRef.Name, dbPolicy.GetMetadata().GetUid(), dbPolicy.GetMetadata().GetVersion(), protoBytes)
+	err = p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO actor_egress_policies (atespace, actor_name, uid, version, proto)
+			VALUES ($1, $2, $3, $4, $5)`, actorRef.Atespace, actorRef.Name, dbPolicy.GetMetadata().GetUid(), dbPolicy.GetMetadata().GetVersion(), protoBytes)
+		return err
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, store.ErrAlreadyExists
@@ -876,51 +884,58 @@ func (p *Persistence) UpdateEgressPolicy(ctx context.Context, actorRef resources
 	if err := precondition.Validate(); err != nil {
 		return nil, err
 	}
-	dbPolicy, err := getEgressPolicyRow(ctx, p.pool, `
-		SELECT uid, version, proto FROM actor_egress_policies
-		WHERE atespace = $1 AND actor_name = $2`, actorRef.Atespace, actorRef.Name)
-	if err != nil {
-		return nil, err
-	}
-	currentUID := dbPolicy.GetMetadata().GetUid()
-	currentVersion := dbPolicy.GetMetadata().GetVersion()
-	if err := precondition.Check(dbPolicy.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbPolicy.Metadata)
-	if err := mutate(dbPolicy); err != nil {
-		return nil, err
-	}
-	dbPolicy.Metadata = oldMeta
-	setUpdateMetadata(dbPolicy.Metadata, oldMeta)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling updated egress policy: %w", err)
-	}
-	commandTag, err := p.pool.Exec(ctx, `
-		UPDATE actor_egress_policies SET version = $1, proto = $2
-		WHERE atespace = $3 AND actor_name = $4 AND uid = $5 AND version = $6`,
-		dbPolicy.GetMetadata().GetVersion(), protoBytes, actorRef.Atespace, actorRef.Name, currentUID, currentVersion)
-	if err != nil {
-		return nil, fmt.Errorf("updating egress policy for %s: %w", actorRef, err)
-	}
-	if commandTag.RowsAffected() == 0 {
-		return nil, store.ErrVersionConflict
-	}
-	if commandTag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("updating egress policy for %s affected %d rows, want 1", actorRef, commandTag.RowsAffected())
-	}
-	return dbPolicy, nil
+	var dbPolicy *ateapipb.EgressPolicy
+	err := p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		dbPolicy, err = getEgressPolicyRow(ctx, tx, `
+			SELECT uid, version, proto FROM actor_egress_policies
+			WHERE atespace = $1 AND actor_name = $2`, actorRef.Atespace, actorRef.Name)
+		if err != nil {
+			return err
+		}
+		currentUID := dbPolicy.GetMetadata().GetUid()
+		currentVersion := dbPolicy.GetMetadata().GetVersion()
+		if err := precondition.Check(dbPolicy.GetMetadata()); err != nil {
+			return err
+		}
+		oldMeta := proto.CloneOf(dbPolicy.Metadata)
+		if err := mutate(dbPolicy); err != nil {
+			return err
+		}
+		dbPolicy.Metadata = oldMeta
+		setUpdateMetadata(dbPolicy.Metadata, oldMeta)
+		protoBytes, err := proto.Marshal(dbPolicy)
+		if err != nil {
+			return fmt.Errorf("marshaling updated egress policy: %w", err)
+		}
+		commandTag, err := tx.Exec(ctx, `
+			UPDATE actor_egress_policies SET version = $1, proto = $2
+			WHERE atespace = $3 AND actor_name = $4 AND uid = $5 AND version = $6`,
+			dbPolicy.GetMetadata().GetVersion(), protoBytes, actorRef.Atespace, actorRef.Name, currentUID, currentVersion)
+		if err != nil {
+			return fmt.Errorf("updating egress policy for %s: %w", actorRef, err)
+		}
+		if commandTag.RowsAffected() == 0 {
+			return store.ErrVersionConflict
+		}
+		if commandTag.RowsAffected() != 1 {
+			return fmt.Errorf("updating egress policy for %s affected %d rows, want 1", actorRef, commandTag.RowsAffected())
+		}
+		return nil
+	})
+	return dbPolicy, err
 }
 
 func (p *Persistence) DeleteEgressPolicy(ctx context.Context, actorRef resources.ActorRef) (*ateapipb.EgressPolicy, error) {
 	var version int64
 	var uid string
 	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `
-		DELETE FROM actor_egress_policies
-		WHERE atespace = $1 AND actor_name = $2
-		RETURNING uid, version, proto`, actorRef.Atespace, actorRef.Name).Scan(&uid, &version, &protoBytes)
+	err := p.writeAndAppendEffectiveEgressPolicyChange(ctx, actorRef, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			DELETE FROM actor_egress_policies
+			WHERE atespace = $1 AND actor_name = $2
+			RETURNING uid, version, proto`, actorRef.Atespace, actorRef.Name).Scan(&uid, &version, &protoBytes)
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -1625,6 +1640,15 @@ func (p *Persistence) renewLease(ctx context.Context, key, token string, ttl tim
 func (p *Persistence) releaseLease(ctx context.Context, key, token string) error {
 	if _, err := p.pool.Exec(ctx, `DELETE FROM leases WHERE key = $1 AND token = $2`, key, token); err != nil {
 		return fmt.Errorf("releasing lease for %q: %w", key, err)
+	}
+	return nil
+}
+
+// --- Debug ---
+
+func (p *Persistence) DebugClearAll(ctx context.Context) error {
+	if _, err := p.pool.Exec(ctx, `TRUNCATE atespaces, actors, actor_egress_policies, actor_templates, actor_snapshots, actor_snapshot_tags, workers, leases, worker_outbox, worker_outbox_trim, effective_egress_policy_outbox, effective_egress_policy_outbox_trim`); err != nil {
+		return fmt.Errorf("truncating tables: %w", err)
 	}
 	return nil
 }

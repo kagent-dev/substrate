@@ -132,6 +132,28 @@ CREATE TABLE IF NOT EXISTS worker_outbox_trim (
     xid  xid8 NOT NULL
 );
 
+-- Transactional invalidations backing WatchEffectiveEgressPolicyChanges.
+-- Actor and egress-policy mutations append the affected Actor key. Consumers
+-- resolve the effective policy only when that key has local subscribers.
+CREATE TABLE IF NOT EXISTS effective_egress_policy_outbox (
+    xid         xid8 NOT NULL DEFAULT pg_current_xact_id(),
+    created_at  timestamptz NOT NULL DEFAULT clock_timestamp(),
+    atespace    text NOT NULL,
+    actor_name  text NOT NULL
+) PARTITION BY RANGE (created_at);
+
+CREATE INDEX IF NOT EXISTS effective_egress_policy_outbox_xid
+    ON effective_egress_policy_outbox (xid);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS effective_egress_policy_outbox_default
+    PARTITION OF effective_egress_policy_outbox DEFAULT
+    WITH (autovacuum_enabled = off);
+
+CREATE TABLE IF NOT EXISTS effective_egress_policy_outbox_trim (
+    id   boolean PRIMARY KEY DEFAULT true CHECK (id),
+    xid  xid8 NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS leases (
     key         text PRIMARY KEY,
     token       text NOT NULL,

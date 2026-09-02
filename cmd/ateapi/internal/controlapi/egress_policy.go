@@ -131,6 +131,10 @@ func (s *ServiceImpl) DeleteEgressPolicy(ctx context.Context, actorRef resources
 	return mapEgressPolicyWrite(deleted, err)
 }
 
+func (s *ServiceImpl) WatchEffectiveEgressPolicyChanges(ctx context.Context) (*store.EffectiveEgressPolicyWatch, error) {
+	return s.store.WatchEffectiveEgressPolicyChanges(ctx)
+}
+
 func validateDeleteActorEgressPolicyRequest(ctx context.Context, req *ateapipb.DeleteActorEgressPolicyRequest) field.ErrorList {
 	return Validate_DeleteActorEgressPolicyRequest(ctx, operation.Operation{Type: operation.Create}, nil, req, nil)
 }

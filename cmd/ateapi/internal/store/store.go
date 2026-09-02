@@ -114,6 +114,11 @@ type Interface interface {
 	// Deletes and returns an Actor's policy subresource.
 	DeleteEgressPolicy(ctx context.Context, actorRef resources.ActorRef) (*ateapipb.EgressPolicy, error)
 
+	// WatchEffectiveEgressPolicyChanges returns Actor keys whose effective
+	// egress policy may have changed. Callers resolve only keys they currently
+	// serve; the events deliberately carry no Actor or policy state.
+	WatchEffectiveEgressPolicyChanges(ctx context.Context) (*EffectiveEgressPolicyWatch, error)
+
 	// Creates an immutable ActorSnapshot. The caller sets snapshot_uri; the
 	// store keeps no location of its own.
 	CreateActorSnapshot(ctx context.Context, snapshot *ateapipb.ActorSnapshot) (*ateapipb.ActorSnapshot, error)
@@ -352,6 +357,28 @@ func NewWorkerWatch(events <-chan WorkerEvent, stop context.CancelFunc) *WorkerW
 
 // Close releases the subscription. Safe to call multiple times.
 func (w *WorkerWatch) Close() { w.stop() }
+
+// EffectiveEgressPolicyChange identifies an Actor whose lifecycle or policy
+// mutation may have changed its effective egress policy.
+type EffectiveEgressPolicyChange struct {
+	Actor resources.ActorRef
+}
+
+// EffectiveEgressPolicyWatch is an active subscription to effective-policy
+// invalidations. The caller must call Close when done.
+type EffectiveEgressPolicyWatch struct {
+	Events <-chan EffectiveEgressPolicyChange
+	stop   context.CancelFunc
+}
+
+// NewEffectiveEgressPolicyWatch builds a watch from its event channel and
+// cancellation function.
+func NewEffectiveEgressPolicyWatch(events <-chan EffectiveEgressPolicyChange, stop context.CancelFunc) *EffectiveEgressPolicyWatch {
+	return &EffectiveEgressPolicyWatch{Events: events, stop: stop}
+}
+
+// Close releases the subscription. Safe to call multiple times.
+func (w *EffectiveEgressPolicyWatch) Close() { w.stop() }
 
 // Lease represents a held distributed lease that is renewed automatically
 // until Close is called. If renewal cannot keep the lease alive, the context
