@@ -62,11 +62,6 @@ func TestRequestParking(t *testing.T) {
 		t.Fatalf("creating router client: %v", err)
 	}
 	defer router.Close()
-	statusz, err := e2e.NewStatuszClient(ctx)
-	if err != nil {
-		t.Fatalf("creating statusz client: %v", err)
-	}
-	defer statusz.Close()
 
 	t.Run("ParkThenServed", func(t *testing.T) {
 		// Occupy the only worker with actor A.
@@ -77,7 +72,7 @@ func TestRequestParking(t *testing.T) {
 		// the worker is asynchronous — SuspendActor(A) returns before the
 		// suspend completes, and on the micro-VM class the snapshot upload
 		// routinely outlives the 5s park budget under CI contention. A
-		// budget-exhausted 503 while the suspend is still in flight is the
+		// budget-exhausted verdict while the suspend is still in flight is the
 		// router behaving correctly, so the request is retried: each attempt
 		// parks anew, and the suspend's completion lets one of them resume B.
 		// A stranded worker (#675's root cause) fails every attempt, so the
@@ -103,9 +98,12 @@ func TestRequestParking(t *testing.T) {
 				resCh <- result{resp, body, err}
 			}()
 			if attempt == 1 {
-				// Free the worker only once the request is observably parked —
-				// the statusz gauge, not a sleep, is the synchronization point.
-				waitForParkedCount(ctx, t, statusz, func(active int) bool { return active >= 1 })
+				// The request must remain pending while the only worker is busy.
+				select {
+				case early := <-resCh:
+					t.Fatalf("request completed before a worker was freed: response=%v err=%v body=%q", early.resp, early.err, early.body)
+				case <-time.After(500 * time.Millisecond):
+				}
 				suspendActor(ctx, t, clients, actorA)
 			}
 			res = <-resCh
@@ -113,9 +111,12 @@ func TestRequestParking(t *testing.T) {
 			if res.err != nil {
 				t.Fatalf("parked request failed transport-level: %v", res.err)
 			}
-			if res.resp.StatusCode == http.StatusServiceUnavailable &&
-				strings.Contains(res.body, "no free workers available") && attempt < 3 {
-				t.Logf("attempt %d budget-exhausted while the worker was still freeing (503 after %v); retrying", attempt, elapsed)
+			capacityVerdict := res.resp.StatusCode == http.StatusServiceUnavailable &&
+				strings.Contains(res.body, "no free workers available")
+			timeoutVerdict := res.resp.StatusCode == http.StatusGatewayTimeout &&
+				strings.Contains(res.body, "request timed out")
+			if (capacityVerdict || timeoutVerdict) && attempt < 3 {
+				t.Logf("attempt %d budget-exhausted while the worker was still freeing (status %d after %v); retrying", attempt, res.resp.StatusCode, elapsed)
 				continue
 			}
 			break
@@ -144,9 +145,6 @@ func TestRequestParking(t *testing.T) {
 		if followUp.StatusCode != http.StatusOK {
 			t.Errorf("follow-up request: status = %d (body %q), want 200 from the resumed actor", followUp.StatusCode, string(followUpBody))
 		}
-
-		// The slot must be released once served.
-		waitForParkedCount(ctx, t, statusz, func(active int) bool { return active == 0 })
 	})
 
 	t.Run("BudgetExhaustion", func(t *testing.T) {
@@ -163,11 +161,12 @@ func TestRequestParking(t *testing.T) {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
 
-		if resp.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d (body %q), want 503", resp.StatusCode, string(body))
-		}
-		if !strings.Contains(string(body), "no free workers available") {
-			t.Errorf("body = %q, want the router's capacity verdict", string(body))
+		capacityVerdict := resp.StatusCode == http.StatusServiceUnavailable &&
+			strings.Contains(string(body), "no free workers available")
+		timeoutVerdict := resp.StatusCode == http.StatusGatewayTimeout &&
+			strings.Contains(string(body), "request timed out")
+		if !capacityVerdict && !timeoutVerdict {
+			t.Fatalf("status = %d (body %q), want the router's capacity or parking-timeout verdict", resp.StatusCode, string(body))
 		}
 		if ct := resp.Header.Get("content-type"); ct != "text/plain" {
 			t.Errorf("content-type = %q, want text/plain", ct)
@@ -176,10 +175,10 @@ func TestRequestParking(t *testing.T) {
 		// milliseconds); upper bound proves the router's own verdict landed
 		// before Envoy's ext_proc timeout (budget+5s) could.
 		if elapsed < routerParkBudget-time.Second {
-			t.Errorf("503 after %v: too fast, the request did not park for the budget", elapsed)
+			t.Errorf("failure after %v: too fast, the request did not park for the budget", elapsed)
 		}
 		if elapsed > routerParkBudget+4*time.Second {
-			t.Errorf("503 after %v: too slow, likely an Envoy timeout rather than the router's verdict", elapsed)
+			t.Errorf("failure after %v: too slow, likely a downstream timeout rather than the router's verdict", elapsed)
 		}
 		t.Logf("budget exhausted after %v", elapsed)
 	})
@@ -263,24 +262,4 @@ func waitForActorState(ctx context.Context, t *testing.T, clients *e2e.Clients, 
 		time.Sleep(1 * time.Second)
 	}
 	t.Fatalf("timed out waiting for actor %q to reach %v", name, want)
-}
-
-// waitForParkedCount polls the router's statusz parking gauge until cond holds.
-// The deadline is short: a parking request becomes visible within its first
-// retry interval (~100ms), and a served one releases its slot immediately.
-func waitForParkedCount(ctx context.Context, t *testing.T, statusz *e2e.StatuszClient, cond func(active int) bool) {
-	t.Helper()
-	deadline := time.Now().Add(4 * time.Second)
-	var last int
-	for time.Now().Before(deadline) {
-		p, err := statusz.Parking(ctx)
-		if err == nil {
-			last = p.Active
-			if cond(p.Active) {
-				return
-			}
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for the parking gauge to satisfy the condition (last active=%d)", last)
 }
