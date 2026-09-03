@@ -79,8 +79,16 @@ spec:
         - "--ateapi-conn-spec=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
         - "--ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem"
         - "--ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
-{{- if .Values.otel.endpoint }}
         env:
+        # ate-controller resolves substrate's namespace from the downward API.
+        # It names the atelet and atenet-router SPIFFE identities handed to
+        # each worker's atunnel, which live in substrate's namespace and not
+        # the worker's, so the controller cannot infer them any other way.
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+{{- if .Values.otel.endpoint }}
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: {{ .Values.otel.endpoint | quote }}
 {{- end }}
