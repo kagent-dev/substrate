@@ -104,6 +104,12 @@ spec:
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - --ateapi-ca-file=/run/servicedns.podcert.ate.dev/trust-bundle.pem
+        # The atelet binary defaults these to api.ate-system.svc, which is
+        # correct only for the canonical render. The credential broker dials
+        # ateapi to mint actor certificates, so pass the chart-resolved
+        # Service and the matching name on its serving cert.
+        - --ateapi-address={{ include "substrate.ateApi.endpoint" . }}
+        - --ateapi-server-name={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc
 {{- with .Values.atelet.extraArgs }}
 {{ toYaml . | indent 8 }}
 {{- end }}

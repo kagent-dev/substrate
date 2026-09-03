@@ -44,9 +44,28 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-const (
-	apiServerName = "api.ate-system.svc"
+// NamespaceEnv overrides the namespace the client looks for substrate in. The
+// client runs outside the cluster, so it has no downward API to read and no
+// pod namespace to fall back on; it matches the ATE_NAMESPACE that
+// hack/install-ate.sh installed with.
+const NamespaceEnv = "ATE_NAMESPACE"
 
+// systemNamespace is the namespace the client expects ateapi to be running in.
+func systemNamespace() string {
+	if ns := os.Getenv(NamespaceEnv); ns != "" {
+		return ns
+	}
+	return installdefaults.SystemNamespace
+}
+
+// apiServerName is the in-cluster DNS name of the ateapi Service. It is both
+// the SNI presented on the connection and the audience of the minted token, so
+// it has to track the namespace ateapi actually runs in.
+func apiServerName() string {
+	return fmt.Sprintf("%s.%s.svc", installdefaults.APIServiceName, systemNamespace())
+}
+
+const (
 	// serviceDNSSignerName and liveBundleSelector mirror the
 	// clusterTrustBundle projected-volume sources that in-cluster clients
 	// mount to verify ateapi's serving cert.
@@ -84,7 +103,7 @@ func (c *Client) Close() {
 }
 
 // NewClient creates a new Ate API client. If endpoint is empty, it automatically port-forwards
-// to the ate-api-server pod in the ate-system namespace.
+// to the ate-api-server pod in substrate's namespace.
 func NewClient(ctx context.Context, kubeconfigPath, k8sContext, endpoint, tokenFile string, traceEnabled bool) (*Client, error) {
 	tp, err := initTracing(ctx, traceEnabled)
 	if err != nil {
@@ -168,7 +187,7 @@ func dialPortForward(ctx context.Context, kubeconfigPath, k8sContext, tokenFile 
 
 	// TODO: Should we special-case a LoadBalancer "api" Service and dial its
 	// address directly instead of port-forwarding?
-	localPort, stopForward, err := portforward.ServicePortForward(ctx, config, clientset, installdefaults.SystemNamespace, installdefaults.APIServiceName, 443)
+	localPort, stopForward, err := portforward.ServicePortForward(ctx, config, clientset, systemNamespace(), installdefaults.APIServiceName, 443)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +252,7 @@ func serverTLSConfig(ctx context.Context, clientset kubernetes.Interface) (*tls.
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    pool,
-		ServerName: apiServerName,
+		ServerName: apiServerName(),
 	}, nil
 }
 
@@ -253,11 +272,11 @@ func bearerTokenDialOption(ctx context.Context, clientset *kubernetes.Clientset,
 	expirationSeconds := int64(3600)
 	tokenRequest := &authv1.TokenRequest{
 		Spec: authv1.TokenRequestSpec{
-			Audiences:         []string{apiServerName},
+			Audiences:         []string{apiServerName()},
 			ExpirationSeconds: &expirationSeconds,
 		},
 	}
-	token, err := clientset.CoreV1().ServiceAccounts(installdefaults.SystemNamespace).CreateToken(ctx, "ate-client", tokenRequest, metav1.CreateOptions{})
+	token, err := clientset.CoreV1().ServiceAccounts(systemNamespace()).CreateToken(ctx, "ate-client", tokenRequest, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to request ateapi bearer token: %w", err)
 	}
