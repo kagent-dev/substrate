@@ -87,7 +87,11 @@ jobs:
     - name: Create cluster
       run: hack/create-kind-cluster.sh
     - name: Install Agent Substrate
-      run: hack/install-ate-kind.sh --deploy-ate-system --atenet-router=agentgateway
+      # The default 60s per-workload rollout wait assumes warm image caches; on a
+      # fresh runner every image (postgres, the agentgateway proxy for router and
+      # egress, ...) is cold-pulled from public registries concurrently, and the
+      # first wait in line regularly exceeds 60s on pull latency alone.
+      run: hack/install-ate-kind.sh --deploy-ate-system --atenet-router=agentgateway --rollout-timeout=300s
     - name: Enable NFS
       # Load NFS kernel modules so in-cluster NFS server and CSI driver can run.
       run: |
