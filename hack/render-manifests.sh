@@ -121,8 +121,9 @@ if [ "${CHECK_MODE}" = "true" ]; then
   trap 'rm -rf "$TMP_DIR" "$CHECK_TMP"' EXIT
   mkdir -p "${CHECK_TMP}/current"
   find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' -exec cp {} "${CHECK_TMP}/current/" \;
-  rm -f "${PRESERVED_FILES[@]/#/${CHECK_TMP}\/current\/}"
-  rm -f "${PRESERVED_FILES[@]/#/${TMP_DIR}\/out\/}"
+  for file in "${PRESERVED_FILES[@]}"; do
+    rm -f "${CHECK_TMP}/current/${file}" "${TMP_DIR}/out/${file}"
+  done
   if ! diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" >/dev/null 2>&1; then
     echo "manifests/ate-install/ is out of date. Run: make helm-template" >&2
     diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" | head -60 >&2 || true
@@ -150,7 +151,9 @@ find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' \
   ! -name 'sandboxconfig-gvisor.yaml' \
   ! -name 'sandboxconfig-validation.yaml' \
   -delete
-rm -f "${PRESERVED_FILES[@]/#/${TMP_DIR}\/out\/}"
+for file in "${PRESERVED_FILES[@]}"; do
+  rm -f "${TMP_DIR}/out/${file}"
+done
 cp "${TMP_DIR}/out/"*.yaml "${OUT_DIR}/"
 rendered_count="$(find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' | wc -l | xargs)"
 echo "Rendered ${rendered_count} manifest files into ${OUT_DIR}"
