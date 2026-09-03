@@ -78,6 +78,12 @@ spec:
         # dials the right backend when substrate is installed as a subchart.
         - "--ateapi-conn-spec=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
         - "--ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem"
+        # A SPIFFE ID names a ServiceAccount, and this chart prefixes those for
+        # any release not called "substrate". The controller stamps these
+        # identities onto every worker, so it has to be told the names actually
+        # rendered rather than assume the canonical ones.
+        - "--atelet-service-account={{ include "substrate.fullname" (list "atelet" .) }}"
+        - "--router-service-account={{ include "substrate.fullname" (list "atenet-router" .) }}"
         - "--ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
         env:
         # ate-controller resolves substrate's namespace from the downward API.

@@ -78,13 +78,13 @@ func WithInsecureCredentials() DialerOption {
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
 // are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, ateletNamespace, clientBundlePath, serverCAPath string, opts ...DialerOption) *AteletDialer {
+func NewAteletDialer(workerIndexer cache.Indexer, ateletIndexer cache.Indexer, ateletSPIFFEID, clientBundlePath, serverCAPath string, opts ...DialerOption) *AteletDialer {
 	d := &AteletDialer{
 		workerIndexer: workerIndexer,
 		ateletIndexer: ateletIndexer,
 		ateletConns:   newAteletConnCache(1024),
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			tlsConfig, err := buildTLSConfig(ateletNamespace, clientBundlePath, serverCAPath, expectedPodUID)
+			tlsConfig, err := buildTLSConfig(ateletSPIFFEID, clientBundlePath, serverCAPath, expectedPodUID)
 			if err != nil {
 				return nil, err
 			}
@@ -191,7 +191,7 @@ func (d *AteletDialer) DialForAteletOnNode(nodeName string) (*grpc.ClientConn, e
 	return ateletConn, nil
 }
 
-func buildTLSConfig(ateletNamespace, clientBundlePath, serverCAPath, expectedPodUID string) (*tls.Config, error) {
+func buildTLSConfig(ateletSPIFFEID, clientBundlePath, serverCAPath, expectedPodUID string) (*tls.Config, error) {
 	trustDomain, err := spiffeid.TrustDomainFromString(installdefaults.AteletTrustDomain)
 	if err != nil {
 		return nil, fmt.Errorf("while parsing trust domain %q: %w", installdefaults.AteletTrustDomain, err)
@@ -200,9 +200,9 @@ func buildTLSConfig(ateletNamespace, clientBundlePath, serverCAPath, expectedPod
 	if err != nil {
 		return nil, fmt.Errorf("while loading CA bundle from %s: %w", serverCAPath, err)
 	}
-	expectedID, err := spiffeid.FromSegments(trustDomain, "ns", ateletNamespace, "sa", installdefaults.AteletServiceAccount)
+	expectedID, err := spiffeid.FromString(ateletSPIFFEID)
 	if err != nil {
-		return nil, fmt.Errorf("while building expected atelet SPIFFE ID: %w", err)
+		return nil, fmt.Errorf("while parsing expected atelet SPIFFE ID %q: %w", ateletSPIFFEID, err)
 	}
 
 	verify, err := verifyAteletServerCert(bundle, expectedID, expectedPodUID)
