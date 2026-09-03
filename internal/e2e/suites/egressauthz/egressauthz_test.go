@@ -55,7 +55,6 @@ import (
 
 const (
 	// Where the gateway's CA lives, fixed by hack/install-ate.sh.
-	egressNamespace = "ate-system"
 
 	probeName = "egressprobe"
 )
