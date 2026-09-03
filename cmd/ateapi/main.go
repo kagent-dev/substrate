@@ -199,7 +199,7 @@ func main() {
 	if *ateletInsecure {
 		dialerOpts = append(dialerOpts, controlapi.WithInsecureCredentials())
 	}
-	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts, dialerOpts...)
+	ateletDialer := controlapi.NewAteletDialer(workerPodInformer.GetIndexer(), ateletPodInformer.GetIndexer(), ateletNamespace, *ateletClientCredBundle, *podIdentityCACerts, dialerOpts...)
 	controlSrv := controlapi.NewRPCService(persistence, workerCache, workerPoolLister, sandboxConfigLister, csiDriverConfigLister, storageClassLister, ateletDialer, instruments, *egressGatewayAddress, *actorWorkflowDeadline, volPlugins)
 
 	// Drive stored ActorTemplates through the golden actor flow.
