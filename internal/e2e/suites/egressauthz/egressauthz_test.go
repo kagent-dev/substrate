@@ -162,6 +162,7 @@ func startProbe(t *testing.T, ctx context.Context) *probeClient {
 	}
 	manifest := filepath.Join(t.TempDir(), "egressprobe.yaml")
 	rendered := strings.ReplaceAll(string(tmpl), "${NAMESPACE}", ns)
+	rendered = strings.ReplaceAll(rendered, "${SYSTEM_NAMESPACE}", e2e.SystemNamespace())
 	if err := os.WriteFile(manifest, []byte(rendered), 0o644); err != nil {
 		t.Fatalf("writing rendered egressprobe manifest: %v", err)
 	}
