@@ -36,8 +36,15 @@ fi
 # otherwise just use the current cluster in KUBECONFIG ...
 
 # Namespace the substrate control plane is installed into. Defaults to the
-# canonical ate-system so existing flows are unaffected; override it to install
-# a relocated release (the chart's --namespace must match).
+# canonical ate-system so existing flows are unaffected.
+#
+# This applies to the resources this script creates and waits on: the mTLS
+# authorities, the api-server ConfigMaps, and the rollout checks. It does NOT
+# relocate the checked-in manifests, which carry `namespace: ate-system`
+# literally and are applied verbatim by render_ate_system_manifests. Installing
+# into another namespace means installing with the Helm chart and using this
+# script only for the bootstrap steps; require_default_namespace_for_manifests
+# below refuses the combination that would half-install.
 ATE_NAMESPACE="${ATE_NAMESPACE:-ate-system}"
 
 # Service name fronting ateapi. It is the audience the API authentication config
@@ -332,7 +339,30 @@ label_nodes_substrate_version() {
   done
 }
 
+# require_default_namespace_for_manifests stops the manifest-applying paths when
+# ATE_NAMESPACE has been overridden. Those manifests name ate-system literally,
+# so proceeding would put the workloads in ate-system while this script created
+# their secrets and ConfigMaps somewhere else — an install that comes up far
+# enough to look healthy and then fails on a missing envFrom source.
+require_default_namespace_for_manifests() {
+  if [[ "${ATE_NAMESPACE}" != "ate-system" ]]; then
+    echo "error: ATE_NAMESPACE=${ATE_NAMESPACE} cannot be used with the manifest-applying subcommands." >&2
+    echo "       manifests/ate-install/ hardcodes the ate-system namespace. Install into" >&2
+    echo "       another namespace with the Helm chart, then use this script only for the" >&2
+    echo "       --create-* bootstrap steps." >&2
+    exit 1
+  fi
+  if [[ "${ATE_API_SERVICE_NAME}" != "api" ]]; then
+    echo "error: ATE_API_SERVICE_NAME=${ATE_API_SERVICE_NAME} cannot be used with the manifest-applying subcommands." >&2
+    echo "       manifests/ate-install/ creates the Service literally named api, so tokens" >&2
+    echo "       minted for this audience would all be rejected. A renamed Service comes" >&2
+    echo "       from a Helm install; use this script only for the --create-* bootstrap steps." >&2
+    exit 1
+  fi
+}
+
 render_ate_system_manifests() {
+  require_default_namespace_for_manifests
   local router=""
   router="$(atenet_router)"
 

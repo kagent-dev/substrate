@@ -170,6 +170,12 @@ func main() {
 	// atelet shares ateapi's namespace in every supported deployment topology,
 	// so we read it from Kubernetes' downward API rather than expose a flag.
 	ateletNamespace := installdefaults.NamespaceFromPodEnv()
+	// An empty ServiceAccount would not fail here: path.Join drops the empty
+	// segment, yielding an identity that parses but matches nothing, so every
+	// atelet dial would be rejected with no hint at the cause.
+	if *ateletServiceAccount == "" {
+		serverboot.Fatal(ctx, "Invalid flags", fmt.Errorf("--atelet-service-account must not be empty"))
+	}
 	ateletSPIFFEID := installdefaults.SPIFFEID(ateletNamespace, *ateletServiceAccount)
 	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace), slog.String("atelet-spiffe-id", ateletSPIFFEID))
 

@@ -41,14 +41,13 @@ type Controller struct {
 	Reloader     ConfigReloader
 
 	// SystemNamespace is the namespace where atenet-router and the substrate
-	// CoreDNS Service live. Defaults to installdefaults.SystemNamespace.
+	// CoreDNS Service live. Must be set; the zero value looks the Services up
+	// in no namespace at all.
 	SystemNamespace string
 	// RouterServiceName is the Service name of the atenet-router that the
-	// CoreDNS Corefile forwards actor traffic to. Defaults to
-	// installdefaults.RouterServiceName.
+	// CoreDNS Corefile forwards actor traffic to. Must be set.
 	RouterServiceName string
-	// DNSServiceName is the Service name of substrate's CoreDNS. Defaults to
-	// installdefaults.DNSServiceName.
+	// DNSServiceName is the Service name of substrate's CoreDNS. Must be set.
 	DNSServiceName string
 }
 

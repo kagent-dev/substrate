@@ -155,6 +155,16 @@ func main() {
 
 	ateapiClient := ateapipb.NewControlClient(ateapiConn)
 
+	// Empty ServiceAccounts would not fail here: path.Join drops the empty
+	// segment, yielding identities that parse but match nothing, so every
+	// worker would reject both of its peers with no hint at the cause.
+	for flag, value := range map[string]string{"--atelet-service-account": *ateletServiceAccount, "--router-service-account": *routerServiceAccount} {
+		if value == "" {
+			setupLog.Error(nil, "invalid flag", "flag", flag, "reason", "must not be empty")
+			os.Exit(1)
+		}
+	}
+
 	// EgressMITMTrustReconciler watches the Secret `egress-mitm-ca-pool`.
 	systemNamespace := installdefaults.NamespaceFromPodEnv()
 	egressMITMCAPool := controllers.EgressMITMCAPoolRef(systemNamespace)

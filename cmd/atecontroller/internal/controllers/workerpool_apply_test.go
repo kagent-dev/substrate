@@ -730,7 +730,6 @@ func expectedDeploymentApplyConfig(mutatePodSpec func(*corev1ac.PodSpecApplyConf
 				"--atunnel-credential-bundle="+atunnelIdentityMountPath+"/credential-bundle.pem",
 				"--atunnel-trust-bundle="+atunnelIdentityMountPath+"/trust-bundle.pem",
 				"--atunnel-client-identity="+installdefaults.RouterSPIFFEID(installdefaults.SystemNamespace),
-				"--atunnel-broker-identity="+installdefaults.AteletSPIFFEID(installdefaults.SystemNamespace),
 				"--atunnel-egress-listen-address=0.0.0.0:15001",
 				"--atunnel-egress-trust-bundle="+atunnelEgressTrustMountPath+"/trust-bundle.pem",
 			).
@@ -877,5 +876,36 @@ func TestBuildDeploymentAtunnelIdentitiesPrefixedServiceAccounts(t *testing.T) {
 		if got != wantVal {
 			t.Errorf("%s%s, want %s%s", flag, got, flag, wantVal)
 		}
+	}
+}
+
+// TestBuildDeploymentOmitsBrokerIdentityForCanonicalInstall pins the flag's
+// absence, which is what keeps a rolling upgrade working. docs/upgrade.md runs
+// the outgoing worker pool alongside the new one, and this controller
+// reconciles that pool's Deployment while it is still pinned to its old image.
+// An ateom from before --atunnel-broker-identity existed exits on the
+// unrecognized flag, so passing it would crashloop every old worker the moment
+// the control plane rolled out.
+func TestBuildDeploymentOmitsBrokerIdentityForCanonicalInstall(t *testing.T) {
+	c := buildDeploymentApplyConfig(testWorkerPoolApplyConfig(nil), ateomOTelSettings{},
+		installdefaults.SystemNamespace, installdefaults.AteletServiceAccount, installdefaults.RouterServiceAccount).
+		Spec.Template.Spec.Containers[0]
+
+	for _, arg := range c.Args {
+		if strings.HasPrefix(arg, "--atunnel-broker-identity=") {
+			t.Fatalf("canonical install passed %q; an ateom predating the flag exits on it", arg)
+		}
+	}
+
+	// The value it would have carried is the one such an ateom already assumes,
+	// so omitting it changes nothing for either binary.
+	var clientIdentity string
+	for _, arg := range c.Args {
+		if strings.HasPrefix(arg, "--atunnel-client-identity=") {
+			clientIdentity = strings.TrimPrefix(arg, "--atunnel-client-identity=")
+		}
+	}
+	if want := installdefaults.RouterSPIFFEID(installdefaults.SystemNamespace); clientIdentity != want {
+		t.Errorf("--atunnel-client-identity=%s, want %s", clientIdentity, want)
 	}
 }
