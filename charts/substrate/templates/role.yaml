@@ -102,7 +102,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "substrate.fullname" (list "ate-controller" .) }}
-  namespace: ate-system
+  namespace: {{ .Release.Namespace }}
 rules:
 - apiGroups:
   - discovery.k8s.io

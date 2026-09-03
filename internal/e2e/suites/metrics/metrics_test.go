@@ -43,7 +43,7 @@ func TestPlatformMetricsEmitted(t *testing.T) {
 	tmpl := e2e.SubstrateCounterFixture()
 	actorID := fmt.Sprintf("metrics-probe-%d", time.Now().UnixNano())
 	metricPrefixes := append([]string(nil), e2e.PlatformMetricPrefixes...)
-	router, err := clients.K8s.AppsV1().Deployments("ate-system").Get(ctx, "atenet-router", metav1.GetOptions{})
+	router, err := clients.K8s.AppsV1().Deployments(e2e.SystemNamespace()).Get(ctx, e2e.ResourceName("atenet-router"), metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Get atenet-router deployment: %v", err)
 	}

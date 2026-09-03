@@ -89,6 +89,9 @@ spec:
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--egress-gateway-address={{ include "substrate.fullname" (list "atenet-egress" .) }}.{{ .Release.Namespace }}.svc:443"
+        # ateapi verifies atelet's SPIFFE ID, which embeds the ServiceAccount
+        # name this chart prefixes for a renamed release.
+        - "--atelet-service-account={{ include "substrate.fullname" (list "atelet" .) }}"
         - "--atelet-client-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
         - "--pod-identity-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem"
         - "--drain-delay=13s"
