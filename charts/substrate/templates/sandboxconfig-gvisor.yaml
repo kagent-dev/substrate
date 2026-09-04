@@ -14,18 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-# Cluster-wide default SandboxConfig for the gVisor (runsc) sandbox class. A
-# WorkerPool with sandboxClass gvisor (the default) and no explicit
-# sandboxConfigName resolves to this. atelet fetches the runsc binary matching
-# the worker node's architecture. To pin a different runsc, edit the assets
-# below or create another SandboxConfig and name it from the WorkerPool.
+# Cluster-wide SandboxConfig for the gVisor (runsc) sandbox class, shipped with
+# the platform so gVisor ActorTemplates have a config to name via
+# sandboxConfig.configName.
 apiVersion: ate.dev/v1alpha1
 kind: SandboxConfig
 metadata:
   name: gvisor-default
 spec:
   sandboxClass: gvisor
-  default: true
   pauseImage: "registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4"
   assets:
     amd64:
