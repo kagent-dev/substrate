@@ -35,7 +35,7 @@ jobs:
       uses: azure/setup-helm@v4
     - name: Test Helm chart
       run: |
-        helm plugin install https://github.com/helm-unittest/helm-unittest.git --version 1.0.3
+        helm plugin install https://github.com/helm-unittest/helm-unittest.git --version 1.0.3 --verify=false
         make helm-test
     - name: Cache micro-VM assets
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
