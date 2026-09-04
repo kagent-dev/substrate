@@ -37,6 +37,7 @@ See `values.yaml` for the full set; the important keys:
 |-----|---------|-------|
 | `postgres.enabled` | `true` | Deploy the bundled PostgreSQL instance |
 | `postgres.connectionString` | `""` (in-cluster) | Override to use external PostgreSQL |
+| `postgres.connectionStringSecretRef` | disabled | Read an external PostgreSQL connection string from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
 | `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
