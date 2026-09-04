@@ -111,6 +111,10 @@ clean:
 helm-template:
 	@./hack/render-manifests.sh
 
+.PHONY: helm-test
+helm-test:
+	@helm unittest charts/substrate
+
 # Verify that manifests/ate-install/ matches the chart output. Used in CI.
 .PHONY: verify-helm-template
 verify-helm-template:

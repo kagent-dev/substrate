@@ -78,6 +78,12 @@ Plaintext HTTP URL that clients use to reach atenet-router.
 {{- printf "http://%s.%s.svc:80" (include "substrate.fullname" (list "atenet-router" .)) .Release.Namespace -}}
 {{- end -}}
 
+{{/* PostgreSQL connection Secret, when configured. */}}
+{{- define "substrate.postgres.connectionStringSecretEnabled" -}}
+{{- $ref := .Values.postgres.connectionStringSecretRef | default dict -}}
+{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- end -}}
+
 {{/*
 Build an image reference for a substrate component binary.
 
