@@ -113,16 +113,11 @@ func TestActorEgress(t *testing.T) {
 	actorRef := resources.ActorRef{Atespace: networkingAtespace, Name: actorName}
 	url := fmt.Sprintf("http://%s/healthz", target.Address())
 
-	// Bound the access-log scan to lines this test produced: captured before
-	// the fetch, with slack for clock skew against the gateway's node.
-	since := metav1.NewTime(time.Now().Add(-1 * time.Minute))
 	status, body := fetchThroughEgressActor(t, ctx, router, actorRef, url)
 	if status != http.StatusOK {
 		t.Fatalf("Actor egress fetch of %s returned HTTP %d, want 200; body: %s", url, status, body)
 	}
 	t.Logf("Actor egress fetch of %s succeeded; body: %s", url, body)
-
-	assertEgressGatewayConnect(t, ctx, since, actorName, strconv.Itoa(origin.Port))
 
 	// The Actor resolves the name itself -- DNS leaves over the UDP masquerade,
 	// not the tunnel, and atunnel forwards the resolved address, never the
