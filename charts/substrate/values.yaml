@@ -27,6 +27,12 @@ postgres:
   enabled: true
   storageSize: 1Gi
   connectionString: ""
+  # Read the connection string from a Secret instead of values/ConfigMap.
+  connectionStringSecretRef:
+    # When enabled with no name, use the release-scoped postgres-connection name.
+    enabled: false
+    name: ""
+    key: connectionString
   schema: public
   resources:
     requests:

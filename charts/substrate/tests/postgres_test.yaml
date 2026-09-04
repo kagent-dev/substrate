@@ -1,0 +1,125 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: PostgreSQL configuration
+templates:
+- ate-api-server-envvars.yaml
+- ate-api-server.yaml
+- postgres.yaml
+tests:
+- it: configures the bundled PostgreSQL database by default
+  template: ate-api-server-envvars.yaml
+  asserts:
+  - isNotNull:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+  - equal:
+      path: data.ATE_API_POSTGRES_SCHEMA
+      value: public
+
+- it: configures an external PostgreSQL connection string and schema
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      connectionString: postgresql://user:pass@database:5432/agents
+      schema: substrate
+  asserts:
+  - equal:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+      value: postgresql://user:pass@database:5432/agents
+  - equal:
+      path: data.ATE_API_POSTGRES_SCHEMA
+      value: substrate
+
+- it: omits bundled PostgreSQL for an external connection
+  template: postgres.yaml
+  set:
+    postgres:
+      enabled: false
+      connectionString: postgresql://user:pass@database:5432/agents
+  asserts:
+  - hasDocuments:
+      count: 0
+
+- it: reads an explicitly named connection Secret
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        name: shared-database
+        key: url
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_CONNECTION_STRING
+        valueFrom:
+          secretKeyRef:
+            name: shared-database
+            key: url
+
+- it: derives a release-scoped Secret name when enabled
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        enabled: true
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_CONNECTION_STRING
+        valueFrom:
+          secretKeyRef:
+            name: RELEASE-NAME-postgres-connection
+            key: connectionString
+
+- it: keeps credentials out of the ConfigMap in Secret mode
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      schema: substrate
+      connectionStringSecretRef:
+        name: shared-database
+  asserts:
+  - notExists:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+  - equal:
+      path: data.ATE_API_POSTGRES_SCHEMA
+      value: substrate
+
+- it: rejects disabling bundled PostgreSQL without a connection
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.connectionString or postgres.connectionStringSecretRef is required when postgres.enabled=false
+
+- it: rejects configuring both a literal connection and a Secret
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      connectionString: postgresql://user:pass@database:5432/agents
+      connectionStringSecretRef:
+        name: shared-database
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.connectionString and postgres.connectionStringSecretRef are mutually exclusive

@@ -97,6 +97,14 @@ spec:
 {{ toYaml . | indent 8 }}
 {{- end }}
         env:
+{{- $connectionStringSecretRef := .Values.postgres.connectionStringSecretRef }}
+{{- if include "substrate.postgres.connectionStringSecretEnabled" . }}
+        - name: ATE_API_POSTGRES_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ get $connectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              key: {{ get $connectionStringSecretRef "key" | default "connectionString" | quote }}
+{{- end }}
         - name: POD_NAME
           valueFrom:
             fieldRef:
