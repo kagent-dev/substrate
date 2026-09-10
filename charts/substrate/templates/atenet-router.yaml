@@ -210,6 +210,9 @@ spec:
         - "--port-extproc=50051"
         - "--extproc-address=127.0.0.1"
         - "--ateapi-address=dns:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
+        # /statusz looks up this instance's own ClusterIP by Service name, and
+        # the chart prefixes that name for any release not called "substrate".
+        - "--router-service-name={{ include "substrate.fullname" (list "atenet-router" .) }}"
         - "--ateapi-ca-file=/run/servicedns-ca/trust-bundle.pem"
         - "--ateapi-client-cert=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
         - "--status-port=4040"
