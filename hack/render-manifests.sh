@@ -34,7 +34,6 @@ PRESERVED_FILES=(
   ate-otel-config.yaml
   ate-system-namespace.yaml
   atelet.yaml
-  atenet-dns.yaml
   atenet-egress.yaml
   atenet-egress-with-sdsmint.yaml
   atenet-router.yaml
@@ -141,7 +140,6 @@ find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' \
   ! -name 'ate-otel-config.yaml' \
   ! -name 'ate-system-namespace.yaml' \
   ! -name 'atelet.yaml' \
-  ! -name 'atenet-dns.yaml' \
   ! -name 'atenet-egress.yaml' \
   ! -name 'atenet-egress-with-sdsmint.yaml' \
   ! -name 'atenet-router.yaml' \

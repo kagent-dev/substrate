@@ -26,10 +26,6 @@ const (
 	SystemNamespace = "ate-system"
 	// APIServiceName is the Service name of ate-api-server.
 	APIServiceName = "api"
-	// RouterServiceName is the Service name of atenet-router.
-	RouterServiceName = "atenet-router"
-	// DNSServiceName is the Service name of substrate's CoreDNS.
-	DNSServiceName = "dns"
 
 	// PodNamespaceEnv is the conventional env var name for the namespace
 	// a pod is running in, exposed via Kubernetes' downward API.
