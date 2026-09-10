@@ -42,4 +42,4 @@ See `values.yaml` for the full set; the important keys:
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
-| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces/metrics |
+| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics and the router access log |
