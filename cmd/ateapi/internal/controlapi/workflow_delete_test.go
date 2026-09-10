@@ -17,6 +17,7 @@ package controlapi
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/storetest"
@@ -398,7 +399,7 @@ func TestDeleteActor_CollectsSnapshotsAfterWorkerDelete(t *testing.T) {
 				})
 			}
 
-			actorWorkflow := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, objects)
+			actorWorkflow := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, time.Minute, objects)
 			// Suspend the actor as far as it gets: MarkSuspending mints the
 			// in-progress name, and the checkpoint writes under it
 			actor, err := actorWorkflow.ensureMarkedSuspending(ctx, actorRef, actor, template)
