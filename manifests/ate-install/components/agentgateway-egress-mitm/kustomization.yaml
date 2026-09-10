@@ -35,7 +35,7 @@ patches:
                 substrate.connect.authority: source.connectHeaders["host"]
             # Authorize the actor identity at CONNECT-accept, before any tunnel
             # is terminated. Fails closed when the control plane is unreachable.
-            substrateEgress:
+            substrateEgressActorResolution:
               host: api.ate-system.svc:443
               policies:
                 backendTLS:

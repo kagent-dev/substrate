@@ -184,7 +184,7 @@ data:
       # Authorize the actor identity at CONNECT-accept, before any tunnel
       # (HTTP, TLS, or opaque TCP) is terminated. Fails closed when the
       # control plane is unreachable.
-      substrateEgress:
+      substrateEgressActorResolution:
         host: api.ate-system.svc:443
         policies:
           backendTLS:
