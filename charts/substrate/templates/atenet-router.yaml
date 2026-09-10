@@ -42,6 +42,13 @@ data:
         host: $AGENTGATEWAY_OTLP_ADDRESS
         protocol: grpc
         randomSampling: 0.01
+      # Unsampled per-request access log. It carries the ate.* actor
+      # attribution, which the 1%-sampled traces cannot be aggregated on.
+      # `fields` stays unset so the OTLP sink inherits the full field set.
+      accessLog:
+        otlp:
+          host: $AGENTGATEWAY_OTLP_ADDRESS
+          protocol: grpc
 {{- end }}
 
     backends:
