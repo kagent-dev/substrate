@@ -98,6 +98,10 @@ kind: Job
 metadata:
   name: {{ include "substrate.fullname" (list "rustfs-bucket-init" .) }}
   namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: 10
   template:
