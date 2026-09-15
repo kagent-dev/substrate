@@ -66,6 +66,7 @@ var (
 	redisNoTLS          = pflag.Bool("redis-no-tls", false, "If true, connect to Redis/Valkey in plaintext.")
 
 	clientJWTIssuer      = pflag.String("client-jwt-issuer", "", "The expected issuer URL for client JWTs.")
+	sessionIDIssuer      = pflag.String("session-id-issuer", "https://broker.agentic-substrate-session-id-broker.svc", "The issuer (iss claim) to mint into session JWTs. Must be a publicly resolvable URL when session tokens are verified by external parties (e.g. AWS OIDC federation); the default preserves the historical in-cluster value.")
 	clientJWTAudience    = pflag.String("client-jwt-audience", "", "The expected audience for client JWTs.")
 	sessionIDJWTPoolFile = pflag.String("session-id-jwt-pool", "", "The file that contains the serialized JWT authority pool for signing session JWTs")
 
@@ -167,7 +168,7 @@ func main() {
 		serverboot.Fatal(ctx, "JWT auth mode requires a Kubernetes ServiceAccount issuer discovery client", fmt.Errorf("client JWT issuer %q is not usable for discovery", *clientJWTIssuer))
 	}
 
-	sessionIdentitySrv := sessionidentity.New(*clientJWTIssuer, *clientJWTAudience, *sessionIDJWTPoolFile, *sessionIDCAPoolFile, *workerpoolCACerts, jwtIssuerDiscoveryClient)
+	sessionIdentitySrv := sessionidentity.New(*sessionIDIssuer, *clientJWTIssuer, *clientJWTAudience, *sessionIDJWTPoolFile, *sessionIDCAPoolFile, *workerpoolCACerts, jwtIssuerDiscoveryClient)
 
 	lisCfg := &net.ListenConfig{}
 	lis, err := lisCfg.Listen(ctx, "tcp", *listenAddr)

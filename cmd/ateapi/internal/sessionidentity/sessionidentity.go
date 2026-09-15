@@ -47,6 +47,8 @@ type Server struct {
 	clientJWTIssuer   string
 	clientJWTAudience string
 
+	sessionIDIssuer string
+
 	// TODO: Cache the signing keys in memory, so we don't read from a file every time.
 	sessionIDJWTPoolFile string
 	sessionIDCAPoolFile  string
@@ -57,8 +59,9 @@ type Server struct {
 
 var _ ateapipb.SessionIdentityServer = (*Server)(nil)
 
-func New(clientJWTIssuer, clientJWTAudience, sessionIDJWTPoolFile, sessionIDCAPoolFile, workerCACerts string, httpClient *http.Client) *Server {
+func New(sessionIDIssuer, clientJWTIssuer, clientJWTAudience, sessionIDJWTPoolFile, sessionIDCAPoolFile, workerCACerts string, httpClient *http.Client) *Server {
 	return &Server{
+		sessionIDIssuer:      sessionIDIssuer,
 		clientJWTIssuer:      clientJWTIssuer,
 		clientJWTAudience:    clientJWTAudience,
 		sessionIDJWTPoolFile: sessionIDJWTPoolFile,
@@ -110,7 +113,7 @@ func (s *Server) MintJWT(ctx context.Context, req *ateapipb.MintJWTRequest) (*at
 	}
 
 	sessionClaims := &sessionidjwt.Claims{
-		Issuer:     "https://broker.agentic-substrate-session-id-broker.svc", // TODO: This needs to be globally unique.
+		Issuer:     s.sessionIDIssuer,
 		Subject:    fmt.Sprintf("apps/%s/users/%s/sessions/%s", req.GetAppId(), req.GetUserId(), req.GetSessionId()),
 		Audiences:  req.GetAudience(),
 		Expiration: time.Now().Add(15 * time.Minute),
