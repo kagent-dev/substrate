@@ -126,6 +126,7 @@ func (s *Server) MintJWT(ctx context.Context, req *ateapipb.MintJWTRequest) (*at
 			UserID:    req.GetUserId(),
 			SessionID: req.GetSessionId(),
 		},
+		Custom: req.GetCustomClaims(),
 	}
 
 	sessionWireClaims, err := sessionidjwt.ClaimsToWire(sessionClaims)

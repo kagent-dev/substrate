@@ -39,6 +39,12 @@ type Claims struct {
 
 	// Claims from ADK's session model
 	Substrate SubstrateClaims
+
+	// Custom caller-supplied claims, flattened into the JWT at the top level.
+	// Keys are merged after the standard claims; they MUST NOT collide with
+	// registered claims (iss/sub/aud/exp/nbf/iat/jti/ate.dev) — collisions
+	// are rejected by ClaimsToWire.
+	Custom map[string]string
 }
 
 type SubstrateClaims struct {
@@ -65,6 +71,9 @@ type WireClaims struct {
 
 	// Claims from ADK's session model.
 	Substrate WireSubstrateClaims `json:"ate.dev,omitempty"`
+
+	// Custom caller-supplied claims, flattened into the JWT at the top level.
+	Custom map[string]string `json:"-"`
 }
 
 type WireSubstrateClaims struct {
@@ -92,9 +101,45 @@ func ClaimsToWire(claims *Claims) (*WireClaims, error) {
 			claims.Substrate.UserID,
 			claims.Substrate.SessionID,
 		},
+		Custom: claims.Custom,
 	}
 
 	return wire, nil
+}
+
+// reservedClaims are the claim names custom claims must not overwrite.
+var reservedClaims = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true,
+	"nbf": true, "iat": true, "jti": true, "ate.dev": true,
+}
+
+// MarshalJSON flattens Custom into the top level of the JWT claims set,
+// after the standard claims. Custom keys colliding with registered claims
+// are an error (never silently overridden).
+func (w *WireClaims) MarshalJSON() ([]byte, error) {
+	type Alias WireClaims
+	std, err := json.Marshal((*Alias)(w))
+	if err != nil {
+		return nil, err
+	}
+	if len(w.Custom) == 0 {
+		return std, nil
+	}
+	merged := map[string]json.RawMessage{}
+	if err := json.Unmarshal(std, &merged); err != nil {
+		return nil, err
+	}
+	for k, v := range w.Custom {
+		if reservedClaims[k] {
+			return nil, fmt.Errorf("custom claim %q collides with a registered claim", k)
+		}
+		rv, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		merged[k] = rv
+	}
+	return json.Marshal(merged)
 }
 
 // Sign

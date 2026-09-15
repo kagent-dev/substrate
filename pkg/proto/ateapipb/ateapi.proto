@@ -344,6 +344,12 @@ message MintJWTRequest {
   string app_id = 2;
   string user_id = 3;
   string session_id = 4;
+
+  // Custom claims to merge into the minted JWT (e.g. tenant/org scoping).
+  // Keys are caller-supplied; deployments SHOULD gate which keys each caller
+  // may set (e.g. via an allowlist at the calling mint service) so identity-
+  // bearing claims cannot be self-asserted arbitrarily.
+  map<string, string> custom_claims = 5;
 }
 
 message MintJWTResponse {
