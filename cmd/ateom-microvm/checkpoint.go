@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/agent-substrate/substrate/internal/ateomnet"
-
 	"github.com/agent-substrate/substrate/cmd/ateom-microvm/internal/ch"
 	"github.com/agent-substrate/substrate/cmd/ateom-microvm/internal/kata"
 	"github.com/agent-substrate/substrate/internal/ateompath"
@@ -61,7 +59,7 @@ import (
 //
 // Allow checkpointing even if the pod is shutting down. This will allow actors
 // (or the harness) to suspend on shutdown.
-func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.CheckpointWorkloadRequest) (*ateompb.CheckpointWorkloadResponse, error) {
+func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.CheckpointWorkloadRequest) (resp *ateompb.CheckpointWorkloadResponse, retErr error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -70,10 +68,18 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	s.setActiveRPC(rpcCheckpointWorkload, cancel)
 	defer s.clearActiveRPC()
 
-	if err := s.deactivateActorNetworking(ctx); err != nil {
+	// Draining can fail after disabling traffic, before the guest is paused.
+	// Register network rollback first; resumeActorNetworking requires the live
+	// runtime record before republishing ingress after any checkpoint failure.
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(retErr, s.resumeActorNetworking(ctx))
+		}
+	}()
+
+	if err := s.proxy.Deactivate(ctx); err != nil {
 		return nil, err
 	}
-
 	attribution := ateomstats.ActorAttributionFromRequest(req)
 	actorUID := req.GetActorUid()
 
@@ -119,6 +125,15 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 		return nil, fmt.Errorf("while pausing guest: %w", err)
 	}
 	dPause := time.Since(tPause)
+	defer func() {
+		if retErr != nil {
+			resumeCtx, cancelResume := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancelResume()
+			if err := client.Resume(resumeCtx); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("while resuming guest after failed checkpoint: %w", err))
+			}
+		}
+	}()
 
 	checkpointDir := ateompath.CheckpointStateDir(actorUID)
 	// Start from a clean dir so CH's snapshot files are the only contents.
@@ -369,7 +384,7 @@ func (s *AteomService) TerminateWorkload(ctx context.Context, req *ateompb.Termi
 
 func (s *AteomService) terminateWorkload(ctx context.Context, actorUID string) error {
 	var errs []error
-	if err := s.deactivateActorNetworking(ctx); err != nil {
+	if err := s.proxy.Deactivate(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("while deactivating actor networking: %w", err))
 	}
 
@@ -398,7 +413,7 @@ func (s *AteomService) terminateWorkload(ctx context.Context, actorUID string) e
 	// the two views of "is an actor here" from disagreeing.
 	s.activeActor.Store(nil)
 
-	if err := ateomnet.CleanupActorNetwork(ctx, s.interiorNetNS); err != nil {
+	if err := s.proxy.Reset(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("while cleaning up actor network: %w", err))
 	}
 	return errors.Join(errs...)

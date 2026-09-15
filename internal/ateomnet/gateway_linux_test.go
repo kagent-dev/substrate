@@ -95,9 +95,10 @@ func testSandboxGatewayTCP(t *testing.T, attachment string) {
 	stopProxy[0]()
 	stopApp[0]()
 	stopAttachment[0]()
-	inSocketTestNamespace(t, *gateways[0], func() error {
-		return ateomnet.CleanupActorNetwork(t.Context(), *actors[0])
-	})
+	n := &ateomnet.Sandbox{Gateway: *gateways[0], Runtime: *actors[0]}
+	if err := n.Reset(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	inSocketTestNamespace(t, *worker, func() error {
 		link, err := netlink.LinkByName("sandbox0")
 		if err != nil {
@@ -127,27 +128,23 @@ func testSandboxGatewayTCP(t *testing.T, attachment string) {
 func setupSocketTestGateway(t *testing.T, worker netns.NsHandle, slot int, attachment string) (*netns.NsHandle, *netns.NsHandle, func()) {
 	t.Helper()
 	gateway, actor := setupSocketTestTransit(t, worker, slot), newSocketTestNamespace(t)
+	n := &ateomnet.Sandbox{Gateway: *gateway, Runtime: *actor, MTU: 1500}
 	stop := func() {}
+	if attachment == "tap" {
+		n.Runtime = -1
+	}
+	if err := n.Setup(t.Context(), 15001); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the DROP policy even if gateway forwarding is accidentally enabled.
+	inSocketTestNamespace(t, *gateway, ateomnet.EnableIPv4Forwarding)
 	if attachment == "tap" {
 		gatewayTap := socketTestTAP(t, *gateway, ateomnet.HostVethName, ateomnet.HostVethCIDR, "02:a8:1e:00:00:01")
 		guestTap := socketTestTAP(t, *actor, ateomnet.ActorVethName, ateomnet.ActorVethCIDR, "02:a8:1e:00:00:02")
 		inSocketTestNamespace(t, *actor, func() error {
 			return netlink.RouteAdd(&netlink.Route{Gw: net.ParseIP(ateomnet.ActorVethGateway)})
 		})
-		inSocketTestNamespace(t, *gateway, func() error {
-			if err := ateomnet.EnableIPv4Forwarding(); err != nil {
-				return err
-			}
-			return ateomnet.InstallActorNftablesRules(15001)
-		})
 		stop = connectSocketTestTAPs(t, gatewayTap, guestTap)
-	} else {
-		inSocketTestNamespace(t, *gateway, func() error {
-			return ateomnet.SetupActorNetwork(t.Context(), ateomnet.NetworkConfig{
-				InteriorNetNS:      *actor,
-				EgressRedirectPort: 15001,
-			})
-		})
 	}
 	return gateway, actor, stop
 }
@@ -212,9 +209,6 @@ func setupSocketTestTunnel(t *testing.T, ns netns.NsHandle, slot int) {
 	t.Helper()
 	addSocketTestRoute(t, ns, slot, "198.51.100.20/32")
 	inSocketTestNamespace(t, ns, func() error {
-		if err := ateomnet.RemoveActorNftablesRules(); err != nil {
-			return err
-		}
 		routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
 		if err != nil {
 			return err

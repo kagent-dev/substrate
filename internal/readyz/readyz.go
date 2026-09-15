@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -38,9 +37,8 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// Tuning knobs. Sized for actor cold-start where the HTTP server may take
-// a few seconds to bind; HTTPClient below is a var so tests can substitute
-// a transport that targets a test server's loopback address.
+// Tuning knobs for actor cold-start, where the HTTP server may take a few
+// seconds to bind.
 const (
 	// DefaultOverallTimeout applies to probes that do not set
 	// timeout_seconds. A workload that needs longer says so on its
@@ -49,21 +47,7 @@ const (
 	RequestTimeout        = 250 * time.Millisecond
 	PollInterval          = 1 * time.Millisecond
 	DefaultPath           = "/readyz"
-	maxIdleConnsHost      = 1
 )
-
-// HTTPClient builds a keep-alive HTTP client tuned for fast, repeated
-// probing of a single endpoint. Exposed as a var so tests can substitute a
-// transport that targets a test server's loopback address.
-var HTTPClient = func() *http.Client {
-	tr := &http.Transport{
-		DisableCompression:    true,
-		MaxIdleConnsPerHost:   maxIdleConnsHost,
-		DialContext:           (&net.Dialer{Timeout: RequestTimeout}).DialContext,
-		ResponseHeaderTimeout: RequestTimeout,
-	}
-	return &http.Client{Transport: tr, Timeout: RequestTimeout}
-}
 
 // WaitAll blocks until every container with a readyz probe set reports 200,
 // or returns the first error. Containers without a probe are skipped (their
@@ -73,7 +57,7 @@ var HTTPClient = func() *http.Client {
 // errors.As cannot cross a process, and the interceptor would flatten it to a
 // bare codes.Internal, leaving atelet reading UNKNOWN. The ErrorInfo detail is
 // what carries it. Internal and no crash directive both match today's behavior.
-func WaitAll(ctx context.Context, containers []*ateompb.Container, actorIP string) error {
+func WaitAll(ctx context.Context, client *http.Client, containers []*ateompb.Container, actorIP string) error {
 	g, gctx := errgroup.WithContext(ctx)
 	for _, ac := range containers {
 		if ac.GetReadyz() == nil {
@@ -81,7 +65,7 @@ func WaitAll(ctx context.Context, containers []*ateompb.Container, actorIP strin
 		}
 		ac := ac
 		g.Go(func() error {
-			return Wait(gctx, ac.GetName(), ac.GetReadyz(), actorIP)
+			return Wait(gctx, client, ac.GetName(), ac.GetReadyz(), actorIP)
 		})
 	}
 	err := g.Wait()
@@ -92,15 +76,13 @@ func WaitAll(ctx context.Context, containers []*ateompb.Container, actorIP strin
 }
 
 // Wait polls the configured HTTP endpoint until it returns 200, the context
-// is cancelled, or the overall deadline is exceeded.
-func Wait(ctx context.Context, containerName string, probe *ateompb.Readyz, actorIP string) error {
+// is canceled, or the overall deadline is exceeded. The caller owns the client
+// and its connection pool; Wait does not reconfigure or close either.
+func Wait(ctx context.Context, client *http.Client, containerName string, probe *ateompb.Readyz, actorIP string) error {
 	url, err := URL(probe, actorIP)
 	if err != nil {
 		return fmt.Errorf("invalid readyz config for %q: %w", containerName, err)
 	}
-
-	client := HTTPClient()
-	defer client.CloseIdleConnections()
 
 	timeout := overallTimeout(probe)
 	start := time.Now()
@@ -155,6 +137,8 @@ func overallTimeout(probe *ateompb.Readyz) time.Duration {
 }
 
 func tryOnce(ctx context.Context, client *http.Client, url string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, err

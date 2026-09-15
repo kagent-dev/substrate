@@ -30,6 +30,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "pause" {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "guest" {
 		for _, fs := range []string{"proc", "sysfs", "devtmpfs"} {
 			path := map[string]string{"proc": "/proc", "sysfs": "/sys", "devtmpfs": "/dev"}[fs]
@@ -47,6 +52,20 @@ func main() {
 		must(netlink.LinkSetUp(link))
 		must(netlink.RouteAdd(&netlink.Route{LinkIndex: link.Attrs().Index, Gw: net.ParseIP("169.254.17.1")}))
 	}
+	http.HandleFunc("/dns", func(w http.ResponseWriter, r *http.Request) {
+		ips, err := net.LookupIP("example.test.")
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				fmt.Fprint(w, ip.String())
+				return
+			}
+		}
+		http.Error(w, "no IPv4 answer", 502)
+	})
 	var count atomic.Int64
 	http.HandleFunc("/mtu", func(w http.ResponseWriter, r *http.Request) {
 		link, err := net.InterfaceByName("eth0")

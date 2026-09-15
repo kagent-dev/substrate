@@ -265,7 +265,7 @@ func validateIdentity(identity *substratex509.ActorIdentity) error {
 
 // validateActor checks the identity a certificate certifies against the control
 // plane's current view of that actor: it still exists, it is the actor the
-// certificate was issued to, and it is running. Every error it returns is
+// certificate was issued to, and it is running or assigned for startup. Every error it returns is
 // already a client-facing ext_proc denial.
 func (h *Handler) validateActor(ctx context.Context, identity *substratex509.ActorIdentity) error {
 	atespace := identity.Atespace
@@ -294,12 +294,52 @@ func (h *Handler) validateActor(ctx context.Context, identity *substratex509.Act
 			"egress denied: actor %q/%q is not the actor this certificate was issued to", atespace, actorName)
 	}
 
-	// The actor performing egress must actually be running.
-	if actor.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_RUNNING {
+	// Startup needs DNS and application egress before readiness can finish.
+	switch actor.GetStatus().GetState() {
+	case ateapipb.ActorState_ACTOR_STATE_RUNNING:
+		return nil
+	case ateapipb.ActorState_ACTOR_STATE_RESUMING:
+		return h.validateStartupAssignment(ctx, actor)
+	default:
 		return extproc.NewReqError(envoy_type.StatusCode_Forbidden,
-			"egress denied: actor %q/%q is %s, not running", atespace, actorName, actor.GetStatus().GetState())
+			"egress denied: actor %q/%q is %s, not running or resuming", atespace, actorName, actor.GetStatus().GetState())
 	}
-	return nil
+}
+
+// validateStartupAssignment permits pre-readiness egress only for an active
+// placement. RESUMING alone is insufficient: actor status can outlive a worker
+// replacement or assignment release, even while the actor certificate is valid.
+func (h *Handler) validateStartupAssignment(ctx context.Context, actor *ateapipb.Actor) error {
+	assignment := actor.GetStatus().GetWorkerAssignment()
+	workerRef := assignment.GetWorker()
+	if workerRef.GetName() == "" || workerRef.GetAtespace() != "" || assignment.GetWorkerPodUid() == "" {
+		return extproc.NewReqError(envoy_type.StatusCode_Forbidden, "egress denied: resuming actor has no worker assignment")
+	}
+	worker, err := h.apiClient.GetWorker(ctx, &ateapipb.GetWorkerRequest{Worker: workerRef})
+	if err != nil {
+		return mapEgressIdentityError(actor.GetMetadata().GetAtespace(), actor.GetMetadata().GetName(), err)
+	}
+	if worker.GetStatus().GetState() != ateapipb.WorkerState_WORKER_STATE_ACTIVE || worker.GetWorkerPodUid() != assignment.GetWorkerPodUid() {
+		return extproc.NewReqError(envoy_type.StatusCode_Forbidden, "egress denied: resuming actor's worker is unavailable or replaced")
+	}
+	// Match the scheduler's assignment record as well as the actor's view, so
+	// a stale actor assignment cannot authorize a released placement.
+	request := &ateapipb.ListWorkerActorAssignmentsRequest{Worker: workerRef, PageSize: 1000}
+	for {
+		page, err := h.apiClient.ListWorkerActorAssignments(ctx, request)
+		if err != nil {
+			return mapEgressIdentityError(actor.GetMetadata().GetAtespace(), actor.GetMetadata().GetName(), err)
+		}
+		for _, hosted := range page.GetActorAssignments() {
+			if hosted.GetActorUid() == actor.GetMetadata().GetUid() {
+				return nil
+			}
+		}
+		if page.GetNextPageToken() == "" {
+			return extproc.NewReqError(envoy_type.StatusCode_Forbidden, "egress denied: worker no longer hosts resuming actor")
+		}
+		request.PageToken = page.GetNextPageToken()
+	}
 }
 
 // authenticateActorCertificate turns the mTLS peer certificate Envoy recorded

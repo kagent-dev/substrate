@@ -93,7 +93,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	s.setActiveRPC(rpcRestoreWorkload, cancel)
 	defer s.clearActiveRPC()
 
-	if err := s.deactivateActorNetworking(ctx); err != nil {
+	if err := s.proxy.Deactivate(ctx); err != nil {
 		return nil, err
 	}
 
@@ -178,10 +178,6 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	actorUID := p.actorUID
 
 	rr := s.resolveRuntime(p.assetPaths)
-	egress, err := s.prepareActorEgress(ctx, p.actorRef.Atespace, p.actorRef.Name, p.actorUID, p.egressGateway)
-	if err != nil {
-		return err
-	}
 	kata.CleanupSandboxState(ctx, actorUID)
 
 	// Repoint the snapshot's vsock socket to this actor's VMDir (the disk + kernel
@@ -264,24 +260,16 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	tLowers := time.Now()
 	tDurable := tLowers
 
-	// Networking: rebuild the per-activation veth + tap; the snapshot's virtio-net
+	// Networking: rebuild the gateway TAP; the snapshot's virtio-net
 	// is fd-backed, so CH needs fresh tap FDs (net_fds) on restore.
-	if err := ateomnet.SetupActorNetwork(ctx, ateomnet.NetworkConfig{
-		InteriorNetNS:      s.interiorNetNS,
-		HostVethHWAddr:     hostVethHWAddr,
-		SweepInteriorLinks: true,
-		EgressRedirectPort: s.egressRedirectPort(p.egressGateway != nil),
-	}); err != nil {
-		return fmt.Errorf("while setting up actor network: %w", err)
-	}
+	// Neither host FDs nor actor credentials come from the snapshot. Prepare
+	// obtains the current assignment's identity and installs capture before the
+	// restored VM can transmit. Later failures must reset that activation too.
 	defer func() {
 		if retErr != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
-			if cleanupErr := s.deactivateActorNetworking(cleanupCtx); cleanupErr != nil {
-				slog.WarnContext(cleanupCtx, "Failed to deactivate actor networking after Restore failure", slog.Any("err", cleanupErr))
-			}
-			if cleanupErr := ateomnet.CleanupActorNetwork(cleanupCtx, s.interiorNetNS); cleanupErr != nil {
+			if cleanupErr := s.proxy.Reset(cleanupCtx); cleanupErr != nil {
 				slog.WarnContext(cleanupCtx, "Failed to clean up actor network after Restore failure", slog.Any("err", cleanupErr))
 			}
 			// Detach any bundle rootfs overlays mounted by buildActorContainers
@@ -291,6 +279,12 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 			}
 		}
 	}()
+
+	network, err := s.proxy.Prepare(ctx, p.actorAttribution(), p.egressGateway)
+	if err != nil {
+		return err
+	}
+
 	netDevs, err := ch.SnapshotNetDevices(restoreDir)
 	if err != nil {
 		return fmt.Errorf("while reading snapshot net devices: %w", err)
@@ -302,8 +296,11 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 			_ = f.Close()
 		}
 	}()
-	for i, nd := range netDevs {
-		files, terr := s.setupRestoreTap(ctx, fmt.Sprintf("tap%d_kata", i), nd.QueuePairs)
+	if len(netDevs) != 1 {
+		return fmt.Errorf("snapshot must contain exactly one network device, got %d", len(netDevs))
+	}
+	for _, nd := range netDevs {
+		files, terr := s.setupTap(ctx, ateomnet.HostVethName, nd.QueuePairs)
 		if terr != nil {
 			return fmt.Errorf("while building restore tap for %s: %w", nd.ID, terr)
 		}
@@ -320,7 +317,11 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	apiSocket := filepath.Join(kata.VMDir(actorUID), "clh-api-restore.sock")
 	tTap := time.Now()
 	chCmd, client, err := ch.LaunchVMM(ctx, ch.LaunchVMMOptions{
-		Binary: rr.chBinary, APISocket: apiSocket, Stdout: slogWriter{ctx}, Stderr: slogWriter{ctx},
+		Binary:    rr.chBinary,
+		APISocket: apiSocket,
+		NetNS:     s.proxy.Net.Gateway,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 	})
 	if err != nil {
 		return fmt.Errorf("while launching VMM for restore: %w", err)
@@ -354,7 +355,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	tResume := time.Now()
 
 	// Block until every readyz-enabled container reports 200.
-	if err := readyz.WaitAll(ctx, containers, ateomnet.ActorVethIP); err != nil {
+	if err := readyz.WaitAll(ctx, s.proxy.HTTPClient, containers, ateomnet.ActorVethIP); err != nil {
 		return fmt.Errorf("while waiting for container readyz: %w", err)
 	}
 
@@ -416,9 +417,10 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 		}
 	}
 
-	if err := s.activateActorNetworking(p.actorRef.Atespace, p.actorRef.Name, egress); err != nil {
+	if err := network.PublishIngress(); err != nil {
 		return err
 	}
+	ra.network = network
 	s.running[actorUID] = ra
 
 	// Publish the guest to GetWorkloadStats, past the last error return above

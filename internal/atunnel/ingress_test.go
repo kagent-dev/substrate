@@ -886,3 +886,49 @@ func receiveWithin[T any](t *testing.T, channel <-chan T, description string) T 
 		return zero
 	}
 }
+
+func TestConfiguredIngressDialer(t *testing.T) {
+	upstream, _ := url.Parse("http://169.254.17.2:8080")
+	bundle, trust := makeCertFiles(t, t.TempDir())
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodConnect} {
+		t.Run(method, func(t *testing.T) {
+			dialed := make(chan string, 1)
+			s, err := NewServer(Config{
+				CredentialBundlePath: bundle,
+				TrustBundlePath:      trust,
+				AllowedClientID:      "spiffe://cluster.local/ns/ate-system/sa/atenet-router",
+				Upstream:             upstream,
+				DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+					dialed <- network + " " + address
+					return nil, net.ErrClosed
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Activate("team", "actor"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Deactivate(context.Background()) })
+			req := httptest.NewRequest(method, "http://worker:8080/", nil)
+			req.Host = "worker:8080"
+			req.Header.Set(atenet.TargetActorHeader, "team/actor")
+			if method == http.MethodPost {
+				req.ProtoMajor = 2
+				req.Header.Set("Content-Type", "application/grpc")
+			}
+			rec := httptest.NewRecorder()
+			if method == http.MethodConnect {
+				s.ServeConnectHTTP(rec, req)
+			} else {
+				s.ServeHTTP(rec, req)
+			}
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("status %d", rec.Code)
+			}
+			if got := receiveWithin(t, dialed, "configured dialer"); got != "tcp 169.254.17.2:8080" {
+				t.Fatalf("dialed %q", got)
+			}
+		})
+	}
+}

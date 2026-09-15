@@ -214,8 +214,12 @@ func egressHandler(roots *x509.CertPool, actor *ateapipb.Actor, err error) *Hand
 // egressMockClient is the slice of ateapi the egress handler talks to.
 type egressMockClient struct {
 	ateapipb.ControlClient
-	actor *ateapipb.Actor
-	err   error
+	actor          *ateapipb.Actor
+	err            error
+	worker         *ateapipb.Worker
+	workerErr      error
+	assignments    map[string]*ateapipb.ListWorkerActorAssignmentsResponse
+	assignmentsErr error
 
 	// policy is what GetActorEgressPolicy returns; nil answers NotFound.
 	// policyErr, when set, is returned instead.
@@ -233,6 +237,14 @@ func (m *egressMockClient) GetActor(context.Context, *ateapipb.GetActorRequest, 
 		return nil, m.err
 	}
 	return m.actor, nil
+}
+
+func (m *egressMockClient) GetWorker(context.Context, *ateapipb.GetWorkerRequest, ...grpc.CallOption) (*ateapipb.Worker, error) {
+	return m.worker, m.workerErr
+}
+
+func (m *egressMockClient) ListWorkerActorAssignments(_ context.Context, req *ateapipb.ListWorkerActorAssignmentsRequest, _ ...grpc.CallOption) (*ateapipb.ListWorkerActorAssignmentsResponse, error) {
+	return m.assignments[req.GetPageToken()], m.assignmentsErr
 }
 
 func (m *egressMockClient) GetActorEgressPolicy(ctx context.Context, _ *ateapipb.GetActorEgressPolicyRequest, _ ...grpc.CallOption) (*ateapipb.EgressPolicy, error) {
@@ -703,6 +715,65 @@ func TestHandleRequestHeadersAuthorization(t *testing.T) {
 			leaf := ca.issueActorCert(t, actorCertOptions{})
 			_, err := h.HandleRequestHeaders(context.Background(), egressMetadata(xfccHeader(leaf)))
 			wantStatus(t, err, tc.want)
+		})
+	}
+}
+
+func TestHandleRequestHeadersStartupAssignment(t *testing.T) {
+	ca := newTestCA(t, "actor-identity-ca")
+	leaf := ca.issueActorCert(t, actorCertOptions{})
+	tests := []struct {
+		name   string
+		change func(*egressMockClient)
+		want   envoy_type.StatusCode
+	}{
+		{name: "assigned startup DNS", want: envoy_type.StatusCode_OK},
+		{name: "missing assignment", change: func(m *egressMockClient) { m.actor.Status.WorkerAssignment = nil }, want: envoy_type.StatusCode_Forbidden},
+		{name: "missing pod UID", change: func(m *egressMockClient) { m.actor.Status.WorkerAssignment.WorkerPodUid = "" }, want: envoy_type.StatusCode_Forbidden},
+		{name: "replaced worker", change: func(m *egressMockClient) { m.worker.WorkerPodUid = "replacement" }, want: envoy_type.StatusCode_Forbidden},
+		{name: "draining worker", change: func(m *egressMockClient) { m.worker.Status.State = ateapipb.WorkerState_WORKER_STATE_DRAINING }, want: envoy_type.StatusCode_Forbidden},
+		{name: "missing worker", change: func(m *egressMockClient) { m.workerErr = status.Error(codes.NotFound, "worker deleted") }, want: envoy_type.StatusCode_Forbidden},
+		{name: "worker lookup unavailable", change: func(m *egressMockClient) { m.workerErr = status.Error(codes.Unavailable, "unavailable") }, want: envoy_type.StatusCode_ServiceUnavailable},
+		{name: "released placement", change: func(m *egressMockClient) { m.assignments = nil }, want: envoy_type.StatusCode_Forbidden},
+		{name: "other actor placed", change: func(m *egressMockClient) { m.assignments[""].ActorAssignments[0].ActorUid = "other" }, want: envoy_type.StatusCode_Forbidden},
+		{name: "assignments unavailable", change: func(m *egressMockClient) { m.assignmentsErr = status.Error(codes.Unavailable, "unavailable") }, want: envoy_type.StatusCode_ServiceUnavailable},
+		{name: "placement on second page", change: func(m *egressMockClient) {
+			m.assignments["next"] = m.assignments[""]
+			m.assignments[""] = &ateapipb.ListWorkerActorAssignmentsResponse{NextPageToken: "next"}
+		}, want: envoy_type.StatusCode_OK},
+		{name: "policy still required", change: func(m *egressMockClient) { m.policy = nil }, want: envoy_type.StatusCode_Forbidden},
+		{name: "certificate UID still checked", change: func(m *egressMockClient) { m.actor.Metadata.Uid = "replacement" }, want: envoy_type.StatusCode_Forbidden},
+		{name: "suspended placement denied", change: func(m *egressMockClient) { m.actor.Status.State = ateapipb.ActorState_ACTOR_STATE_SUSPENDED }, want: envoy_type.StatusCode_Forbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actor := runningActor()
+			actor.Status.State = ateapipb.ActorState_ACTOR_STATE_RESUMING
+			actor.Status.WorkerAssignment = &ateapipb.WorkerAssignment{Worker: &ateapipb.ObjectRef{Name: "worker"}, WorkerPodUid: "pod-uid"}
+			m := &egressMockClient{
+				actor:       actor,
+				worker:      &ateapipb.Worker{WorkerPodUid: "pod-uid", Status: &ateapipb.WorkerStatus{State: ateapipb.WorkerState_WORKER_STATE_ACTIVE}},
+				assignments: map[string]*ateapipb.ListWorkerActorAssignmentsResponse{"": {ActorAssignments: []*ateapipb.ActorAssignment{{ActorUid: testEgressActorUID}}}},
+				policy:      allowAllPolicy(),
+			}
+			if tc.change != nil {
+				tc.change(m)
+			}
+			h := New(m, ca.roots(), DefaultPolicyCacheTTL)
+			md := egressMetadata(xfccHeader(leaf))
+			md.Host = "10.96.0.10:53"
+			md.Headers[":authority"] = md.Host
+			res, err := h.HandleRequestHeaders(t.Context(), md)
+			if tc.want == envoy_type.StatusCode_OK {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := passthroughDestinationOf(res); got != md.Host {
+					t.Fatalf("destination = %q, want %q", got, md.Host)
+				}
+			} else {
+				wantStatus(t, err, tc.want)
+			}
 		})
 	}
 }

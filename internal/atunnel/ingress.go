@@ -69,6 +69,7 @@ type Config struct {
 	TrustBundlePath      string
 	AllowedClientID      string
 	Upstream             *url.URL
+	DialContext          DialFunc
 }
 
 // Server is an activation-aware HTTPS reverse proxy. It is long-lived across
@@ -80,8 +81,9 @@ type Server struct {
 	proxy                *httputil.ReverseProxy
 	upstream             *url.URL
 
-	mu     sync.Mutex
-	active *activation
+	mu          sync.Mutex
+	active      *activation
+	dialContext DialFunc
 }
 
 type activation struct {
@@ -122,6 +124,12 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	transport := newProtocolMirrorTransport()
+	if cfg.DialContext != nil {
+		transport.h1.DialContext = cfg.DialContext
+		transport.h2c.DialContext = cfg.DialContext
+	}
+	transport.h1.Proxy = nil
+	transport.h2c.Proxy = nil
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(cfg.Upstream)
@@ -148,6 +156,7 @@ func NewServer(cfg Config) (*Server, error) {
 		credentialBundlePath: cfg.CredentialBundlePath,
 		proxy:                proxy,
 		upstream:             cfg.Upstream,
+		dialContext:          cfg.DialContext,
 	}
 	s.tlsConfig = &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -316,8 +325,11 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	upstream, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(s.upstream.Hostname(), port))
+	dial := s.dialContext
+	if dial == nil {
+		dial = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+	}
+	upstream, err := dial(ctx, "tcp", net.JoinHostPort(s.upstream.Hostname(), port))
 	if err != nil {
 		slog.WarnContext(r.Context(), "atunnel CONNECT upstream failed", slog.Any("actor", ref), slog.Any("err", err))
 		http.Error(w, "bad gateway", http.StatusBadGateway)

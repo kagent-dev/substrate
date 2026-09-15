@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/internal/ateomnet"
+	"github.com/agent-substrate/substrate/internal/ateomproxy"
 
 	"github.com/agent-substrate/substrate/cmd/ateom-microvm/internal/ch"
 	"github.com/agent-substrate/substrate/cmd/ateom-microvm/internal/kata"
@@ -50,6 +51,8 @@ import (
 // cloud-hypervisor process directly (booted by RunWorkload or relaunched by
 // RestoreWorkload), so it tracks that process and its api-socket for teardown.
 type runningActor struct {
+	network *ateomproxy.Session
+
 	// baseID is the FROZEN base sandbox id propagated across this actor's restore
 	// lineage. For a cold-run actor this is the actor's own id; for a restored
 	// actor it is the id read from the snapshot's base-id file (the golden id,
@@ -281,7 +284,7 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	s.setActiveRPC(rpcRunWorkload, cancel)
 	defer s.clearActiveRPC()
 
-	if err := s.deactivateActorNetworking(ctx); err != nil {
+	if err := s.proxy.Deactivate(ctx); err != nil {
 		return nil, err
 	}
 
@@ -404,29 +407,15 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 		return fmt.Errorf("ateom-microvm requires %q and %q asset paths", assetKernel, assetImage)
 	}
 	rr := s.resolveRuntime(paths)
-	egress, err := s.prepareActorEgress(ctx, p.actorRef.Atespace, p.actorRef.Name, p.actorUID, p.egressGateway)
-	if err != nil {
-		return err
-	}
 
-	// Networking (host side): per-activation veth into the interior netns. The
-	// tap + TC mirror is built below (after the VM exists) so its FDs are fresh.
-	if err := ateomnet.SetupActorNetwork(ctx, ateomnet.NetworkConfig{
-		InteriorNetNS:      s.interiorNetNS,
-		HostVethHWAddr:     hostVethHWAddr,
-		SweepInteriorLinks: true,
-		EgressRedirectPort: s.egressRedirectPort(p.egressGateway != nil),
-	}); err != nil {
-		return fmt.Errorf("while setting up actor network: %w", err)
-	}
+	// Install cleanup before enabling egress: later boot failures must revoke
+	// the activation too. VMM cleanup registered below runs first (defer LIFO),
+	// so Reset can then remove the TAP without racing a live guest.
 	defer func() {
 		if retErr != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
-			if cleanupErr := s.deactivateActorNetworking(cleanupCtx); cleanupErr != nil {
-				slog.WarnContext(cleanupCtx, "Failed to deactivate actor networking after Run failure", slog.Any("err", cleanupErr))
-			}
-			if cleanupErr := ateomnet.CleanupActorNetwork(cleanupCtx, s.interiorNetNS); cleanupErr != nil {
+			if cleanupErr := s.proxy.Reset(cleanupCtx); cleanupErr != nil {
 				slog.WarnContext(cleanupCtx, "Failed to clean up actor network after Run failure", slog.Any("err", cleanupErr))
 			}
 			// Detach any bundle rootfs overlays mounted by buildActorContainers
@@ -437,6 +426,12 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 		}
 	}()
 
+	// Capture must precede attaching the TAP, and authenticated DNS/egress must
+	// precede guest startup. Ingress is published only after container readiness.
+	network, err := s.proxy.Prepare(ctx, p.actorAttribution(), p.egressGateway)
+	if err != nil {
+		return err
+	}
 	// Guest sizing + agent kernel params from the kata config.
 	memMiB, vcpus, kparams, err := s.guestConfig(rr)
 	if err != nil {
@@ -512,8 +507,9 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 	chCmd, client, err := ch.LaunchVMM(ctx, ch.LaunchVMMOptions{
 		Binary:    rr.chBinary,
 		APISocket: apiSocket,
-		Stdout:    slogWriter{ctx},
-		Stderr:    slogWriter{ctx},
+		NetNS:     s.proxy.Net.Gateway,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 	})
 	if err != nil {
 		return fmt.Errorf("while launching VMM: %w", err)
@@ -536,9 +532,8 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 		return fmt.Errorf("while creating VM: %w", err)
 	}
 
-	// Network device: build the tap + TC mirror against the actor veth and add a
-	// virtio-net to the created (pre-boot) VM with the tap FDs (SCM_RIGHTS).
-	tapFiles, err := s.setupRestoreTap(ctx, "tap0_kata", 1)
+	// Add the gateway TAP to the pre-boot VM using queue FDs (SCM_RIGHTS).
+	tapFiles, err := s.setupTap(ctx, ateomnet.HostVethName, 1)
 	if err != nil {
 		return fmt.Errorf("while building tap: %w", err)
 	}
@@ -594,7 +589,7 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 	tContainers := time.Now()
 
 	// Block until every readyz-enabled container reports 200.
-	if err := readyz.WaitAll(ctx, containers, ateomnet.ActorVethIP); err != nil {
+	if err := readyz.WaitAll(ctx, s.proxy.HTTPClient, containers, ateomnet.ActorVethIP); err != nil {
 		return fmt.Errorf("while waiting for container readyz: %w", err)
 	}
 
@@ -608,9 +603,10 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 		slog.Duration("since_boot", time.Since(tBooted)))
 
 	ra := &runningActor{chCmd: chCmd, vfsdCmd: vfsdCmd, apiSocket: apiSocket, baseID: actorUID, guestAgent: ac, workloadIDs: workloadIDs(ctrs)}
-	if err := s.activateActorNetworking(p.actorRef.Atespace, p.actorRef.Name, egress); err != nil {
+	if err := network.PublishIngress(); err != nil {
 		return err
 	}
+	ra.network = network
 	s.running[actorUID] = ra
 
 	// Forward each container's stdout/stderr into the pod logs, keyed by the
@@ -897,7 +893,7 @@ func (s *AteomService) startActorContainers(ctx context.Context, ac *kata.AgentC
 	tSandbox := time.Now()
 
 	// Configure guest networking (the shim's job): eth0 IP/MAC/MTU, routes, ARP.
-	mtu := uint64(s.actorVethMTU(ctx))
+	mtu := uint64(s.proxy.Net.MTU)
 	netCtx, netCancel := context.WithTimeout(ctx, 20*time.Second)
 	err = s.configureGuestNetwork(netCtx, ac, mtu)
 	netCancel()
@@ -1100,13 +1096,4 @@ func waitForFile(path string, d time.Duration) bool {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-}
-
-// slogWriter adapts an io.Writer to slog at info level, capturing the
-// cloud-hypervisor process's stdout/stderr into the worker logs.
-type slogWriter struct{ ctx context.Context }
-
-func (w slogWriter) Write(p []byte) (int, error) {
-	slog.InfoContext(w.ctx, "cloud-hypervisor", slog.String("out", string(p)))
-	return len(p), nil
 }

@@ -107,8 +107,67 @@ func TestWait_ReturnsOnFirst200(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := Wait(ctx, "main", probe, ip); err != nil {
+	if err := Wait(ctx, srv.Client(), "main", probe, ip); err != nil {
 		t.Fatalf("Wait returned error: %v", err)
+	}
+}
+
+type trackingTransport struct {
+	*http.Transport
+	closes atomic.Int32
+}
+
+func (tr *trackingTransport) CloseIdleConnections() {
+	tr.closes.Add(1)
+	tr.Transport.CloseIdleConnections()
+}
+
+func TestWaitAll_UsesCallerClient(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	tr := &trackingTransport{Transport: &http.Transport{}}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Transport: tr}
+	ip, port := splitHostPort(t, srv.URL)
+	probe := &ateompb.Readyz{HttpGet: &ateompb.HTTPGetAction{Port: int32(port)}}
+	containers := []*ateompb.Container{
+		{Name: "first", Readyz: probe},
+		{Name: "second", Readyz: probe},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := WaitAll(ctx, client, containers, ip); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("got %d requests, want 2", requests.Load())
+	}
+	if client.Transport != tr || client.Timeout != 0 || tr.closes.Load() != 0 {
+		t.Fatal("readiness changed or closed the caller's client")
+	}
+}
+
+func TestTryOnce_RequestTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	client := srv.Client() // No client timeout: readiness bounds each request.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ok, err := tryOnce(ctx, client, srv.URL)
+	if ok || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("tryOnce = %v, %v; want a request timeout", ok, err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("request ran until the parent deadline")
+	}
+	if client.Timeout != 0 {
+		t.Fatal("readiness changed the caller's timeout")
 	}
 }
 
@@ -135,7 +194,7 @@ func TestWait_WaitsForServerToBecomeReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	start := time.Now()
-	if err := Wait(ctx, "main", probe, ip); err != nil {
+	if err := Wait(ctx, srv.Client(), "main", probe, ip); err != nil {
 		t.Fatalf("Wait returned error: %v", err)
 	}
 	elapsed := time.Since(start)
@@ -159,7 +218,7 @@ func TestWait_ContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	err := Wait(ctx, "main", probe, "127.0.0.1")
+	err := Wait(ctx, &http.Client{}, "main", probe, "127.0.0.1")
 	if err == nil {
 		t.Fatalf("Wait returned nil, expected cancellation error")
 	}
@@ -215,7 +274,7 @@ func TestWait_GivesUpAtProbeTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
-	err := Wait(ctx, "main", probe, "127.0.0.1")
+	err := Wait(ctx, &http.Client{}, "main", probe, "127.0.0.1")
 	if err == nil {
 		t.Fatalf("Wait returned nil, expected a timeout error")
 	}
@@ -239,7 +298,7 @@ func TestWaitAll_SkipsContainersWithoutProbe(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := WaitAll(ctx, containers, "127.0.0.1"); err != nil {
+	if err := WaitAll(ctx, &http.Client{}, containers, "127.0.0.1"); err != nil {
 		t.Fatalf("WaitAll with no probes returned error: %v", err)
 	}
 }
@@ -285,7 +344,7 @@ func TestWaitAll_ReasonSurvivesTheRPCBoundary(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := WaitAll(ctx, containers, "127.0.0.1")
+	err := WaitAll(ctx, &http.Client{}, containers, "127.0.0.1")
 	if err == nil {
 		t.Fatal("WaitAll returned nil, expected a timeout error")
 	}

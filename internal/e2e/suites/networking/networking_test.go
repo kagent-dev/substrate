@@ -182,7 +182,7 @@ var httpTarget = e2e.ServerPod{
 // The port is worth its own test because nothing in the egress path holds it as
 // a constant or derives it from the scheme: it is the Actor's own TCP
 // destination port, recovered from SO_ORIGINAL_DST by TCPOriginalDestination
-// after the prerouting REDIRECT that InstallActorNftablesRules adds inside the
+// after the prerouting REDIRECT that InstallGatewayNftablesRules adds inside the
 // worker pod's netns, and then written verbatim into the CONNECT authority by
 // atunnel's Client.DialContext. The other two tests would still pass if that
 // port were defaulted from the scheme, because 80 and 443 are exactly what such

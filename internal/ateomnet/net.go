@@ -19,15 +19,11 @@ package ateomnet
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"runtime"
 
-	"github.com/google/nftables"
-	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -35,13 +31,12 @@ import (
 )
 
 const (
-	HostVethName      = "ateom0"
-	ActorVethName     = "eth0"
-	HostVethCIDR      = "169.254.17.1/30"
-	ActorVethCIDR     = "169.254.17.2/30"
-	ActorVethGateway  = "169.254.17.1"
-	ActorVethIP       = "169.254.17.2"
-	ActorNftTableName = "ateom_actor"
+	HostVethName     = "ateom0"
+	ActorVethName    = "eth0"
+	HostVethCIDR     = "169.254.17.1/30"
+	ActorVethCIDR    = "169.254.17.2/30"
+	ActorVethGateway = "169.254.17.1"
+	ActorVethIP      = "169.254.17.2"
 
 	// ActorVethSubnet is the point-to-point /30 the actor veth lives on.
 	ActorVethSubnet = "169.254.17.0/30"
@@ -83,14 +78,17 @@ func MustParseMAC(s string) net.HardwareAddr {
 // ConfigureActorVeth configures the actor veth inside the interior netns.
 // It assumes it is already running inside the target network namespace.
 func ConfigureActorVeth(ctx context.Context) error {
-	// Run inside the gVisor interior netns. SetupActorNetwork has already created
+	// Run inside the gVisor interior netns. Sandbox.Setup has already created
 	// the veth peer here, under its final name, so this only has to address it.
 	// gVisor reads link names, addresses, and routes from this namespace when the
 	// workload starts, so eth0 is configured like a normal container interface:
 	//
 	//   * lo is brought up for localhost behavior.
 	//   * eth0 receives the actor-side /30 address.
-	//   * the default route points to the worker-side veth gateway.
+	//   * the default route points to the gateway namespace's veth.
+	//
+	// This route delivers arbitrary destinations to capture. Gateway itself has
+	// no default route and drops forwarding; the runtime route is not an uplink.
 	loLink, err := netlink.LinkByName("lo")
 	if err != nil {
 		return fmt.Errorf("while acquiring lo in interior netns: %w", err)
@@ -119,53 +117,6 @@ func ConfigureActorVeth(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// CleanupActorNetwork removes all per-activation network state owned by ateom.
-// Intentionally idempotent.
-func CleanupActorNetwork(ctx context.Context, interiorNetNS netns.NsHandle) error {
-	// Remove all per-activation network state owned by ateom. Deleting the
-	// worker-side veth also deletes its peer, but the pair is born with its peer
-	// already in the actor netns, so a setup that failed before the worker side
-	// was named can leave that peer behind on its own. For that reason cleanup
-	// also enters the interior netns and deletes the actor interface if present.
-	//
-	// This function is intentionally idempotent so it can run before setup, after
-	// checkpoint, and from setup failure cleanup without requiring the caller to
-	// know how far network initialization progressed.
-	var cleanupErr error
-	if err := RemoveActorNftablesRules(); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while removing actor nftables rules: %w", err))
-		slog.WarnContext(ctx, "Failed to remove actor nftables rules; continuing actor netns cleanup", "err", err)
-	}
-
-	if link, err := netlink.LinkByName(HostVethName); err == nil {
-		if err := netlink.LinkDel(link); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while deleting host veth: %w", err))
-			slog.WarnContext(ctx, "Failed to delete host veth; continuing actor netns cleanup", "err", err)
-		}
-	} else if _, notFound := errors.AsType[netlink.LinkNotFoundError](err); !notFound {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while looking up host veth: %w", err))
-		slog.WarnContext(ctx, "Failed to look up host veth; continuing actor netns cleanup", "err", err)
-	}
-
-	if err := NetNSDo(ctx, interiorNetNS, func(_ context.Context) error {
-		link, err := netlink.LinkByName(ActorVethName)
-		if err == nil {
-			if err := netlink.LinkDel(link); err != nil {
-				return fmt.Errorf("while deleting interior veth %q: %w", ActorVethName, err)
-			}
-			return nil
-		}
-		if _, notFound := errors.AsType[netlink.LinkNotFoundError](err); !notFound {
-			return fmt.Errorf("while looking up interior veth %q: %w", ActorVethName, err)
-		}
-		return nil
-	}); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("while cleaning interior netns links: %w", err))
-	}
-
-	return cleanupErr
 }
 
 // EnableIPv4Forwarding enables IPv4 forwarding in the current network namespace.
@@ -197,119 +148,12 @@ func EnableIPv4Forwarding() error {
 	return nil
 }
 
-// InstallActorNftablesRules configures the NAT and filtering rules for the
-// actor. egressPort, when non-zero, is the local atunnel egress listener actor
-// TCP egress is redirected to; zero leaves the redirect uninstalled.
-func InstallActorNftablesRules(egressPort uint16) error {
-	// Install a dedicated nftables table for the active actor. Keeping all
-	// rules in an ateom-owned table makes cleanup simple and avoids mutating
-	// Kubernetes or CNI-managed chains directly.
-	//
-	// TODO: Add IPv6 veth addressing, forwarding, and nftables rules once actor
-	// networking supports dual-stack pods. The current actor network is IPv4-only.
-	//
-	// The rules do three things:
-	//
-	//   * prerouting: redirect new actor TCP connections to atunnel's local
-	//     listener. REDIRECT preserves SO_ORIGINAL_DST for the CONNECT authority.
-	//   * postrouting: masquerade traffic not handled by the TCP tunnel, notably
-	//     DNS over UDP, so hostname resolution continues to work.
-	//   * forward: drop actor UDP egress to any port but DNS, and accept the rest
-	//     of the packets forwarded between the actor veth and pod eth0.
-	if err := RemoveActorNftablesRules(); err != nil {
-		return err
-	}
-
-	c := &nftables.Conn{}
-	table := &nftables.Table{
-		Family: nftables.TableFamilyIPv4,
-		Name:   ActorNftTableName,
-	}
-	c.AddTable(table)
-
-	prerouting := c.AddChain(&nftables.Chain{
-		Name:     "prerouting",
-		Table:    table,
-		Type:     nftables.ChainTypeNAT,
-		Hooknum:  nftables.ChainHookPrerouting,
-		Priority: nftables.ChainPriorityNATDest,
-	})
-	if redirectRule := ActorEgressRedirectRule(table, prerouting, egressPort); redirectRule != nil {
-		c.AddRule(redirectRule)
-	}
-
-	postrouting := c.AddChain(&nftables.Chain{
-		Name:     "postrouting",
-		Table:    table,
-		Type:     nftables.ChainTypeNAT,
-		Hooknum:  nftables.ChainHookPostrouting,
-		Priority: nftables.ChainPriorityNATSource,
-	})
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: postrouting,
-		Exprs: append(IPSourceEqual(ActorVethIP), &expr.Masq{}),
-	})
-
-	acceptPolicy := nftables.ChainPolicyAccept
-	forward := c.AddChain(&nftables.Chain{
-		Name:     "forward",
-		Table:    table,
-		Type:     nftables.ChainTypeFilter,
-		Hooknum:  nftables.ChainHookForward,
-		Priority: nftables.ChainPriorityFilter,
-		Policy:   &acceptPolicy,
-	})
-	// Order matters: the accept below is a catch-all, so the drop has to precede
-	// it.
-	c.AddRule(actorNonDNSUDPDropRule(table, forward))
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: forward,
-		Exprs: []expr.Any{
-			&expr.Verdict{Kind: expr.VerdictAccept},
-		},
-	})
-
-	if err := c.Flush(); err != nil {
-		return fmt.Errorf("while installing actor nftables rules: %w", err)
-	}
-	return nil
-}
-
-// RemoveActorNftablesRules removes the ateom nftables table.
-func RemoveActorNftablesRules() error {
-	// Delete the whole ateom nftables table if it exists. The table is
-	// per-worker and currently per-active-actor because this worker path runs at
-	// most one actor at a time. Missing tables are treated as already clean.
-	c := &nftables.Conn{}
-	tables, err := c.ListTablesOfFamily(nftables.TableFamilyIPv4)
-	if err != nil {
-		return fmt.Errorf("while listing nftables tables: %w", err)
-	}
-	for _, table := range tables {
-		if table.Name != ActorNftTableName {
-			continue
-		}
-		c.DelTable(table)
-		if err := c.Flush(); err != nil {
-			return fmt.Errorf("while deleting actor nftables table: %w", err)
-		}
-		return nil
-	}
-	return nil
-}
-
-func IPSourceEqual(ip string) []expr.Any {
-	return IPPayloadEqual(12, ip)
-}
-
-func IPPayloadEqual(offset uint32, ip string) []expr.Any {
+func ipSourceEqual(ip string) []expr.Any {
 	return []expr.Any{
 		&expr.Payload{
 			DestRegister: 1,
 			Base:         expr.PayloadBaseNetworkHeader,
-			Offset:       offset,
+			Offset:       12,
 			Len:          4,
 		},
 		&expr.Cmp{
@@ -329,54 +173,6 @@ func l4ProtocolEqual(proto byte) []expr.Any {
 			Data:     []byte{proto},
 		},
 	}
-}
-
-// ActorEgressRedirectRule returns the prerouting rule that redirects actor TCP
-// egress to the local atunnel egress listener on port, or nil when port is zero
-// (tunneled egress disabled, so actor egress stays on the masquerade path).
-func ActorEgressRedirectRule(table *nftables.Table, chain *nftables.Chain, port uint16) *nftables.Rule {
-	if port == 0 {
-		return nil
-	}
-	exprs := append(IPSourceEqual(ActorVethIP), l4ProtocolEqual(unix.IPPROTO_TCP)...)
-	exprs = append(exprs,
-		&expr.Immediate{
-			Register: 1,
-			Data:     binaryutil.BigEndian.PutUint16(port),
-		},
-		&expr.Redir{RegisterProtoMin: 1},
-	)
-	return &nftables.Rule{Table: table, Chain: chain, Exprs: exprs}
-}
-
-// actorNonDNSUDPDropRule returns the forward-chain rule that drops actor UDP
-// egress to every destination port but [dnsPort].
-//
-// The rule counts what it drops: a workload that legitimately needs UDP shows
-// up as a rising counter in `nft list table ip ateom_actor` rather than as an
-// unexplained timeout.
-func actorNonDNSUDPDropRule(table *nftables.Table, chain *nftables.Chain) *nftables.Rule {
-	// dnsPort is the only destination port on which actor UDP egress is forwarded.
-	const dnsPort = 53
-
-	exprs := append(IPSourceEqual(ActorVethIP), l4ProtocolEqual(unix.IPPROTO_UDP)...)
-	exprs = append(exprs,
-		// Destination port, at offset 2 of the UDP header.
-		&expr.Payload{
-			DestRegister: 1,
-			Base:         expr.PayloadBaseTransportHeader,
-			Offset:       2,
-			Len:          2,
-		},
-		&expr.Cmp{
-			Op:       expr.CmpOpNeq,
-			Register: 1,
-			Data:     binaryutil.BigEndian.PutUint16(dnsPort),
-		},
-		&expr.Counter{},
-		&expr.Verdict{Kind: expr.VerdictDrop},
-	)
-	return &nftables.Rule{Table: table, Chain: chain, Exprs: exprs}
 }
 
 // CreateNetNSWithoutSwitching creates a named netns and returns its handle,
@@ -408,11 +204,15 @@ func CreateNetNSWithoutSwitching(name string) (netns.NsHandle, error) {
 }
 
 // NetNSDo runs do() with the OS thread switched into targetNS, then restores it.
+// The callback must finish namespace-sensitive work synchronously. Goroutines
+// started inside it do not inherit its locked thread or target namespace; move
+// serving loops and asynchronous I/O outside this call. The deferred restoration
+// also runs on callback errors and panics, before the thread is unlocked.
 func NetNSDo(ctx context.Context, targetNS netns.NsHandle, do func(context.Context) error) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// We need to create the new NS, then switch back to the current netns.
+	// Save this thread's namespace; nested calls must return to their caller's NS.
 	curNetNS, err := netns.Get()
 	if err != nil {
 		return fmt.Errorf("while getting current netns: %w", err)
@@ -433,162 +233,5 @@ func NetNSDo(ctx context.Context, targetNS netns.NsHandle, do func(context.Conte
 	if err := do(ctx); err != nil {
 		return fmt.Errorf("while executing function in target netns: %w", err)
 	}
-	return nil
-}
-
-// DumpNetInfo dumps link and route information for debugging.
-func DumpNetInfo(ctx context.Context, prefix string) error {
-	links, err := netlink.LinkList()
-	if err != nil {
-		return fmt.Errorf("in netlink.LinkList(): %w", err)
-	}
-
-	for _, link := range links {
-		slog.InfoContext(ctx, prefix+"Link", slog.String("name", link.Attrs().Name), slog.String("type", link.Type()), slog.Any("attrs", link.Attrs()))
-
-		addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
-		if err != nil {
-			return fmt.Errorf("while getting pod eth0 addresses: %w", err)
-		}
-		slog.InfoContext(ctx, prefix+"Link Addresses", slog.String("link", link.Attrs().Name), slog.Any("addrs", addrs))
-
-		rts, err := netlink.RouteList(link, netlink.FAMILY_V4)
-		if err != nil {
-			return fmt.Errorf("while getting routes off eth0: %w", err)
-		}
-		for _, rt := range rts {
-			slog.InfoContext(ctx, prefix+"Link Routes", slog.Any("link", link.Attrs().Name), slog.Any("route", rt), slog.Any("route-string", rt.String()))
-		}
-	}
-
-	return nil
-}
-
-type NetworkConfig struct {
-	// InteriorNetNS is the target network namespace for the actor's veth pair peer.
-	// Used by: Both gVisor and MicroVM.
-	InteriorNetNS netns.NsHandle
-
-	// HostVethHWAddr is the hardware address to assign to the host veth interface.
-	// Used by: MicroVM (to ensure consistent MAC addresses across snapshot/restore).
-	HostVethHWAddr net.HardwareAddr
-	// SweepInteriorLinks indicates whether to delete existing links in the interior netns (excluding loopback).
-	// Used by: MicroVM (to clean up stale tap devices).
-	SweepInteriorLinks bool
-
-	// DumpNetInfo indicates whether to dump network information to the logs for debugging purposes.
-	// Used by: gVisor.
-	DumpNetInfo bool
-
-	// EgressRedirectPort is the local atunnel egress listener port actor TCP
-	// egress is redirected to. Zero installs no redirect, leaving actor egress
-	// on the masquerade path.
-	// Used by: Both gVisor and MicroVM.
-	EgressRedirectPort uint16
-}
-
-// SetupActorNetwork builds a fresh point-to-point network between the worker
-// pod netns and the interior netns.
-func SetupActorNetwork(ctx context.Context, cfg NetworkConfig) (retErr error) {
-	// Build a fresh point-to-point network between the worker pod netns and the
-	// gVisor interior netns. The worker side keeps the pod's real eth0 and creates
-	// ateom0 as the gateway; the pair's peer is born inside the actor netns as
-	// eth0, where it gets the actor-side address and a default route via the
-	// worker-side veth address. This replaces the old behavior of moving the
-	// Kubernetes-provided eth0 out of the worker pod.
-	//
-	// The nftables rules installed here redirect actor TCP egress to atunnel
-	// when configured, masquerade traffic the TCP tunnel does not handle
-	// (notably DNS over UDP), and drop actor UDP egress to any other port.
-	//
-	// Clean up stale state from a failed prior activation before creating the
-	// next actor-side network. The worker currently runs one actor at a time.
-	if err := CleanupActorNetwork(ctx, cfg.InteriorNetNS); err != nil {
-		return fmt.Errorf("failed to clean up stale actor network before setup: %w", err)
-	}
-	defer func() {
-		if retErr != nil {
-			if err := CleanupActorNetwork(ctx, cfg.InteriorNetNS); err != nil {
-				slog.WarnContext(ctx, "Failed to clean up partially configured actor network", slog.Any("err", err))
-			}
-		}
-	}()
-
-	if cfg.SweepInteriorLinks {
-		if err := NetNSDo(ctx, cfg.InteriorNetNS, func(ctx context.Context) error {
-			links, err := netlink.LinkList()
-			if err != nil {
-				return fmt.Errorf("while listing interior netns links: %w", err)
-			}
-			for _, l := range links {
-				if l.Attrs().Name == "lo" {
-					continue
-				}
-				if err := netlink.LinkDel(l); err != nil {
-					slog.WarnContext(ctx, "Failed to delete leftover interior link", slog.String("link", l.Attrs().Name), slog.Any("err", err))
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	// The peer is born in the interior netns under its final name. Do not replace
-	// this with the obvious "create locally, LinkSetNsFd across, rename to eth0":
-	// moving and renaming a netdev each cost an RCU grace period under the global
-	// RTNL lock, which is ~18ms vs ~3ms for all of SetupActorNetwork, on the
-	// resume path. Naming the peer here is safe because its name is resolved in
-	// its own netns, so it never collides with the pod's eth0.
-	veth := &netlink.Veth{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: HostVethName,
-		},
-		PeerName: ActorVethName,
-		// netlink.NsFd, not netns.NsHandle: only the netlink type is recognized
-		// as IFLA_NET_NS_FD on the peer, though both are file descriptors.
-		PeerNamespace: netlink.NsFd(int(cfg.InteriorNetNS)),
-	}
-	if len(cfg.HostVethHWAddr) > 0 {
-		veth.LinkAttrs.HardwareAddr = cfg.HostVethHWAddr
-	}
-
-	if err := netlink.LinkAdd(veth); err != nil {
-		return fmt.Errorf("while creating actor veth pair: %w", err)
-	}
-
-	hostLink, err := netlink.LinkByName(HostVethName)
-	if err != nil {
-		return fmt.Errorf("while getting host veth: %w", err)
-	}
-	if err := netlink.AddrReplace(hostLink, HostVethAddr); err != nil {
-		return fmt.Errorf("while assigning host veth address: %w", err)
-	}
-	if err := netlink.LinkSetUp(hostLink); err != nil {
-		return fmt.Errorf("while bringing up host veth: %w", err)
-	}
-
-	if err := NetNSDo(ctx, cfg.InteriorNetNS, ConfigureActorVeth); err != nil {
-		return fmt.Errorf("while configuring actor veth in interior netns: %w", err)
-	}
-
-	if err := EnableIPv4Forwarding(); err != nil {
-		return err
-	}
-	if err := InstallActorNftablesRules(cfg.EgressRedirectPort); err != nil {
-		return err
-	}
-
-	if cfg.DumpNetInfo {
-		if err := DumpNetInfo(ctx, "Pod NetNS "); err != nil {
-			return fmt.Errorf("while dumping pod netns links: %w", err)
-		}
-		if err := NetNSDo(ctx, cfg.InteriorNetNS, func(ctx context.Context) error {
-			return DumpNetInfo(ctx, "Interior NetNS ")
-		}); err != nil {
-			return fmt.Errorf("while dumping interior netns links: %w", err)
-		}
-	}
-
 	return nil
 }

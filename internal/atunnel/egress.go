@@ -215,6 +215,8 @@ func waitForRenewal(ctx context.Context, delay time.Duration) bool {
 func (e *Egress) Deactivate(ctx context.Context) error {
 	e.mu.Lock()
 	active := e.active
+	// Clear admission under the same lock used to add connections to wg. Once
+	// we unlock, no handler can join this activation while Deactivate waits.
 	e.active = nil
 	if active != nil {
 		active.expiresAt = time.Time{}
@@ -282,6 +284,9 @@ func (e *Egress) handle(downstream net.Conn) {
 	}()
 }
 
+// copyBothWays preserves TCP half-close: a client can finish its request and
+// still read the response. Cancellation must close the connections separately
+// to unblock either copy; a full close at the first EOF could discard a reply.
 func copyBothWays(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
@@ -302,4 +307,54 @@ func closeWrite(conn net.Conn) {
 	if conn, ok := conn.(interface{ CloseWrite() error }); ok {
 		_ = conn.CloseWrite()
 	}
+}
+
+// DialContext opens a proxy-owned connection under the active actor identity.
+// DNS uses this same CONNECT path; it cannot acquire a direct worker dialer.
+func (e *Egress) DialContext(ctx context.Context, network, destination string) (net.Conn, error) {
+	if network != "tcp" {
+		return nil, fmt.Errorf("atunnel: unsupported network %q", network)
+	}
+	e.mu.Lock()
+	active := e.active
+	if active == nil || !time.Now().Before(active.expiresAt) {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("atunnel: actor egress inactive")
+	}
+	active.wg.Add(1)
+	e.mu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(active.ctx, cancel)
+	release := func() { stop(); cancel(); active.wg.Done() }
+	conn, err := active.dialer.DialContext(ctx, destination)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	// Keep DNS connections in the activation's drain set until the caller closes
+	// them. Cancellation closes the socket to interrupt I/O; Close releases the
+	// wait-group entry exactly once, including when cleanup also closes it.
+	tracked := &egressConn{Conn: conn, release: release}
+	tracked.stop = context.AfterFunc(ctx, func() { _ = conn.Close() })
+	return tracked, nil
+}
+
+type egressConn struct {
+	net.Conn
+	once    sync.Once
+	release func()
+	stop    func() bool
+}
+
+func (c *egressConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { c.stop(); c.release() })
+	return err
+}
+
+func (c *egressConn) CloseWrite() error {
+	if conn, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return conn.CloseWrite()
+	}
+	return nil
 }

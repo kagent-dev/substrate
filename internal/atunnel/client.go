@@ -137,6 +137,13 @@ func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn,
 	if err != nil {
 		return nil, fmt.Errorf("atunnel: connecting to egress gateway: %w", err)
 	}
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = rawConn.Close(); close(canceled) })
+	defer func() {
+		if !stop() {
+			<-canceled
+		}
+	}()
 	tlsConn := tls.Client(rawConn, c.tlsConfig.Clone())
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = rawConn.Close()

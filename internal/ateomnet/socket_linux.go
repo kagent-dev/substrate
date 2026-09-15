@@ -108,6 +108,10 @@ func newTCPSocket(ns netns.NsHandle, address netip.AddrPort) (*socket.Conn, *uni
 	if !address.IsValid() || !address.Addr().Is4() {
 		return nil, nil, fmt.Errorf("TCP address must be IPv4: %s", address)
 	}
+	// Config.NetNS confines namespace entry to socket creation. Linux retains
+	// that namespace on the socket, so later bind/connect/accept and I/O use its
+	// network even on ordinary Go runtime threads. Connections do not keep a
+	// goroutine locked to an OS thread for their lifetime.
 	c, err := socket.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_TCP, "ateom-tcp", &socket.Config{NetNS: int(ns)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating TCP socket in namespace: %w", err)
@@ -121,6 +125,8 @@ func newTCPSocket(ns netns.NsHandle, address netip.AddrPort) (*socket.Conn, *uni
 
 // duplicateSocket bridges socket.Conn to the standard net FD wrappers without
 // transferring ownership of socket.Conn's descriptor to an os.File finalizer.
+// net.FileConn/FileListener duplicate this intermediate FD again: callers close
+// both temporary owners, leaving only the returned net connection or listener.
 func duplicateSocket(c *socket.Conn) (*os.File, error) {
 	raw, err := c.SyscallConn()
 	if err != nil {
@@ -137,4 +143,32 @@ func duplicateSocket(c *socket.Conn) (*os.File, error) {
 		return nil, fmt.Errorf("duplicating TCP descriptor: %w", dupErr)
 	}
 	return os.NewFile(uintptr(fd), "ateom-tcp"), nil
+}
+
+// ListenUDP creates a namespace-local IPv4 datagram socket.
+func ListenUDP(ns netns.NsHandle, address netip.AddrPort) (*net.UDPConn, error) {
+	if ns <= 0 || !address.IsValid() || !address.Addr().Is4() {
+		return nil, fmt.Errorf("invalid UDP namespace or address")
+	}
+	c, err := socket.Socket(unix.AF_INET, unix.SOCK_DGRAM, unix.IPPROTO_UDP, "ateom-dns", &socket.Config{NetNS: int(ns)})
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, fmt.Errorf("creating UDP socket failed")
+	}
+	defer c.Close()
+	if err = c.Bind(&unix.SockaddrInet4{Addr: address.Addr().As4(), Port: int(address.Port())}); err != nil {
+		return nil, err
+	}
+	f, err := duplicateSocket(c)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	conn, err := net.FilePacketConn(f)
+	if err != nil {
+		return nil, err
+	}
+	return conn.(*net.UDPConn), nil
 }

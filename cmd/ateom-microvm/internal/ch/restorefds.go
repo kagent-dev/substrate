@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -40,46 +39,6 @@ type RestoredNet struct {
 	ID string
 	// FDs are open tap fds (one per queue pair) for CH to adopt.
 	FDs []int
-}
-
-// LaunchVMMOptions configures starting a bare VMM (no VM) for an FD-passing
-// restore.
-type LaunchVMMOptions struct {
-	// Binary is the cloud-hypervisor executable (defaults to "cloud-hypervisor").
-	Binary string
-	// APISocket is the api-socket path the new VMM should listen on.
-	APISocket string
-	// Stdout/Stderr receive the VMM's output.
-	Stdout, Stderr interface{ Write([]byte) (int, error) }
-}
-
-// LaunchVMM starts a cloud-hypervisor process with only an api-socket (no VM)
-// and waits until it answers. Use Client.RestoreWithNetFDs to then restore a
-// snapshot that has fd-backed net devices. The caller owns cmd.
-func LaunchVMM(ctx context.Context, o LaunchVMMOptions) (*exec.Cmd, *Client, error) {
-	if o.APISocket == "" {
-		return nil, nil, fmt.Errorf("LaunchVMMOptions.APISocket is required")
-	}
-	bin := o.Binary
-	if bin == "" {
-		bin = "cloud-hypervisor"
-	}
-	_ = os.Remove(o.APISocket)
-	// Deliberately NOT exec.CommandContext: the VMM must outlive the RPC whose
-	// ctx launched it. The caller owns cmd; WaitReady honors ctx.
-	cmd := exec.Command(bin, "--api-socket", o.APISocket)
-	cmd.Stdout = o.Stdout
-	cmd.Stderr = o.Stderr
-	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("while starting cloud-hypervisor: %w", err)
-	}
-	client := NewClient(o.APISocket)
-	if _, err := client.WaitReady(ctx, 15*time.Second); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return nil, nil, fmt.Errorf("while waiting for VMM api-socket: %w", err)
-	}
-	return cmd, client, nil
 }
 
 // RestoreWithNetFDs issues vm.restore for a snapshot dir, passing fresh tap FDs
