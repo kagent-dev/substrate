@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/storetest"
@@ -337,7 +338,7 @@ func TestDeleteActor_CollectsInFlightSnapshotWithoutTemplate(t *testing.T) {
 	ctx := context.Background()
 	persistence := newTestPersistence(t)
 	objects := objectstoretest.New()
-	w := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, objects)
+	w := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, time.Minute, objects)
 
 	actorRef := resources.ActorRef{Atespace: "team-a", Name: "actor-1"}
 	actor := storetest.MustCreateActor(t, ctx, persistence, &ateapipb.Actor{
@@ -481,7 +482,7 @@ func TestDeleteActor_CollectsSnapshotsAfterWorkerDelete(t *testing.T) {
 				})
 			}
 
-			actorWorkflow := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, objects)
+			actorWorkflow := NewActorWorkflow(persistence, nil, nil, nil, nil, nil, "", nil, time.Minute, objects)
 			// Suspend the actor as far as it gets: MarkSuspending mints the
 			// in-progress URI, and the checkpoint writes under it
 			actor, err := actorWorkflow.ensureMarkedSuspending(ctx, actorRef, actor, template)
