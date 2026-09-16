@@ -139,3 +139,19 @@ verify: test
 .PHONY: clean
 clean:
 	rm -rf $(BINDIR)
+
+# Render the substrate Helm chart into manifests/ate-install/ (mTLS mode,
+# the historical default install). Run this whenever charts/substrate/ changes.
+.PHONY: helm-template
+helm-template:
+	@./hack/render-manifests.sh
+
+# Verify that manifests/ate-install/ matches the chart output. Used in CI.
+.PHONY: verify-helm-template
+verify-helm-template:
+	@./hack/render-manifests.sh --check
+
+# Verify that the CRD chart mirrors the generated CRDs.
+.PHONY: verify-crd-chart
+verify-crd-chart:
+	@./hack/verify/crd-chart.sh
