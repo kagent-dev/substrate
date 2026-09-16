@@ -17,6 +17,7 @@ package controlapi
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
@@ -73,6 +74,7 @@ type VolumePluginRegistry interface {
 // ate-api always builds one.
 //
 // actorJWTIssuer is copied verbatim into the iss claim of every actor JWT.
+// actorWorkflowDeadline bounds each Resume/Suspend workflow end-to-end.
 func NewRPCService(
 	persistence store.Interface,
 	workerCache *workercache.Cache,
@@ -82,6 +84,7 @@ func NewRPCService(
 	dialer *AteletDialer,
 	instruments *Instruments,
 	egressGatewayAddress string,
+	actorWorkflowDeadline time.Duration,
 	volumePlugins map[string]volume.VolumePluginControlPlane,
 	objectStore objectstore.Store,
 	actorJWTIssuer string,
@@ -103,7 +106,7 @@ func NewRPCService(
 		actorIDJWTPool:        actorIDJWTPool,
 		actorIDCAPool:         actorIDCAPool,
 	}
-	s.actorWorkflow = NewActorWorkflow(impl, workerCache, dialer, sandboxConfigLister, storageClassLister, instruments, egressGatewayAddress, s, objectStore)
+	s.actorWorkflow = NewActorWorkflow(impl, workerCache, dialer, sandboxConfigLister, storageClassLister, instruments, egressGatewayAddress, s, actorWorkflowDeadline, objectStore)
 	s.workerWorkflow = NewWorkerWorkflow(impl)
 	return s
 }
