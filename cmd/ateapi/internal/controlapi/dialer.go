@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/lru"
@@ -61,6 +62,11 @@ type DialerOption func(*AteletDialer)
 // while still exercising the real lookup, dial and connection-cache path.
 func WithDialCredentials(build func(expectedPodUID string) (credentials.TransportCredentials, error)) DialerOption {
 	return func(d *AteletDialer) { d.dialCredentials = build }
+}
+
+// WithInsecureCredentials disables transport security for local clusters without Pod Certificates.
+func WithInsecureCredentials() DialerOption {
+	return WithDialCredentials(func(string) (credentials.TransportCredentials, error) { return insecure.NewCredentials(), nil })
 }
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath

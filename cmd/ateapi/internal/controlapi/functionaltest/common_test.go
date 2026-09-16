@@ -67,10 +67,8 @@ const (
 	testStorageLocation = "gs://fake-fake-fake"
 	testActorJWTIssuer  = "https://idp.example.test"
 
-	// ateletNamespace and byNode mirror the unexported constants controlapi's
-	// atelet informer is built with.
-	ateletNamespace = "ate-system"
-	byNode          = "by-node"
+	// byNode mirrors the unexported index name controlapi's atelet informer uses.
+	byNode = "by-node"
 )
 
 var (
@@ -710,7 +708,7 @@ func createAteletPod(kc kubernetes.Interface, name, nodeName string) error {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: ateletNamespace,
+			Namespace: installdefaults.SystemNamespace,
 			Labels:    map[string]string{"app": "atelet"},
 		},
 		Spec: corev1.PodSpec{
@@ -718,7 +716,7 @@ func createAteletPod(kc kubernetes.Interface, name, nodeName string) error {
 			Containers: []corev1.Container{{Name: "main", Image: "nginx"}},
 		},
 	}
-	created, err := kc.CoreV1().Pods(ateletNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	created, err := kc.CoreV1().Pods(installdefaults.SystemNamespace).Create(context.Background(), pod, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return nil
 	}
@@ -727,7 +725,7 @@ func createAteletPod(kc kubernetes.Interface, name, nodeName string) error {
 	}
 	created.Status.PodIPs = []corev1.PodIP{{IP: "127.0.0.1"}}
 	created.Status.Phase = corev1.PodRunning
-	if _, err := kc.CoreV1().Pods(ateletNamespace).UpdateStatus(context.Background(), created, metav1.UpdateOptions{}); err != nil {
+	if _, err := kc.CoreV1().Pods(installdefaults.SystemNamespace).UpdateStatus(context.Background(), created, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("updating atelet pod %s status: %w", name, err)
 	}
 	return nil
@@ -744,7 +742,7 @@ func setupAteletOnNode(t *testing.T, tc *testContext, name, nodeName string) {
 		t.Fatalf("%v", err)
 	}
 	t.Cleanup(func() {
-		_ = tc.k8sClient.CoreV1().Pods(ateletNamespace).Delete(context.Background(), name, metav1.DeleteOptions{
+		_ = tc.k8sClient.CoreV1().Pods(installdefaults.SystemNamespace).Delete(context.Background(), name, metav1.DeleteOptions{
 			GracePeriodSeconds: ptr.To[int64](0),
 		})
 	})
