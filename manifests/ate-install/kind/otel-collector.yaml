@@ -93,6 +93,12 @@ data:
           receivers: [otlp]
           processors: [batch]
           exporters: [prometheus, debug]
+        # The router access log arrives here. Without a logs pipeline the
+        # receiver rejects the export and the records are lost silently.
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
 
         # The count pipelines read the same receiver as the two pipelines
         # above, and they only count. The connector declares MutatesData
