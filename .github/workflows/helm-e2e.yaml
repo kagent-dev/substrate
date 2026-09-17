@@ -57,7 +57,7 @@ jobs:
         kubectl apply -f manifests/ate-install/kind/prometheus.yaml
     - name: Build chart images
       run: |
-        for component in ateapi atecontroller atelet podcertcontroller atenet; do
+        for component in ateapi atecontroller atelet podcertcontroller atenet k8s-credential-provider; do
           KO_DOCKER_REPO="localhost:5001/${component}" \
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
@@ -107,6 +107,17 @@ jobs:
       env:
         E2E_SANDBOX_CLASS: microvm
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
+    - name: Enable Kubernetes credential injection
+      # Interception changes egress TLS, so enable it after the standard lanes.
+      run: |
+        hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
+        helm upgrade substrate charts/substrate --namespace ate-system \
+          --reuse-values -f internal/e2e/suites/credentials/values.yaml \
+          --wait --timeout=5m
+    - name: Run E2E tests (Kubernetes credentials)
+      env:
+        E2E_CREDENTIAL_PROVIDER: "1"
+      run: hack/run-e2e-kind.sh ./internal/e2e/suites/credentials -v -args --no-color
     - name: Dump diagnostics on failure
       if: failure()
       run: |

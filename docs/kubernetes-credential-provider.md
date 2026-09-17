@@ -172,3 +172,30 @@ It verifies header injection, denial for an ungranted atespace after a successfu
 fetch, and denial of credential injection on cleartext egress. Kubernetes Secret
 storage and ateapi's actor/policy RPCs are faked; it does not validate cluster
 RBAC, certificate provisioning, or Pod deployment.
+
+## Cluster E2E test
+
+The Helm CI workflow builds the sidecar image and runs
+`internal/e2e/suites/credentials` after enabling the feature. The test deploys a
+real actor and an in-cluster HTTPS origin, creates Secrets and namespace-scoped
+RBAC, and exercises the actual ateapi, AGW, and provider. It checks the exact
+injected token, an unauthenticated-origin control, namespace-policy denial,
+Kubernetes RBAC denial, and cleartext denial. SubjectAccessReviews verify the
+permission assumptions behind each denial.
+
+To run it on a dedicated Helm-installed Kind cluster with this branch's images
+(including `k8s-credential-provider`) available:
+
+```sh
+hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
+helm upgrade substrate charts/substrate --namespace ate-system \
+  --reuse-values -f internal/e2e/suites/credentials/values.yaml \
+  --wait --timeout=5m
+E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 \
+  hack/run-e2e-kind.sh ./internal/e2e/suites/credentials -v -args --no-color
+```
+
+This configuration enables TLS interception cluster-wide, so run it after tests
+that require passthrough egress. The test temporarily trusts the cluster's serving
+CA for the local HTTPS origin, restoring that gateway configuration on cleanup.
+It does not modify the actor or credential-provider authentication settings.

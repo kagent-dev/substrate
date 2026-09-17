@@ -156,6 +156,20 @@ func TestRenderServerPod_HTTPProbe(t *testing.T) {
 	}
 }
 
+func TestRenderServerPod_HTTPSProbe(t *testing.T) {
+	pod, service := renderServerPodDocs(t, ServerPod{
+		Name: "tlsorigin", ImportPath: "github.com/agent-substrate/substrate/internal/e2e/fixtures/testserver",
+		Args: []string{"http"}, Port: 443, TargetPort: 8443, HTTPSProbe: true,
+	})
+	probe := pod.Spec.Containers[0].ReadinessProbe.HTTPGet
+	if probe == nil || probe.Scheme != corev1.URISchemeHTTPS || probe.Port.IntValue() != 8443 {
+		t.Fatalf("HTTPS readiness probe = %+v, want HTTPS on container port 8443", probe)
+	}
+	if service.Spec.Ports[0].Port != 443 {
+		t.Fatal("origin Service must expose port 443")
+	}
+}
+
 // TestRenderServerPod covers where each port lands: every field kubelet or
 // the binary reaches follows the listener, while the Service alone keeps the
 // published port.

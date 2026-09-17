@@ -68,6 +68,8 @@ type ServerPod struct {
 	// an HTTP GET. A gRPC server answers an HTTP request with a protocol error,
 	// so a server speaking grpc must set this and register the health service.
 	GRPCProbe bool
+	// HTTPSProbe uses HTTPS for readiness. Ignored when GRPCProbe is set.
+	HTTPSProbe bool
 	// HealthPath is the HTTP readiness path, defaulting to /healthz. Ignored
 	// when GRPCProbe is set.
 	HealthPath string
@@ -179,5 +181,9 @@ func serverReadinessProbe(spec ServerPod, targetPort string) string {
 	if path == "" {
 		path = "/healthz"
 	}
-	return fmt.Sprintf("      httpGet:\n        path: %s\n        port: %s", path, targetPort)
+	probe := fmt.Sprintf("      httpGet:\n        path: %s\n        port: %s", path, targetPort)
+	if spec.HTTPSProbe {
+		probe += "\n        scheme: HTTPS"
+	}
+	return probe
 }
