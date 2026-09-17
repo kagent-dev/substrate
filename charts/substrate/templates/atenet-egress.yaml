@@ -56,12 +56,42 @@ data:
     - mode: internal
       protocol: AUTO
       listeners:
+{{- if .Values.ateApi.credentialProvider.enabled }}
+      - protocol: HTTPS
+        tls:
+          mode: dynamicCa
+          cert: /run/egress-mitm/tls.crt
+          key: /run/egress-mitm/tls.key
+        routes:
+        - backends:
+          - dynamic: {}
+            policies:
+              backendTLS: {}
+          policies:
+            substrateEgress:
+              host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
+              policies:
+                backendTLS:
+                  cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                  key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                  root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+              credentialProviders:
+              - uriAuthority: kubernetes.io
+                target:
+                  host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:50051
+                  policies:
+                    backendTLS:
+                      cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                      key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                      root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- else }}
       - protocol: TLS
         hostname: "*"
         tcpRoutes:
         - backends:
           - dynamic:
               target: source.connectHeaders["host"]
+{{- end }}
       - protocol: HTTP
         routes:
         - backends:
@@ -132,6 +162,11 @@ spec:
             port: readiness
           periodSeconds: 1
         volumeMounts:
+{{- if .Values.ateApi.credentialProvider.enabled }}
+        - name: egress-mitm
+          mountPath: /run/egress-mitm
+          readOnly: true
+{{- end }}
         - name: config
           mountPath: /etc/agentgateway
           readOnly: true
@@ -193,6 +228,16 @@ spec:
         - name: drain-signal
           mountPath: /var/run/atenet
       volumes:
+{{- if .Values.ateApi.credentialProvider.enabled }}
+      - name: egress-mitm
+        secret:
+          secretName: egress-mitm-ca-pool
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+{{- end }}
       - name: config
         configMap:
           name: {{ include "substrate.fullname" (list "atenet-egress-agentgateway-config" .) }}

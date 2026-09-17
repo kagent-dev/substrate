@@ -1,0 +1,82 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ate-api-server
+  namespace: ate-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: credential-provider
+        image: ko://github.com/agent-substrate/substrate/cmd/k8s-credential-provider
+        args:
+        - --listen-address=:50051
+        - --metrics-address=:9091
+        - --server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem
+        - --client-ca-file=/run/podidentity.podcert.ate.dev/trust-bundle.pem
+        - --injector-spiffe-id=spiffe://cluster.local/ns/ate-system/sa/atenet-egress
+        - --namespace-policy-file=/etc/credential-provider/policy.yaml
+        ports:
+        - name: credentials
+          containerPort: 50051
+        - name: cred-health
+          containerPort: 9091
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: cred-health
+          periodSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: cred-health
+          initialDelaySeconds: 10
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: servicedns
+          mountPath: /run/servicedns.podcert.ate.dev
+          readOnly: true
+        - name: podidentity
+          mountPath: /run/podidentity.podcert.ate.dev
+          readOnly: true
+        - name: credential-provider-policy
+          mountPath: /etc/credential-provider
+          readOnly: true
+      volumes:
+      - name: credential-provider-policy
+        configMap:
+          name: credential-provider-policy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: ate-system
+spec:
+  ports:
+  - name: credentials
+    protocol: TCP
+    port: 50051
+    targetPort: credentials

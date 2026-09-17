@@ -74,6 +74,9 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
+{{- if .Values.ateApi.credentialProvider.enabled }}
+        checksum/credential-provider-policy: {{ toJson .Values.ateApi.credentialProvider.namespacePolicies | sha256sum }}
+{{- end }}
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-api-server" .) }}
       terminationGracePeriodSeconds: 40
@@ -155,7 +158,50 @@ spec:
             port: 9090
           initialDelaySeconds: 10
           periodSeconds: 10
+{{- if .Values.ateApi.credentialProvider.enabled }}
+      - name: credential-provider
+        image: {{ include "substrate.componentImage" (list "k8s-credential-provider" .) }}
+        args:
+        - --listen-address=:50051
+        - --metrics-address=:9091
+        - --server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem
+        - --client-ca-file=/run/podidentity.podcert.ate.dev/trust-bundle.pem
+        - --injector-spiffe-id=spiffe://cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "substrate.fullname" (list "atenet-egress" .) }}
+        - --namespace-policy-file=/etc/credential-provider/policy.yaml
+        ports:
+        - name: credentials
+          containerPort: 50051
+        - name: cred-health
+          containerPort: 9091
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: cred-health
+          periodSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: cred-health
+          initialDelaySeconds: 10
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - { name: servicedns, mountPath: /run/servicedns.podcert.ate.dev, readOnly: true }
+        - { name: podidentity, mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
+        - { name: credential-provider-policy, mountPath: /etc/credential-provider, readOnly: true }
+{{- end }}
       volumes:
+{{- if .Values.ateApi.credentialProvider.enabled }}
+      - name: credential-provider-policy
+        configMap:
+          name: {{ include "substrate.fullname" (list "credential-provider-policy" .) }}
+{{- end }}
       - name: servicedns
         projected:
           sources:
@@ -225,3 +271,9 @@ spec:
     protocol: TCP
     port: 443
     targetPort: 443
+{{- if .Values.ateApi.credentialProvider.enabled }}
+  - name: credentials
+    protocol: TCP
+    port: 50051
+    targetPort: credentials
+{{- end }}
