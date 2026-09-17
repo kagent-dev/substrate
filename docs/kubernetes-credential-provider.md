@@ -4,7 +4,7 @@ The optional `k8s-credential-provider` Deployment follows the provider from
 [upstream](https://github.com/agent-substrate/substrate/pull/1335). It serves
 `CredentialProvider.FetchSecret` at `k8s-credential-provider.ate-system.svc:50051`
 with its own ServiceAccount and projected serving certificate. AGW calls it
-directly over mTLS on the HTTPS interception route.
+directly over mTLS to inject credentials into HTTP and intercepted HTTPS requests.
 
 `ate-secret://kubernetes.io/team-a-secrets/example-api/token` resolves the `token`
 entry in that Kubernetes Secret. Omitting the key requires exactly one data entry.
@@ -14,8 +14,10 @@ can take that long to reach injected requests.
 
 Each request requires a trusted injector certificate with the configured SPIFFE
 identity, an explicit atespace-to-namespace grant for the attested actor, and
-Kubernetes `get` permission for the provider's ServiceAccount. Empty policies
-deny all requests. Secret permissions are granted separately from ateapi.
+Kubernetes `get` permission for the provider's ServiceAccount. Both installers
+include the upstream get-only Secret ClusterRole and bind it to that ServiceAccount.
+The provider can read Secrets across namespaces; its namespace policy controls
+which namespaces each actor may use. Empty policies deny all requests.
 
 ## Enable the provider
 
@@ -31,7 +33,8 @@ hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
 ```
 
 The gateway needs `egress-mitm-ca-pool` with `tls.crt` and `tls.key` in its namespace.
-Actors must trust this CA; see the [MITM trust bundle guide](egress-trust-bundle.md).
+Actors making HTTPS requests must trust this CA; see the
+[MITM trust bundle guide](egress-trust-bundle.md).
 
 For Helm, add these values to your release configuration:
 
@@ -44,12 +47,18 @@ credentialProvider:
 ```
 
 The feature is disabled by default. Enabling it deploys the provider and configures
-AGW's HTTPS interception route. Cleartext egress cannot receive injected Secrets.
+AGW's HTTP route and HTTPS interception route.
 Policy changes roll the provider's Pods. Resource names and the injector identity
 follow the release: release `demo` in namespace `platform` uses ServiceAccount
 `demo-k8s-credential-provider`, endpoint
 `demo-k8s-credential-provider.platform.svc:50051`, and injector identity
 `spiffe://cluster.local/ns/platform/sa/demo-atenet-egress`.
+
+HTTPS uses a dynamic backend: AGW selects the destination from the request and
+validates its certificate using the system CA roots (`backendTLS: {}`). Public
+APIs such as OpenAI and Anthropic need no per-backend certificates. The single
+MITM CA lets AGW generate actor-facing certificates as needed. HTTP also travels
+through the authenticated CONNECT tunnel, then leaves AGW over plaintext HTTP.
 
 For the manifest installer, set your grants in
 `manifests/egress-credential-injection/namespace-policy.yaml`, then deploy:
@@ -66,41 +75,9 @@ reapplication. Direct ConfigMap edits require a rollout restart: policy and clie
 CA files are loaded at startup. Serving certificates rotate through the existing
 certificate loader.
 
-## Grant Secret access
+## Configure injection
 
-Create the Secret, then bind only the required reads to the provider:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: egress-credentials
-  namespace: team-a-secrets
-rules:
-- apiGroups: [""]
-  resources: ["secrets"]
-  resourceNames: [example-api]
-  verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: egress-credentials
-  namespace: team-a-secrets
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: egress-credentials
-subjects:
-- kind: ServiceAccount
-  name: k8s-credential-provider
-  namespace: ate-system
-```
-
-For a named Helm release, use its prefixed provider ServiceAccount and namespace.
-Neither installer grants cluster-wide Secret access.
-
-Set an actor's egress policy header injection to use credential URI
+Create the Secret and set an actor's egress policy header injection to use credential URI
 `ate-secret://kubernetes.io/team-a-secrets/example-api/token`, header
 `authorization`, and prefix `Bearer `. Namespace grants alone do not create an
 egress policy. No ext_proc injector is needed.
@@ -108,11 +85,10 @@ egress policy. No ext_proc injector is needed.
 ## Tests
 
 The Helm PR workflow runs `internal/e2e/suites/credentials` with real actors,
-Secrets, RBAC, projected certificates, AGW, and the deployed provider. It checks
+Secrets, chart-managed RBAC, AGW, and the deployed provider. It checks
 the exact injected token, an unauthenticated-origin control, namespace-policy
-denial, cache isolation between atespaces, Kubernetes RBAC denial, and cleartext
-denial. SubjectAccessReviews verify
-the permission assumptions.
+denial and cache isolation between atespaces. The local origin serves HTTP;
+the suite uses the installed gateway configuration without modifying ConfigMaps.
 
 On a dedicated Helm-installed Kind cluster with this branch's images, including
 `kubernetes-secrets`, and the MITM CA Secret:
@@ -125,5 +101,5 @@ E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 \
 ```
 
 Enabling interception changes cluster egress TLS, so run this after tests that
-require passthrough. The test temporarily trusts the cluster serving CA for its
-local HTTPS origin and restores gateway configuration on cleanup.
+require passthrough. This suite tests HTTP credential injection; the manifest
+tests also check HTTPS interception and default public CA trust.

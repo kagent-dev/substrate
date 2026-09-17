@@ -42,8 +42,8 @@ See `values.yaml` for the full set; the important keys:
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
-| `credentialProvider.enabled` | `false` | Deploy the Kubernetes credential provider and AGW HTTPS injection; requires a MITM CA Secret; see [setup](../../docs/kubernetes-credential-provider.md) |
-| `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; Kubernetes Secret RBAC is configured separately |
+| `credentialProvider.enabled` | `false` | Deploy the Kubernetes credential provider and AGW HTTP/HTTPS injection; requires a MITM CA Secret; see [setup](../../docs/kubernetes-credential-provider.md) |
+| `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.extraArgs` | `[]` | Additional command-line arguments appended to the ateapi defaults |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics and the router access log |
 | `otel.traces.enabled` | `true` | Set to `false` to export no traces from the router; the Go components do not honor this yet |

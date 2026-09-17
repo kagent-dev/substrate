@@ -15,22 +15,19 @@
 package main
 
 import (
-	"crypto/tls"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/agent-substrate/substrate/internal/credbundle"
 	"github.com/spf13/cobra"
 )
 
 // newHTTPCmd is a plain HTTP/1.1 origin an Actor's egress lands on. It exists so
 // a test can assert the destination port is recovered from SO_ORIGINAL_DST.
-// It can also serve TLS and verify an injected Authorization header against a
-// mounted token for the credential-provider E2E test.
+// It can also verify an injected Authorization header against a mounted token.
 func newHTTPCmd() *cobra.Command {
-	var listenAddress, tlsBundle, authorizationFile string
+	var listenAddress, authorizationFile string
 	cmd := &cobra.Command{
 		Use:   "http",
 		Short: "Serve a plain HTTP/1.1 origin answering /healthz.",
@@ -51,15 +48,10 @@ func newHTTPCmd() *cobra.Command {
 				WriteTimeout:      2 * time.Minute,
 			}
 			log.Printf("testserver http: listening on %s", listenAddress)
-			if tlsBundle != "" {
-				server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: credbundle.Loader(tlsBundle)}
-				return server.ListenAndServeTLS("", "")
-			}
 			return server.ListenAndServe()
 		},
 	}
 	cmd.Flags().StringVar(&listenAddress, "listen", ":8080", "Address the HTTP origin listens on.")
-	cmd.Flags().StringVar(&tlsBundle, "tls-bundle", "", "Serve HTTPS using this certificate and key bundle.")
 	cmd.Flags().StringVar(&authorizationFile, "authorization-file", "", "Enable /credential, requiring a Bearer token matching this file.")
 	return cmd
 }

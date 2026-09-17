@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -60,6 +61,7 @@ func TestProviderManifests(t *testing.T) {
 			}
 			decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
 			var providerFound, portFound, policyFound, accountFound bool
+			var roleFound, bindingFound bool
 			for {
 				var doc struct {
 					Kind     string
@@ -68,8 +70,10 @@ func TestProviderManifests(t *testing.T) {
 						Template corev1.PodTemplateSpec
 						Ports    []corev1.ServicePort
 					}
-					Data  map[string]string
-					Rules []rbacv1.PolicyRule
+					Data     map[string]string
+					Rules    []rbacv1.PolicyRule
+					RoleRef  rbacv1.RoleRef
+					Subjects []rbacv1.Subject
 				}
 				if err := decoder.Decode(&doc); errors.Is(err, io.EOF) {
 					break
@@ -151,20 +155,31 @@ func TestProviderManifests(t *testing.T) {
 						t.Fatal("unexpected namespace policy")
 					}
 				case "ClusterRole":
-					if !strings.Contains(doc.Metadata.Name, "k8s-credential-provider") && doc.Metadata.Name != tc.prefix+"ate-api-server-role" {
+					if doc.Metadata.Name != tc.prefix+"k8s-credential-provider-secret-reader" {
 						continue
 					}
-					for _, rule := range doc.Rules {
-						for _, resource := range rule.Resources {
-							if resource == "secrets" || resource == "*" {
-								t.Fatal("provider grants cluster-wide Secret access")
-							}
-						}
+					roleFound = true
+					want := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}}}
+					if !reflect.DeepEqual(doc.Rules, want) {
+						t.Fatalf("provider rules = %#v, want get-only Secret access", doc.Rules)
+					}
+				case "ClusterRoleBinding":
+					if doc.Metadata.Name != tc.prefix+"k8s-credential-provider-secret-reader" {
+						continue
+					}
+					bindingFound = true
+					wantRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: tc.prefix + "k8s-credential-provider-secret-reader"}
+					wantSubjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: tc.prefix + "k8s-credential-provider", Namespace: tc.namespace}}
+					if doc.RoleRef != wantRef || !reflect.DeepEqual(doc.Subjects, wantSubjects) {
+						t.Fatalf("unexpected provider binding: roleRef=%+v subjects=%+v", doc.RoleRef, doc.Subjects)
 					}
 				}
 			}
 			if providerFound != tc.enabled || portFound != tc.enabled || policyFound != tc.enabled || accountFound != tc.enabled {
 				t.Fatalf("provider=%v port=%v policy=%v account=%v, enabled=%v", providerFound, portFound, policyFound, accountFound, tc.enabled)
+			}
+			if roleFound != tc.enabled || bindingFound != tc.enabled {
+				t.Fatalf("role=%v binding=%v, enabled=%v", roleFound, bindingFound, tc.enabled)
 			}
 		})
 	}
@@ -191,7 +206,8 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 				t.Fatalf("render: %v\n%s", err, data)
 			}
 			decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
-			providers, mitmMounts := 0, 0
+			providers := map[string]int{}
+			mitmMounts := 0
 			for {
 				var doc struct {
 					Kind string
@@ -224,6 +240,10 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 							Protocol string
 							TLS      struct{ Mode, Cert, Key string }
 							Routes   []struct {
+								Backends []struct {
+									Dynamic  map[string]any
+									Policies struct{ BackendTLS map[string]any }
+								}
 								Policies struct {
 									SubstrateEgress struct {
 										CredentialProviders []struct {
@@ -248,12 +268,16 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 					for _, listener := range bind.Listeners {
 						for _, route := range listener.Routes {
 							for _, provider := range route.Policies.SubstrateEgress.CredentialProviders {
-								providers++
-								if listener.Protocol != "HTTPS" || listener.TLS.Mode != "dynamicCa" {
-									t.Fatal("credentials enabled outside TLS interception")
-								}
-								if listener.TLS.Cert != "/run/egress-mitm/tls.crt" || listener.TLS.Key != "/run/egress-mitm/tls.key" {
-									t.Fatal("incorrect MITM certificate paths")
+								providers[listener.Protocol]++
+								if listener.Protocol == "HTTPS" {
+									if listener.TLS.Mode != "dynamicCa" || listener.TLS.Cert != "/run/egress-mitm/tls.crt" || listener.TLS.Key != "/run/egress-mitm/tls.key" {
+										t.Fatal("incorrect MITM configuration")
+									}
+									if len(route.Backends) != 1 || route.Backends[0].Dynamic == nil || len(route.Backends[0].Dynamic) != 0 || route.Backends[0].Policies.BackendTLS == nil || len(route.Backends[0].Policies.BackendTLS) != 0 {
+										t.Fatal("HTTPS must use a dynamic destination with default public TLS trust")
+									}
+								} else if listener.Protocol != "HTTP" {
+									t.Fatalf("credentials enabled on unexpected protocol %q", listener.Protocol)
 								}
 								if provider.URIAuthority != "kubernetes.io" || provider.Target.Host != tc.host {
 									t.Fatalf("incorrect provider: %+v", provider)
@@ -271,8 +295,8 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 			if tc.enabled {
 				want = 1
 			}
-			if providers != want || mitmMounts != want {
-				t.Fatalf("providers=%d MITM mounts=%d, want %d", providers, mitmMounts, want)
+			if providers["HTTP"] != want || providers["HTTPS"] != want || mitmMounts != want {
+				t.Fatalf("providers=%v MITM mounts=%d, want %d per protocol and %d mounts", providers, mitmMounts, want, want)
 			}
 		})
 	}

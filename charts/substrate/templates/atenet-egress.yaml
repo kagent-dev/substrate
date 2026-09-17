@@ -105,6 +105,17 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- if .Values.credentialProvider.enabled }}
+              credentialProviders:
+              - uriAuthority: kubernetes.io
+                target:
+                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
+                  policies:
+                    backendTLS:
+                      cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                      key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                      root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- end }}
       - protocol: TCP
         tcpRoutes:
         - backends:

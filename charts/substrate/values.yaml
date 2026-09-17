@@ -58,8 +58,8 @@ atelet:
 ateApi:
   extraArgs: []
 
-# Optional Kubernetes Secret provider and AGW HTTPS credential injection.
-# Requires egress-mitm-ca-pool; grant Secret reads separately to the provider SA.
+# Optional Kubernetes Secret provider and AGW HTTP/HTTPS credential injection.
+# Requires egress-mitm-ca-pool; includes get-only Secret RBAC for the provider SA.
 credentialProvider:
   enabled: false
   namespacePolicies: []
