@@ -193,7 +193,7 @@ func issueCertificate(t *testing.T, ca *localca.CA, uri string) tls.Certificate 
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
-		DNSNames: []string{"api.ate-system.svc"}, KeyUsage: x509.KeyUsageDigitalSignature,
+		DNSNames: []string{"api.ate-system.svc", "localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, KeyUsage: x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 	}
 	if uri != "" {

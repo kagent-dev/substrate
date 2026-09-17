@@ -155,3 +155,21 @@ Set an egress policy header injection's credential URI to
 `ate-secret://kubernetes.io/team-a-secrets/example-api/token`, for example with
 header `authorization` and prefix `Bearer `. Namespace grants alone do not
 create an egress policy.
+
+## Validate an AGW image locally
+
+On Linux with a local Docker daemon and Helm installed, set
+`AGENTGATEWAY_TEST_IMAGE` to the image reference from `images.agentgateway` in
+`charts/substrate/values.yaml`, then run:
+
+```sh
+go test -race ./cmd/k8s-credential-provider -run '^TestAgentgatewayInjection$' -count=1 -v
+```
+
+The test skips unless that environment variable is exported. It uses the
+rendered Helm egress configuration, an authenticated actor CONNECT tunnel, TLS
+interception, the real credential-provider server over mTLS, and a TLS upstream.
+It verifies header injection, denial for an ungranted atespace after a successful
+fetch, and denial of credential injection on cleartext egress. Kubernetes Secret
+storage and ateapi's actor/policy RPCs are faked; it does not validate cluster
+RBAC, certificate provisioning, or Pod deployment.
