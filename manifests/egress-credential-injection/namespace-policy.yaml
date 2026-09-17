@@ -12,11 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-- ../ate-api-server.yaml
-
-components:
-- ../components/credential-provider
+# Default-deny atespace-to-namespace grants. Secret RBAC is configured separately.
+policies: []

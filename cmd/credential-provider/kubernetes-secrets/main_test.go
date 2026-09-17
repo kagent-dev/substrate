@@ -132,7 +132,7 @@ func TestProviderMTLS(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"}, Data: map[string][]byte{"token": []byte("credential")},
 	})
 	srv := grpc.NewServer(grpc.Creds(creds))
-	credproviderpb.RegisterCredentialProviderServer(srv, NewServer(client, &namespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}}))
+	credproviderpb.RegisterCredentialProviderServer(srv, NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}}))
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

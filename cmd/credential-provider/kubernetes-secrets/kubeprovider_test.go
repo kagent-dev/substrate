@@ -40,18 +40,18 @@ func TestParseURI(t *testing.T) {
 	tests := []struct {
 		name    string
 		uri     string
-		want    secretRef
+		want    SecretRef
 		wantErr bool
 	}{
 		{
 			name: "with key",
 			uri:  "ate-secret://kubernetes.io/ns1/example-api/token",
-			want: secretRef{Namespace: "ns1", Name: "example-api", Key: "token"},
+			want: SecretRef{Namespace: "ns1", Name: "example-api", Key: "token"},
 		},
 		{
 			name: "without key",
 			uri:  "ate-secret://kubernetes.io/ns1/example-api",
-			want: secretRef{Namespace: "ns1", Name: "example-api"},
+			want: SecretRef{Namespace: "ns1", Name: "example-api"},
 		},
 		{name: "wrong scheme", uri: "https://kubernetes.io/ns1/example-api", wantErr: true},
 		{name: "wrong provider", uri: "ate-secret://vault.io/ns1/example-api", wantErr: true},
@@ -72,18 +72,18 @@ func TestParseURI(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseURI(tc.uri)
+			got, err := ParseURI(tc.uri)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("parseURI(%q) = %+v, want error", tc.uri, got)
+					t.Fatalf("ParseURI(%q) = %+v, want error", tc.uri, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseURI(%q) unexpected error: %v", tc.uri, err)
+				t.Fatalf("ParseURI(%q) unexpected error: %v", tc.uri, err)
 			}
 			if got != tc.want {
-				t.Errorf("parseURI(%q) = %+v, want %+v", tc.uri, got, tc.want)
+				t.Errorf("ParseURI(%q) = %+v, want %+v", tc.uri, got, tc.want)
 			}
 		})
 	}
@@ -267,7 +267,7 @@ func TestFetchSecret(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := fake.NewSimpleClientset(secret, multiKey)
-			srv := NewServer(client, &namespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
+			srv := NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
 			resp, err := srv.FetchSecret(context.Background(), &credproviderpb.FetchSecretRequest{Uri: tc.uri, ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/my-actor"})
 			if tc.wantCode != codes.OK {
 				if status.Code(err) != tc.wantCode {
@@ -303,16 +303,16 @@ func TestLoadNamespaceAuthorizer(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.policy), 0600); err != nil {
 				t.Fatal(err)
 			}
-			auth, err := loadNamespaceAuthorizer(path)
+			auth, err := LoadNamespaceAuthorizer(path)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("loadNamespaceAuthorizer: %v", err)
+				t.Fatalf("LoadNamespaceAuthorizer: %v", err)
 			}
 			if err == nil && auth.Allowed("team-a", "ns1") != (tc.name == "valid") {
 				t.Fatal("unexpected namespace grant")
 			}
 		})
 	}
-	if _, err := loadNamespaceAuthorizer(filepath.Join(t.TempDir(), "absent")); err == nil {
+	if _, err := LoadNamespaceAuthorizer(filepath.Join(t.TempDir(), "absent")); err == nil {
 		t.Fatal("missing policy accepted")
 	}
 }
@@ -329,7 +329,7 @@ func TestFetchSecretKubernetesErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := fake.NewSimpleClientset()
 			client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, tc.err })
-			srv := NewServer(client, &namespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
+			srv := NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
 			_, err := srv.FetchSecret(t.Context(), &credproviderpb.FetchSecretRequest{
 				Uri: "ate-secret://kubernetes.io/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a",
 			})
@@ -346,7 +346,7 @@ func TestFetchSecretKubernetesErrors(t *testing.T) {
 func TestFetchSecretObservesRotation(t *testing.T) {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"}, Data: map[string][]byte{"token": []byte("first")}}
 	client := fake.NewSimpleClientset(secret)
-	srv := NewServer(client, &namespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
+	srv := NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
 	req := &credproviderpb.FetchSecretRequest{Uri: "ate-secret://kubernetes.io/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a"}
 	first, err := srv.FetchSecret(t.Context(), req)
 	if err != nil || string(first.GetOpaqueBytes()) != "first" {

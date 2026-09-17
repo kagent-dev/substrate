@@ -44,10 +44,10 @@ const ProviderName = "kubernetes.io"
 // uriScheme is the only scheme a credential URI may carry.
 const uriScheme = "ate-secret"
 
-// secretRef is a parsed ate-secret:// URI for the kubernetes.io provider.
+// SecretRef is a parsed ate-secret:// URI for the kubernetes.io provider.
 //
 //	ate-secret://kubernetes.io/<namespace>/<secret>[/<key>]
-type secretRef struct {
+type SecretRef struct {
 	Namespace string
 	Name      string
 	// Key is the data key within the Secret, or "" when the URI omits it (only
@@ -55,37 +55,37 @@ type secretRef struct {
 	Key string
 }
 
-// parseURI parses a ate-secret:// URI of the kubernetes.io provider. It
+// ParseURI parses a ate-secret:// URI of the kubernetes.io provider. It
 // rejects any other scheme or provider name.
-func parseURI(raw string) (secretRef, error) {
+func ParseURI(raw string) (SecretRef, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return secretRef{}, fmt.Errorf("parsing credential URI %q: %w", raw, err)
+		return SecretRef{}, fmt.Errorf("parsing credential URI %q: %w", raw, err)
 	}
 	if u.Scheme != uriScheme {
-		return secretRef{}, fmt.Errorf("malformed credential URI %q: scheme is %q, want %q", raw, u.Scheme, uriScheme)
+		return SecretRef{}, fmt.Errorf("malformed credential URI %q: scheme is %q, want %q", raw, u.Scheme, uriScheme)
 	}
 	if u.Host != ProviderName {
-		return secretRef{}, fmt.Errorf("credential URI %q: provider is %q, this provider serves %q", raw, u.Host, ProviderName)
+		return SecretRef{}, fmt.Errorf("credential URI %q: provider is %q, this provider serves %q", raw, u.Host, ProviderName)
 	}
 
 	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
-		return secretRef{}, fmt.Errorf("credential URI must not contain user info, a query, or a fragment")
+		return SecretRef{}, fmt.Errorf("credential URI must not contain user info, a query, or a fragment")
 	}
 
 	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	// <namespace>/<secret> is the minimum; an optional 3rd segment is the data
 	// key.
 	if len(segments) < 2 || len(segments) > 3 {
-		return secretRef{}, fmt.Errorf("credential URI %q: want <namespace>/<secret>[/<key>], got %d path segments", raw, len(segments))
+		return SecretRef{}, fmt.Errorf("credential URI %q: want <namespace>/<secret>[/<key>], got %d path segments", raw, len(segments))
 	}
 	for i, s := range segments {
 		if s == "" {
-			return secretRef{}, fmt.Errorf("credential URI %q: empty path segment %d", raw, i)
+			return SecretRef{}, fmt.Errorf("credential URI %q: empty path segment %d", raw, i)
 		}
 	}
 
-	ref := secretRef{
+	ref := SecretRef{
 		Namespace: segments[0],
 		Name:      segments[1],
 	}
@@ -93,7 +93,7 @@ func parseURI(raw string) (secretRef, error) {
 		ref.Key = segments[2]
 	}
 	if len(validation.IsDNS1123Label(ref.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || (ref.Key != "" && len(validation.IsConfigMapKey(ref.Key)) != 0) {
-		return secretRef{}, fmt.Errorf("credential URI contains an invalid namespace, secret name, or key")
+		return SecretRef{}, fmt.Errorf("credential URI contains an invalid namespace, secret name, or key")
 	}
 	return ref, nil
 }
@@ -105,17 +105,17 @@ type Server struct {
 
 	client kubernetes.Interface
 	// nsAuth restricts which namespaces an atespace may resolve secrets from.
-	nsAuth *namespaceAuthorizer
+	nsAuth *NamespaceAuthorizer
 }
 
 // NewServer builds a Kubernetes credential provider with a default-deny policy.
-func NewServer(client kubernetes.Interface, nsAuth *namespaceAuthorizer) *Server {
+func NewServer(client kubernetes.Interface, nsAuth *NamespaceAuthorizer) *Server {
 	return &Server{client: client, nsAuth: nsAuth}
 }
 
 // FetchSecret resolves one ate-secret:// URI to its Secret value.
 func (s *Server) FetchSecret(ctx context.Context, req *credproviderpb.FetchSecretRequest) (*credproviderpb.FetchSecretResponse, error) {
-	ref, err := parseURI(req.GetUri())
+	ref, err := ParseURI(req.GetUri())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}

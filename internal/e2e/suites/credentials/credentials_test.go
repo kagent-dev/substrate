@@ -49,10 +49,11 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 	ctx := t.Context()
 	clients := e2e.GetClients()
 	namespace, template := e2e.DeployProbe(t, env["BUCKET_NAME"], "credentials", e2e.WithTrustBundle())
+	deniedAtespace, deniedTemplate := e2e.DeployProbe(t, env["BUCKET_NAME"], "credentials-denied", e2e.WithTrustBundle())
 	otherNamespace := e2e.CreateNamespace(t).Name
-	api, err := clients.K8s.AppsV1().Deployments("ate-system").Get(ctx, "ate-api-server", metav1.GetOptions{})
+	provider, err := clients.K8s.AppsV1().Deployments("ate-system").Get(ctx, "k8s-credential-provider", metav1.GetOptions{})
 	require.NoError(t, err)
-	serviceAccount := api.Spec.Template.Spec.ServiceAccountName
+	serviceAccount := provider.Spec.Template.Spec.ServiceAccountName
 	require.NotEmpty(t, serviceAccount)
 
 	for _, secret := range []struct{ namespace, name string }{
@@ -119,32 +120,47 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 	router, err := e2e.NewRouterClient(ctx)
 	require.NoError(t, err)
 	t.Cleanup(router.Close)
+	// Keep the successful actor alive through the cache-isolation check.
+	suite := t
 	for _, tc := range []struct {
 		name, secretNamespace, secret, scheme string
 		want                                  string
 	}{
 		{"without-injection", "", "", "https", "401"},
 		{"allowed", namespace, "allowed", "https", "204"},
+		{"atespace-denied", namespace, "allowed", "https", "403"},
 		{"namespace-denied", otherNamespace, "allowed", "https", "403"},
 		{"rbac-denied", namespace, "no-rbac", "https", "403"},
 		{"cleartext-denied", namespace, "allowed", "http", "403"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			actor := &ateapipb.ObjectRef{Atespace: namespace, Name: tc.name}
+			atespace, actorTemplate := namespace, template
+			actorName := tc.name
+			if tc.name == "atespace-denied" {
+				// Use the already-fetched URI from an ungranted atespace so an
+				// incorrectly shared gateway cache cannot bypass authorization.
+				atespace, actorTemplate = deniedAtespace, deniedTemplate
+				actorName = "allowed"
+			}
+			actor := &ateapipb.ObjectRef{Atespace: atespace, Name: actorName}
 			_, _ = clients.SubstrateAPI.SuspendActor(ctx, &ateapipb.SuspendActorRequest{Actor: actor})
 			_, _ = clients.SubstrateAPI.DeleteActor(ctx, &ateapipb.DeleteActorRequest{Actor: actor})
 			_, err := clients.SubstrateAPI.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
-				Metadata:      &ateapipb.ResourceMetadata{Atespace: namespace, Name: tc.name},
-				ActorTemplate: &ateapipb.ObjectRef{Atespace: namespace, Name: template.GetMetadata().GetName()},
+				Metadata:      &ateapipb.ResourceMetadata{Atespace: atespace, Name: actorName},
+				ActorTemplate: &ateapipb.ObjectRef{Atespace: atespace, Name: actorTemplate.GetMetadata().GetName()},
 			}})
 			require.NoError(t, err)
-			t.Cleanup(func() {
+			cleanupTest := t
+			if tc.name == "allowed" {
+				cleanupTest = suite
+			}
+			cleanupTest.Cleanup(func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 				defer cancel()
 				_, _ = clients.SubstrateAPI.SuspendActor(cleanupCtx, &ateapipb.SuspendActorRequest{Actor: actor})
 				_, err := clients.SubstrateAPI.DeleteActor(cleanupCtx, &ateapipb.DeleteActorRequest{Actor: actor})
 				if err != nil {
-					t.Errorf("delete actor %s: %v", tc.name, err)
+					cleanupTest.Errorf("delete actor %s/%s: %v", atespace, actorName, err)
 				}
 			})
 			rule := e2e.EgressAllowHostnames(host)
@@ -162,7 +178,7 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 			// retry still requires the precise result; transport errors never pass.
 			deadline := time.Now().Add(90 * time.Second)
 			for {
-				resp, err := router.Get(ctx, resources.ActorRef{Atespace: namespace, Name: tc.name}, path)
+				resp, err := router.Get(ctx, resources.ActorRef{Atespace: atespace, Name: actorName}, path)
 				var body []byte
 				if err == nil {
 					body, err = io.ReadAll(resp.Body)

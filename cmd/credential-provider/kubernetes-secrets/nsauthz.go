@@ -35,17 +35,17 @@ type atespaceNamespacePolicy struct {
 	AllowedNamespaces []string `json:"allowedNamespaces"`
 }
 
-// namespaceAuthorizer decides whether an atespace may resolve secrets in a given
+// NamespaceAuthorizer decides whether an atespace may resolve secrets in a given
 // Kubernetes namespace. It is default-deny: an atespace absent from the mapping
 // can resolve nothing.
-type namespaceAuthorizer struct {
+type NamespaceAuthorizer struct {
 	// allowed maps atespace -> set of permitted namespaces.
 	allowed map[string]map[string]struct{}
 }
 
-// loadNamespaceAuthorizer reads the YAML policy file at path and builds an
+// LoadNamespaceAuthorizer reads the YAML policy file at path and builds an
 // authorizer, so a malformed file fails startup rather than the first request.
-func loadNamespaceAuthorizer(path string) (*namespaceAuthorizer, error) {
+func LoadNamespaceAuthorizer(path string) (*NamespaceAuthorizer, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading namespace policy file %q: %w", path, err)
@@ -59,7 +59,7 @@ func loadNamespaceAuthorizer(path string) (*namespaceAuthorizer, error) {
 
 // newNamespaceAuthorizer builds an authorizer over a parsed policy file,
 // validating that each grant names an atespace.
-func newNamespaceAuthorizer(file namespacePolicyFile) (*namespaceAuthorizer, error) {
+func newNamespaceAuthorizer(file namespacePolicyFile) (*NamespaceAuthorizer, error) {
 	allowed := make(map[string]map[string]struct{})
 	for i, p := range file.Policies {
 		if !resources.IsValidResourceName(p.Atespace) {
@@ -77,13 +77,13 @@ func newNamespaceAuthorizer(file namespacePolicyFile) (*namespaceAuthorizer, err
 			set[ns] = struct{}{}
 		}
 	}
-	return &namespaceAuthorizer{allowed: allowed}, nil
+	return &NamespaceAuthorizer{allowed: allowed}, nil
 }
 
 // Allowed reports whether atespace may resolve secrets in namespace. Default
 // deny: an atespace absent from the mapping, or a namespace not in its list, is
 // refused.
-func (a *namespaceAuthorizer) Allowed(atespace, namespace string) bool {
+func (a *NamespaceAuthorizer) Allowed(atespace, namespace string) bool {
 	if a == nil {
 		return false
 	}

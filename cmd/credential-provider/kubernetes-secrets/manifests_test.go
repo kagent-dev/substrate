@@ -28,17 +28,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
-func TestSidecarManifests(t *testing.T) {
+func TestProviderManifests(t *testing.T) {
 	for _, tc := range []struct {
 		name, tool, namespace, prefix string
 		args                          []string
 		enabled                       bool
 	}{
-		{name: "disabled", tool: "helm", namespace: "ate-system", args: []string{"template", "substrate", "../../charts/substrate", "-n", "ate-system"}},
+		{name: "disabled", tool: "helm", namespace: "ate-system", args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
 		{name: "custom release", tool: "helm", namespace: "custom", prefix: "test-", enabled: true,
-			args: []string{"template", "test", "../../charts/substrate", "-n", "custom", "--set", "ateApi.credentialProvider.enabled=true", "--set", "ateApi.credentialProvider.namespacePolicies[0].atespace=team-a", "--set", "ateApi.credentialProvider.namespacePolicies[0].allowedNamespaces[0]=ns1"}},
+			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.enabled=true", "--set", "credentialProvider.namespacePolicies[0].atespace=team-a", "--set", "credentialProvider.namespacePolicies[0].allowedNamespaces[0]=ns1"}},
 		{name: "kustomize", tool: "kubectl", namespace: "ate-system", enabled: true,
-			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../manifests/ate-install/kubernetes-credentials"}},
+			args: []string{"kustomize", "../../../manifests/egress-credential-injection"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath(tc.tool); err != nil {
@@ -49,7 +49,7 @@ func TestSidecarManifests(t *testing.T) {
 				t.Fatalf("render: %v\n%s", err, data)
 			}
 			decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
-			var sidecarFound, portFound, policyFound bool
+			var providerFound, portFound, policyFound, accountFound bool
 			for {
 				var doc struct {
 					Kind     string
@@ -67,55 +67,57 @@ func TestSidecarManifests(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch doc.Kind {
+				case "ServiceAccount":
+					if doc.Metadata.Name == tc.prefix+"k8s-credential-provider" {
+						accountFound = true
+					}
 				case "Deployment":
-					if doc.Metadata.Name != tc.prefix+"ate-api-server" {
+					if doc.Metadata.Name != tc.prefix+"k8s-credential-provider" {
 						continue
 					}
 					pod := doc.Spec.Template.Spec
-					if pod.ServiceAccountName != tc.prefix+"ate-api-server" {
+					if pod.ServiceAccountName != tc.prefix+"k8s-credential-provider" {
 						t.Fatalf("unexpected ServiceAccount %q", pod.ServiceAccountName)
 					}
 					for _, container := range pod.Containers {
-						if container.Name != "credential-provider" {
+						if container.Name != "k8s-credential-provider" {
 							continue
 						}
-						sidecarFound = true
+						providerFound = true
 						args := strings.Join(container.Args, " ")
 						for _, required := range []string{
-							"--listen-address=:50051", "--metrics-address=:9091",
+							"--listen-address=:50051", "--metrics-address=:9090",
 							"--injector-spiffe-id=spiffe://cluster.local/ns/" + tc.namespace + "/sa/" + tc.prefix + "atenet-egress",
 							"--server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem",
 							"--client-ca-file=/run/podidentity.podcert.ate.dev/trust-bundle.pem",
 						} {
+							if tc.tool == "kubectl" && strings.HasPrefix(required, "--injector-spiffe-id=") {
+								continue
+							}
 							if !strings.Contains(args, required) {
-								t.Errorf("sidecar missing %s", required)
+								t.Errorf("provider missing %s", required)
 							}
 						}
-						if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet.Port.StrVal != "cred-health" {
+						if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet.Port.StrVal != "metrics" {
 							t.Fatal("missing dedicated readiness probe")
-						}
-						for _, port := range container.Ports {
-							if port.ContainerPort == 443 || port.ContainerPort == 9090 {
-								t.Fatalf("sidecar conflicts with ateapi on %d", port.ContainerPort)
-							}
 						}
 					}
 				case "Service":
-					if doc.Metadata.Name != tc.prefix+"api" {
+					if doc.Metadata.Name != tc.prefix+"k8s-credential-provider" {
 						continue
 					}
 					for _, port := range doc.Spec.Ports {
-						if port.Port == 50051 && port.TargetPort.StrVal == "credentials" {
+						if port.Port == 50051 && port.TargetPort.StrVal == "grpc" {
 							portFound = true
 						}
 					}
 				case "ConfigMap":
-					if !strings.HasPrefix(doc.Metadata.Name, tc.prefix+"credential-provider-policy") {
+					if !strings.HasPrefix(doc.Metadata.Name, tc.prefix+"k8s-credential-provider-namespace-policy") {
 						continue
 					}
 					policyFound = true
 					var policy namespacePolicyFile
-					if err := yaml.UnmarshalStrict([]byte(doc.Data["policy.yaml"]), &policy); err != nil {
+					if err := yaml.UnmarshalStrict([]byte(doc.Data["namespace-policy.yaml"]), &policy); err != nil {
 						t.Fatal(err)
 					}
 					auth, err := newNamespaceAuthorizer(policy)
@@ -126,20 +128,20 @@ func TestSidecarManifests(t *testing.T) {
 						t.Fatal("unexpected namespace policy")
 					}
 				case "ClusterRole":
-					if doc.Metadata.Name != tc.prefix+"ate-api-server-role" && doc.Metadata.Name != "ate-api-server" {
+					if !strings.Contains(doc.Metadata.Name, "k8s-credential-provider") && doc.Metadata.Name != tc.prefix+"ate-api-server-role" {
 						continue
 					}
 					for _, rule := range doc.Rules {
 						for _, resource := range rule.Resources {
 							if resource == "secrets" || resource == "*" {
-								t.Fatal("sidecar grants cluster-wide Secret access")
+								t.Fatal("provider grants cluster-wide Secret access")
 							}
 						}
 					}
 				}
 			}
-			if sidecarFound != tc.enabled || portFound != tc.enabled || policyFound != tc.enabled {
-				t.Fatalf("sidecar=%v port=%v policy=%v, enabled=%v", sidecarFound, portFound, policyFound, tc.enabled)
+			if providerFound != tc.enabled || portFound != tc.enabled || policyFound != tc.enabled || accountFound != tc.enabled {
+				t.Fatalf("provider=%v port=%v policy=%v account=%v, enabled=%v", providerFound, portFound, policyFound, accountFound, tc.enabled)
 			}
 		})
 	}
@@ -151,11 +153,11 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 		args                    []string
 		enabled                 bool
 	}{
-		{name: "disabled", tool: "helm", args: []string{"template", "substrate", "../../charts/substrate", "-n", "ate-system"}},
-		{name: "helm", tool: "helm", host: "test-api.custom.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem", enabled: true,
-			args: []string{"template", "test", "../../charts/substrate", "-n", "custom", "--set", "ateApi.credentialProvider.enabled=true"}},
-		{name: "kustomize", tool: "kubectl", host: "api.ate-system.svc:50051", roots: "/run/servicedns-ca/trust-bundle.pem", enabled: true,
-			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../manifests/ate-install/agentgateway-egress-mitm"}},
+		{name: "disabled", tool: "helm", args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
+		{name: "helm", tool: "helm", host: "test-k8s-credential-provider.custom.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem", enabled: true,
+			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.enabled=true"}},
+		{name: "kustomize", tool: "kubectl", host: "k8s-credential-provider.ate-system.svc:50051", roots: "/run/servicedns-ca/trust-bundle.pem", enabled: true,
+			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../../manifests/ate-install/agentgateway-egress-mitm"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath(tc.tool); err != nil {

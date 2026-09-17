@@ -56,7 +56,7 @@ data:
     - mode: internal
       protocol: AUTO
       listeners:
-{{- if .Values.ateApi.credentialProvider.enabled }}
+{{- if .Values.credentialProvider.enabled }}
       - protocol: HTTPS
         tls:
           mode: dynamicCa
@@ -78,7 +78,7 @@ data:
               credentialProviders:
               - uriAuthority: kubernetes.io
                 target:
-                  host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:50051
+                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
                   policies:
                     backendTLS:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
@@ -162,7 +162,7 @@ spec:
             port: readiness
           periodSeconds: 1
         volumeMounts:
-{{- if .Values.ateApi.credentialProvider.enabled }}
+{{- if .Values.credentialProvider.enabled }}
         - name: egress-mitm
           mountPath: /run/egress-mitm
           readOnly: true
@@ -228,7 +228,7 @@ spec:
         - name: drain-signal
           mountPath: /var/run/atenet
       volumes:
-{{- if .Values.ateApi.credentialProvider.enabled }}
+{{- if .Values.credentialProvider.enabled }}
       - name: egress-mitm
         secret:
           secretName: egress-mitm-ca-pool

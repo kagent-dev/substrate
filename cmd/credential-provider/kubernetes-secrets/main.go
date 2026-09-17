@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command k8s-credential-provider is the Kubernetes Secrets credential-provider
+// Command kubernetes-secrets is the Kubernetes-Secrets credential-provider
 // plugin: a gRPC service that resolves ate-secret:// URIs of the kubernetes.io
 // provider to Kubernetes Secret values. It is the only component in the egress
 // credential-injection path with Kubernetes access; the egress gateway and its
@@ -47,7 +47,7 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 )
 
-const serviceName = "k8s-credential-provider"
+const serviceName = "credprovider"
 
 var (
 	injectorSPIFFEID = pflag.String("injector-spiffe-id", "spiffe://cluster.local/ns/ate-system/sa/atenet-egress", "SPIFFE identity of the egress injector allowed to fetch credentials")
@@ -99,7 +99,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("--namespace-policy-file is required")
 	}
 
-	nsAuth, err := loadNamespaceAuthorizer(*nsPolicyFile)
+	nsAuth, err := LoadNamespaceAuthorizer(*nsPolicyFile)
 	if err != nil {
 		return fmt.Errorf("namespace policy: %w", err)
 	}

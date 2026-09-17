@@ -57,15 +57,14 @@ atelet:
 # Additional arguments appended to the ateapi defaults.
 ateApi:
   extraArgs: []
-  # Optional Kubernetes Secret provider sharing ateapi's Pod and ServiceAccount.
-  # Enables AGW HTTPS interception and credential injection with the pinned image.
-  # Requires the egress-mitm-ca-pool Secret (see docs).
-  # Secret read access must be granted separately with namespace-scoped RBAC.
-  credentialProvider:
-    enabled: false
-    namespacePolicies: []
-    # - atespace: team-a
-    #   allowedNamespaces: [team-a-secrets]
+
+# Optional Kubernetes Secret provider and AGW HTTPS credential injection.
+# Requires egress-mitm-ca-pool; grant Secret reads separately to the provider SA.
+credentialProvider:
+  enabled: false
+  namespacePolicies: []
+  # - atespace: team-a
+  #   allowedNamespaces: [team-a-secrets]
 
 # Name of a ConfigMap in the release namespace that supplies per-environment
 # overrides for ate-api-server (ATE_API_POSTGRES_CONNECTION_STRING, ...).

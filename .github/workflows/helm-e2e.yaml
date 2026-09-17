@@ -57,8 +57,8 @@ jobs:
         kubectl apply -f manifests/ate-install/kind/prometheus.yaml
     - name: Build chart images
       run: |
-        for component in ateapi atecontroller atelet podcertcontroller atenet k8s-credential-provider; do
-          KO_DOCKER_REPO="localhost:5001/${component}" \
+        for component in ateapi atecontroller atelet podcertcontroller atenet credential-provider/kubernetes-secrets; do
+          KO_DOCKER_REPO="localhost:5001/${component##*/}" \
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
         done
