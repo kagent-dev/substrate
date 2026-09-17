@@ -19,6 +19,9 @@ import (
 	"os"
 	"sort"
 
+	"github.com/agent-substrate/substrate/internal/resources"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"sigs.k8s.io/yaml"
 )
 
@@ -49,7 +52,7 @@ func LoadNamespaceAuthorizer(path string) (*NamespaceAuthorizer, error) {
 		return nil, fmt.Errorf("reading namespace policy file %q: %w", path, err)
 	}
 	var file namespacePolicyFile
-	if err := yaml.Unmarshal(data, &file); err != nil {
+	if err := yaml.UnmarshalStrict(data, &file); err != nil {
 		return nil, fmt.Errorf("parsing namespace policy file %q: %w", path, err)
 	}
 	return newNamespaceAuthorizer(file)
@@ -60,8 +63,8 @@ func LoadNamespaceAuthorizer(path string) (*NamespaceAuthorizer, error) {
 func newNamespaceAuthorizer(file namespacePolicyFile) (*NamespaceAuthorizer, error) {
 	allowed := make(map[string]map[string]struct{})
 	for i, p := range file.Policies {
-		if p.Atespace == "" {
-			return nil, fmt.Errorf("namespace policy %d: atespace is required", i)
+		if !resources.IsValidResourceName(p.Atespace) {
+			return nil, fmt.Errorf("namespace policy %d: valid atespace is required", i)
 		}
 		set := allowed[p.Atespace]
 		if set == nil {
@@ -69,6 +72,9 @@ func newNamespaceAuthorizer(file namespacePolicyFile) (*NamespaceAuthorizer, err
 			allowed[p.Atespace] = set
 		}
 		for _, ns := range p.AllowedNamespaces {
+			if len(validation.IsDNS1123Label(ns)) != 0 {
+				return nil, fmt.Errorf("namespace policy %d: invalid namespace %q", i, ns)
+			}
 			set[ns] = struct{}{}
 		}
 	}
@@ -96,6 +102,9 @@ func (a *NamespaceAuthorizer) Grants() map[string][]string {
 // deny: an atespace absent from the mapping, or a namespace not in its list, is
 // refused.
 func (a *NamespaceAuthorizer) Allowed(atespace, namespace string) bool {
+	if a == nil {
+		return false
+	}
 	set, ok := a.allowed[atespace]
 	if !ok {
 		return false
