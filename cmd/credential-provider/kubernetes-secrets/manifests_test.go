@@ -19,6 +19,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,6 +32,7 @@ import (
 func TestProviderManifests(t *testing.T) {
 	for _, tc := range []struct {
 		name, tool, namespace, prefix string
+		image                         string
 		args                          []string
 		enabled                       bool
 	}{
@@ -39,6 +41,14 @@ func TestProviderManifests(t *testing.T) {
 			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.enabled=true", "--set", "credentialProvider.namespacePolicies[0].atespace=team-a", "--set", "credentialProvider.namespacePolicies[0].allowedNamespaces[0]=ns1"}},
 		{name: "kustomize", tool: "kubectl", namespace: "ate-system", enabled: true,
 			args: []string{"kustomize", "../../../manifests/egress-credential-injection"}},
+		{name: "CI images", tool: "helm", namespace: "ate-system", enabled: true,
+			image: "localhost:5001/kagent-dev/substrate/kubernetes-secrets:helm-e2e",
+			args:  []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system", "--set", "credentialProvider.enabled=true", "--set", "image.registry=localhost:5001", "--set", "image.tag=helm-e2e"}},
+		{name: "global images", tool: "helm", namespace: "ate-system", enabled: true,
+			image: "mirror.example/custom/substrate/kubernetes-secrets:test",
+			args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system", "--set", "credentialProvider.enabled=true",
+				"--set", "image.repository=custom/substrate", "--set", "image.tag=test", "--set", "global.imageRegistry=mirror.example",
+				"--set", "imagePullSecrets[0].name=local", "--set", "global.imagePullSecrets[0].name=global", "--set", "global.imagePullPolicy=Always"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath(tc.tool); err != nil {
@@ -84,6 +94,19 @@ func TestProviderManifests(t *testing.T) {
 							continue
 						}
 						providerFound = true
+						if tc.image != "" && container.Image != tc.image {
+							t.Errorf("image = %q, want %q", container.Image, tc.image)
+						}
+						if tc.name == "global images" {
+							if container.ImagePullPolicy != corev1.PullAlways {
+								t.Errorf("imagePullPolicy = %q, want Always", container.ImagePullPolicy)
+							}
+							for _, name := range []string{"local", "global"} {
+								if !slices.Contains(pod.ImagePullSecrets, corev1.LocalObjectReference{Name: name}) {
+									t.Errorf("missing imagePullSecret %q", name)
+								}
+							}
+						}
 						args := strings.Join(container.Args, " ")
 						for _, required := range []string{
 							"--listen-address=:50051", "--metrics-address=:9090",
