@@ -26,10 +26,10 @@ process separation, not a separate Kubernetes authorization boundary.
 
 ## Agentgateway compatibility
 
-This integration requires an AGW build that implements the current Substrate
-credential protocol. The pinned September 17 nightly includes
-`credentialProviders` configuration, but still uses the previous RPC and URI
-scheme. A compatible AGW image must be pinned before enabling this feature:
+The pinned AGW nightly includes the
+[credential protocol update](https://github.com/agentgateway/agentgateway/pull/3524)
+from [this build](https://github.com/agentgateway/agentgateway/actions/runs/35238449333).
+It implements the current Substrate credential protocol:
 
 - RPC: `/credprovider.CredentialProvider/FetchSecret`.
 - Request: `uri` (field 1), `actor_spiffe_id` (field 2).
@@ -53,8 +53,8 @@ in the gateway's namespace. For a non-default namespace, provision the same
 Secret there. Actors must trust this CA; see the
 [MITM trust bundle guide](egress-trust-bundle.md).
 
-For Helm, set `images.agentgateway` to the compatible image and add these values
-to your existing release configuration:
+For Helm, keep the pinned `images.agentgateway` image and add these values to
+your existing release configuration:
 
 ```yaml
 ateApi:
@@ -136,9 +136,8 @@ Neither the chart nor the overlay grants cluster-wide Secret access.
 ## Connect agentgateway
 
 The Helm configuration above wires `substrateEgress.credentialProviders` to the
-sidecar on the HTTPS interception route. For the manifest installer, update the
-AGW image in `manifests/ate-install/components/agentgateway/kustomization.yaml`
-to your compatible build, install the sidecar overlay, and deploy the AGW MITM
+sidecar on the HTTPS interception route. For the manifest installer, keep the
+pinned AGW image, install the sidecar overlay, and deploy the AGW MITM
 configuration:
 
 ```sh

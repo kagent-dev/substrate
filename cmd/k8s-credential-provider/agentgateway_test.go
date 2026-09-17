@@ -161,9 +161,12 @@ func TestAgentgatewayInjection(t *testing.T) {
 		"backendTLS: {}", "backendTLS: {root: /config/ca.pem}",
 	).Replace(config)
 	write("config.yaml", []byte("config:\n  adminAddr: 127.0.0.1:0\n  statsAddr: 127.0.0.1:0\n  readinessAddr: 127.0.0.1:0\n"+config))
-	container, err := exec.CommandContext(t.Context(), "docker", "run", "--detach", "--rm", "--network=host",
-		"--user=0:0", "--volume", dir+":/config:ro", image, "-f", "/config/config.yaml").CombinedOutput()
-	require.NoError(t, err, "%s", container)
+	command := exec.CommandContext(t.Context(), "docker", "run", "--detach", "--rm", "--network=host",
+		"--user=0:0", "--volume", dir+":/config:ro", image, "-f", "/config/config.yaml")
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	container, err := command.Output()
+	require.NoError(t, err, "%s", stderr.String())
 	id := strings.TrimSpace(string(container))
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -172,7 +175,7 @@ func TestAgentgatewayInjection(t *testing.T) {
 			logs, _ := exec.CommandContext(ctx, "docker", "logs", id).CombinedOutput()
 			t.Logf("AGW logs:\n%s", logs)
 		}
-		out, err := exec.CommandContext(ctx, "docker", "stop", "--time=1", id).CombinedOutput()
+		out, err := exec.CommandContext(ctx, "docker", "stop", "--timeout=1", id).CombinedOutput()
 		if err != nil {
 			t.Errorf("stop AGW: %v: %s", err, out)
 		}
