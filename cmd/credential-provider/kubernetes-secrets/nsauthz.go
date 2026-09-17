@@ -19,6 +19,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/agent-substrate/substrate/internal/resources"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"sigs.k8s.io/yaml"
@@ -86,9 +87,7 @@ func LoadNamespaceAuthorizer(path string) (*NamespaceAuthorizer, error) {
 		return nil, fmt.Errorf("reading namespace policy file %q: %w", path, err)
 	}
 	var file namespacePolicyFile
-	// Strict: a typo like matchLabel, or an unsupported field like
-	// matchExpressions, must fail rather than silently parse as an empty
-	// selector, which would grant every Secret in the namespace.
+	// Reject unknown fields so a misspelled selector cannot broaden a grant.
 	if err := yaml.UnmarshalStrict(data, &file); err != nil {
 		return nil, fmt.Errorf("parsing namespace policy file %q: %w", path, err)
 	}
@@ -100,8 +99,8 @@ func LoadNamespaceAuthorizer(path string) (*NamespaceAuthorizer, error) {
 func newNamespaceAuthorizer(file namespacePolicyFile) (*NamespaceAuthorizer, error) {
 	allowed := make(map[string]map[string][]grant)
 	for i, p := range file.Policies {
-		if p.Atespace == "" {
-			return nil, fmt.Errorf("namespace policy %d: atespace is required", i)
+		if !resources.IsValidResourceName(p.Atespace) {
+			return nil, fmt.Errorf("namespace policy %d: valid atespace is required", i)
 		}
 		// A malformed label can never match, so it would narrow the grant to
 		// nothing and look like the policy was simply ignored. Fail loading
@@ -127,6 +126,9 @@ func newNamespaceAuthorizer(file namespacePolicyFile) (*NamespaceAuthorizer, err
 			g.labels[k] = v
 		}
 		for _, ns := range p.AllowedNamespaces {
+			if len(validation.IsDNS1123Label(ns)) != 0 {
+				return nil, fmt.Errorf("namespace policy %d: invalid namespace %q", i, ns)
+			}
 			set[ns] = append(set[ns], g)
 		}
 	}
@@ -154,6 +156,9 @@ func (a *NamespaceAuthorizer) Grants() map[string][]string {
 // deny: an atespace absent from the mapping, or a namespace not in its list, is
 // refused.
 func (a *NamespaceAuthorizer) Allowed(atespace, namespace string) bool {
+	if a == nil {
+		return false
+	}
 	set, ok := a.allowed[atespace]
 	if !ok {
 		return false

@@ -27,7 +27,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -200,6 +202,11 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 	}
 	if *clientCAFile == "" {
 		return nil, fmt.Errorf("--client-ca-file is required")
+	}
+
+	id, err := url.Parse(*injectorIdentity)
+	if err != nil || id.Scheme != "spiffe" || id.Host == "" || id.Path == "" || id.User != nil || id.RawQuery != "" || id.ForceQuery || strings.Contains(*injectorIdentity, "#") {
+		return nil, fmt.Errorf("--injector-identity must be a SPIFFE URI")
 	}
 
 	// Load the client CA pool once so a missing or empty projection fails the
