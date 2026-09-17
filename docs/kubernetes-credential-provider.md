@@ -1,6 +1,6 @@
 # Kubernetes credential provider
 
-The optional `k8s-credential-provider` Deployment follows the provider from
+The `k8s-credential-provider` Deployment follows the provider from
 [upstream](https://github.com/agent-substrate/substrate/pull/1335). It serves
 `CredentialProvider.FetchSecret` at `k8s-credential-provider.ate-system.svc:50051`
 with its own ServiceAccount and projected serving certificate. AGW calls it
@@ -19,7 +19,7 @@ include the upstream get-only Secret ClusterRole and bind it to that ServiceAcco
 The provider can read Secrets across namespaces; its namespace policy controls
 which namespaces each actor may use. Empty policies deny all requests.
 
-## Enable the provider
+## Configure the provider
 
 Keep the pinned `images.agentgateway` image. It includes the
 [protocol update](https://github.com/agentgateway/agentgateway/pull/3524) from
@@ -40,14 +40,13 @@ For Helm, add these values to your release configuration:
 
 ```yaml
 credentialProvider:
-  enabled: true
   namespacePolicies:
   - atespace: team-a
     allowedNamespaces: [team-a-secrets]
 ```
 
-The feature is disabled by default. Enabling it deploys the provider and configures
-AGW's HTTP route and HTTPS interception route.
+The Helm chart always deploys the provider and configures AGW's HTTP route and
+HTTPS interception route. Namespace grants default to an empty list.
 Policy changes roll the provider's Pods. Resource names and the injector identity
 follow the release: release `demo` in namespace `platform` uses ServiceAccount
 `demo-k8s-credential-provider`, endpoint
@@ -84,22 +83,21 @@ egress policy. No ext_proc injector is needed.
 
 ## Tests
 
-The Helm PR workflow runs `internal/e2e/suites/credentials` with real actors,
+The Helm PR workflow installs the provider and MITM gateway from the start and
+runs `internal/e2e/suites/credentials` alongside the standard suites with real actors,
 Secrets, chart-managed RBAC, AGW, and the deployed provider. It checks
 the exact injected token, an unauthenticated-origin control, namespace-policy
 denial and cache isolation between atespaces. The local origin serves HTTP;
 the suite uses the installed gateway configuration without modifying ConfigMaps.
 
-On a dedicated Helm-installed Kind cluster with this branch's images, including
-`kubernetes-secrets`, and the MITM CA Secret:
+Include `-f internal/e2e/suites/credentials/values.yaml` in the initial Helm
+installation to grant the test atespace access. After deploying the standard
+MITM egress fixtures, run the suites together:
 
 ```sh
-helm upgrade substrate charts/substrate --namespace ate-system \
-  --reuse-values -f internal/e2e/suites/credentials/values.yaml --wait --timeout=5m
-E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 \
-  hack/run-e2e-kind.sh ./internal/e2e/suites/credentials -v -args --no-color
+E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 E2E_EGRESS_MITM=1 \
+  hack/run-e2e-kind.sh -v -args --no-color
 ```
 
-Enabling interception changes cluster egress TLS, so run this after tests that
-require passthrough. This suite tests HTTP credential injection; the manifest
-tests also check HTTPS interception and default public CA trust.
+The credential suite tests HTTP injection. The existing MITM suite checks HTTPS
+interception and actor trust against a public HTTPS origin using the same install.

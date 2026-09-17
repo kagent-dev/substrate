@@ -35,19 +35,18 @@ func TestProviderManifests(t *testing.T) {
 		name, tool, namespace, prefix string
 		image                         string
 		args                          []string
-		enabled                       bool
 	}{
-		{name: "disabled", tool: "helm", namespace: "ate-system", args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
-		{name: "custom release", tool: "helm", namespace: "custom", prefix: "test-", enabled: true,
-			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.enabled=true", "--set", "credentialProvider.namespacePolicies[0].atespace=team-a", "--set", "credentialProvider.namespacePolicies[0].allowedNamespaces[0]=ns1"}},
-		{name: "kustomize", tool: "kubectl", namespace: "ate-system", enabled: true,
+		{name: "default", tool: "helm", namespace: "ate-system", args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
+		{name: "custom release", tool: "helm", namespace: "custom", prefix: "test-",
+			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.namespacePolicies[0].atespace=team-a", "--set", "credentialProvider.namespacePolicies[0].allowedNamespaces[0]=ns1"}},
+		{name: "kustomize", tool: "kubectl", namespace: "ate-system",
 			args: []string{"kustomize", "../../../manifests/egress-credential-injection"}},
-		{name: "CI images", tool: "helm", namespace: "ate-system", enabled: true,
+		{name: "CI images", tool: "helm", namespace: "ate-system",
 			image: "localhost:5001/kagent-dev/substrate/kubernetes-secrets:helm-e2e",
-			args:  []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system", "--set", "credentialProvider.enabled=true", "--set", "image.registry=localhost:5001", "--set", "image.tag=helm-e2e"}},
-		{name: "global images", tool: "helm", namespace: "ate-system", enabled: true,
+			args:  []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system", "--set", "image.registry=localhost:5001", "--set", "image.tag=helm-e2e"}},
+		{name: "global images", tool: "helm", namespace: "ate-system",
 			image: "mirror.example/custom/substrate/kubernetes-secrets:test",
-			args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system", "--set", "credentialProvider.enabled=true",
+			args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system",
 				"--set", "image.repository=custom/substrate", "--set", "image.tag=test", "--set", "global.imageRegistry=mirror.example",
 				"--set", "imagePullSecrets[0].name=local", "--set", "global.imagePullSecrets[0].name=global", "--set", "global.imagePullPolicy=Always"}},
 	} {
@@ -175,11 +174,11 @@ func TestProviderManifests(t *testing.T) {
 					}
 				}
 			}
-			if providerFound != tc.enabled || portFound != tc.enabled || policyFound != tc.enabled || accountFound != tc.enabled {
-				t.Fatalf("provider=%v port=%v policy=%v account=%v, enabled=%v", providerFound, portFound, policyFound, accountFound, tc.enabled)
+			if !providerFound || !portFound || !policyFound || !accountFound {
+				t.Fatalf("provider=%v port=%v policy=%v account=%v", providerFound, portFound, policyFound, accountFound)
 			}
-			if roleFound != tc.enabled || bindingFound != tc.enabled {
-				t.Fatalf("role=%v binding=%v, enabled=%v", roleFound, bindingFound, tc.enabled)
+			if !roleFound || !bindingFound {
+				t.Fatalf("role=%v binding=%v", roleFound, bindingFound)
 			}
 		})
 	}
@@ -189,12 +188,12 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		name, tool, host, roots string
 		args                    []string
-		enabled                 bool
 	}{
-		{name: "disabled", tool: "helm", args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
-		{name: "helm", tool: "helm", host: "test-k8s-credential-provider.custom.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem", enabled: true,
-			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom", "--set", "credentialProvider.enabled=true"}},
-		{name: "kustomize", tool: "kubectl", host: "k8s-credential-provider.ate-system.svc:50051", roots: "/run/servicedns-ca/trust-bundle.pem", enabled: true,
+		{name: "default", tool: "helm", host: "k8s-credential-provider.ate-system.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem",
+			args: []string{"template", "substrate", "../../../charts/substrate", "-n", "ate-system"}},
+		{name: "custom release", tool: "helm", host: "test-k8s-credential-provider.custom.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem",
+			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom"}},
+		{name: "kustomize", tool: "kubectl", host: "k8s-credential-provider.ate-system.svc:50051", roots: "/run/servicedns-ca/trust-bundle.pem",
 			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../../manifests/ate-install/agentgateway-egress-mitm"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,7 +206,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 			}
 			decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
 			providers := map[string]int{}
-			mitmMounts := 0
+			mitmMounts, mitmVolumes, passthroughListeners := 0, 0, 0
 			for {
 				var doc struct {
 					Kind string
@@ -220,6 +219,11 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 				if doc.Kind == "Deployment" {
+					for _, volume := range doc.Spec.Template.Spec.Volumes {
+						if volume.Secret != nil && volume.Secret.SecretName == "egress-mitm-ca-pool" {
+							mitmVolumes++
+						}
+					}
 					for _, container := range doc.Spec.Template.Spec.Containers {
 						if container.Name != "agentgateway" {
 							continue
@@ -266,6 +270,9 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 				}
 				for _, bind := range config.Binds {
 					for _, listener := range bind.Listeners {
+						if listener.Protocol == "TLS" {
+							passthroughListeners++
+						}
 						for _, route := range listener.Routes {
 							for _, provider := range route.Policies.SubstrateEgress.CredentialProviders {
 								providers[listener.Protocol]++
@@ -291,12 +298,11 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 					}
 				}
 			}
-			want := 0
-			if tc.enabled {
-				want = 1
+			if providers["HTTP"] != 1 || providers["HTTPS"] != 1 {
+				t.Fatalf("providers=%v, want one per HTTP/HTTPS route", providers)
 			}
-			if providers["HTTP"] != want || providers["HTTPS"] != want || mitmMounts != want {
-				t.Fatalf("providers=%v MITM mounts=%d, want %d per protocol and %d mounts", providers, mitmMounts, want, want)
+			if mitmMounts != 1 || mitmVolumes != 1 || passthroughListeners != 0 {
+				t.Fatalf("MITM mounts=%d volumes=%d passthrough listeners=%d", mitmMounts, mitmVolumes, passthroughListeners)
 			}
 		})
 	}

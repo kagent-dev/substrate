@@ -25,6 +25,8 @@ jobs:
     env:
       VERSION: helm-e2e
       E2E_ATENET_DATAPLANE: agentgateway
+      E2E_CREDENTIAL_PROVIDER: "1"
+      E2E_EGRESS_MITM: "1"
     steps:
     - name: Checkout
       uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -72,6 +74,7 @@ jobs:
         helm upgrade --install substrate charts/substrate \
           --namespace ate-system \
           --create-namespace \
+          -f internal/e2e/suites/credentials/values.yaml \
           --set image.registry=localhost:5001 \
           --set image.tag=helm-e2e \
           --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
@@ -84,6 +87,7 @@ jobs:
         hack/install-ate-kind.sh --create-actor-id-ca-pool-secret
         hack/install-ate-kind.sh --create-actor-id-ca-certs-secret
         hack/install-ate-kind.sh --create-api-authentication-config
+        hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
     - name: Wait for Helm install
       run: |
         helm upgrade substrate charts/substrate \
@@ -104,24 +108,13 @@ jobs:
     - name: Deploy gVisor counter demo
       run: hack/install-ate-kind.sh --deploy-demo-counter
     - name: Deploy egress demo
-      run: hack/install-ate-kind.sh --deploy-demo-egress
+      run: hack/install-ate-kind.sh --deploy-demo-egress-mitm
     - name: Run E2E tests (gVisor)
       run: hack/run-e2e-kind.sh -v -args --no-color
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
-    - name: Enable Kubernetes credential injection
-      # Interception changes egress TLS, so enable it after the standard lanes.
-      run: |
-        hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
-        helm upgrade substrate charts/substrate --namespace ate-system \
-          --reuse-values -f internal/e2e/suites/credentials/values.yaml \
-          --wait --timeout=5m
-    - name: Run E2E tests (Kubernetes credentials)
-      env:
-        E2E_CREDENTIAL_PROVIDER: "1"
-      run: hack/run-e2e-kind.sh ./internal/e2e/suites/credentials -v -args --no-color
     - name: Dump diagnostics on failure
       if: failure()
       run: |

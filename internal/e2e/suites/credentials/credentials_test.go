@@ -38,7 +38,7 @@ import (
 // actors, and a local HTTP origin with the installed gateway configuration and RBAC.
 func TestKubernetesCredentialInjection(t *testing.T) {
 	if os.Getenv("E2E_CREDENTIAL_PROVIDER") == "" {
-		t.Skip("enable the credential-provider Helm E2E values and set E2E_CREDENTIAL_PROVIDER=1")
+		t.Skip("requires credential E2E namespace grants and E2E_CREDENTIAL_PROVIDER=1")
 	}
 	env, err := e2e.CheckEnv("BUCKET_NAME", "KO_DOCKER_REPO")
 	require.NoError(t, err)

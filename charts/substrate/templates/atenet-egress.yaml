@@ -56,7 +56,6 @@ data:
     - mode: internal
       protocol: AUTO
       listeners:
-{{- if .Values.credentialProvider.enabled }}
       - protocol: HTTPS
         tls:
           mode: dynamicCa
@@ -84,14 +83,6 @@ data:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
-{{- else }}
-      - protocol: TLS
-        hostname: "*"
-        tcpRoutes:
-        - backends:
-          - dynamic:
-              target: source.connectHeaders["host"]
-{{- end }}
       - protocol: HTTP
         routes:
         - backends:
@@ -105,7 +96,6 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
-{{- if .Values.credentialProvider.enabled }}
               credentialProviders:
               - uriAuthority: kubernetes.io
                 target:
@@ -115,7 +105,6 @@ data:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
-{{- end }}
       - protocol: TCP
         tcpRoutes:
         - backends:
@@ -174,11 +163,9 @@ spec:
             port: readiness
           periodSeconds: 1
         volumeMounts:
-{{- if .Values.credentialProvider.enabled }}
         - name: egress-mitm
           mountPath: /run/egress-mitm
           readOnly: true
-{{- end }}
         - name: config
           mountPath: /etc/agentgateway
           readOnly: true
@@ -240,7 +227,6 @@ spec:
         - name: drain-signal
           mountPath: /var/run/atenet
       volumes:
-{{- if .Values.credentialProvider.enabled }}
       - name: egress-mitm
         secret:
           secretName: egress-mitm-ca-pool
@@ -249,7 +235,6 @@ spec:
             path: tls.crt
           - key: tls.key
             path: tls.key
-{{- end }}
       - name: config
         configMap:
           name: {{ include "substrate.fullname" (list "atenet-egress-agentgateway-config" .) }}
