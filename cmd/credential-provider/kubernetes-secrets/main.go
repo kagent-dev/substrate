@@ -25,7 +25,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,20 +47,17 @@ import (
 
 const serviceName = "credprovider"
 
-// injectorSPIFFEID is the identity of the only caller allowed to fetch secrets:
-// the egress gateway's credential injector.
-const injectorSPIFFEID = "spiffe://cluster.local/ns/ate-system/sa/atenet-egress"
-
 var (
-	listenAddr   = pflag.String("listen-address", ":50051", "gRPC listen address")
-	metricsAddr  = pflag.String("metrics-address", ":9090", "Prometheus/health HTTP listen address")
-	serverBundle = pflag.String("server-cred-bundle", "", "credential bundle (PEM key+chain) presented for serving TLS (required)")
-	clientCAFile = pflag.String("client-ca-file", "", "CA bundle that caller (injector) client certificates must chain to (required)")
-	nsPolicyFile = pflag.String("namespace-policy-file", "", "path to the atespace→namespace authorization YAML (required)")
-	logLevel     = pflag.String("log-level", "info", "one of debug, info, warn, error")
-	drainGrace   = pflag.Duration("drain-grace", 5*time.Second, "how long to wait for in-flight RPCs on shutdown before a hard stop")
-	kubeAPIQPS   = pflag.Float32("kube-api-qps", 50, "Sustained queries per second allowed against the Kubernetes API.")
-	kubeAPIBurst = pflag.Int("kube-api-burst", 100, "Burst queries allowed against the Kubernetes API.")
+	injectorSPIFFEID = pflag.String("injector-spiffe-id", "spiffe://cluster.local/ns/ate-system/sa/atenet-egress", "SPIFFE identity of the egress injector allowed to fetch credentials")
+	listenAddr       = pflag.String("listen-address", ":50051", "gRPC listen address")
+	metricsAddr      = pflag.String("metrics-address", ":9090", "Prometheus/health HTTP listen address")
+	serverBundle     = pflag.String("server-cred-bundle", "", "credential bundle (PEM key+chain) presented for serving TLS (required)")
+	clientCAFile     = pflag.String("client-ca-file", "", "CA bundle that caller (injector) client certificates must chain to (required)")
+	nsPolicyFile     = pflag.String("namespace-policy-file", "", "path to the atespace→namespace authorization YAML (required)")
+	logLevel         = pflag.String("log-level", "info", "one of debug, info, warn, error")
+	drainGrace       = pflag.Duration("drain-grace", 5*time.Second, "how long to wait for in-flight RPCs on shutdown before a hard stop")
+	kubeAPIQPS       = pflag.Float32("kube-api-qps", 50, "Sustained queries per second allowed against the Kubernetes API.")
+	kubeAPIBurst     = pflag.Int("kube-api-burst", 100, "Burst queries allowed against the Kubernetes API.")
 )
 
 func main() {
@@ -178,6 +177,11 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		return nil, fmt.Errorf("--client-ca-file is required")
 	}
 
+	id, err := url.Parse(*injectorSPIFFEID)
+	if err != nil || id.Scheme != "spiffe" || id.Host == "" || id.Path == "" || id.User != nil || id.RawQuery != "" || id.ForceQuery || strings.Contains(*injectorSPIFFEID, "#") {
+		return nil, fmt.Errorf("--injector-spiffe-id must be a SPIFFE URI")
+	}
+
 	// Load the client CA pool once so a missing or empty projection fails the
 	// pod promptly; GetConfigForClient below reloads it for every connection.
 	loadPool := credbundle.PoolLoader(*clientCAFile)
@@ -186,7 +190,7 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 	}
 
 	serverCert := credbundle.Loader(*serverBundle)
-	verifySAN := verifyClientSAN(injectorSPIFFEID)
+	verifySAN := verifyClientSAN(*injectorSPIFFEID)
 
 	// GetConfigForClient builds the config anew per connection: a certificate
 	// signed by a newly published CA verifies without a restart.
@@ -206,7 +210,7 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		},
 	}
 	slog.InfoContext(ctx, "verifying caller client certificates",
-		slog.String("ca", *clientCAFile), slog.String("required_san", injectorSPIFFEID))
+		slog.String("ca", *clientCAFile), slog.String("required_san", *injectorSPIFFEID))
 	return credentials.NewTLS(cfg), nil
 }
 

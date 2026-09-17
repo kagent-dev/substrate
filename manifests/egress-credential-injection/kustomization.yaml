@@ -12,5 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Default-deny atespace-to-namespace grants. Secret RBAC is configured separately.
-policies: []
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- k8s-credential-provider.yaml
+
+configMapGenerator:
+- name: k8s-credential-provider-namespace-policy
+  namespace: ate-system
+  files:
+  - namespace-policy.yaml

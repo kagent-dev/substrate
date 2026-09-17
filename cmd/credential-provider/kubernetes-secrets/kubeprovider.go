@@ -27,6 +27,7 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 
 	"google.golang.org/grpc/codes"
@@ -62,7 +63,7 @@ type SecretRef struct {
 	Key string
 }
 
-// ParseURI parses a ate-secret:// URI of the kubernetes.io provider. It
+// ParseURI parses an ate-secret:// URI of the k8s.io provider. It
 // rejects any other scheme or provider name.
 func ParseURI(raw string) (SecretRef, error) {
 	u, err := url.Parse(raw)
@@ -78,15 +79,15 @@ func ParseURI(raw string) (SecretRef, error) {
 	// The grammar is scheme/host/path only; a query or fragment means the caller
 	// assumed a syntax this provider does not honor, so reject it rather than
 	// silently ignore it.
-	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return SecretRef{}, fmt.Errorf("credential URI %q: query and fragment components are not allowed", raw)
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return SecretRef{}, fmt.Errorf("credential URI %q: user info, query, and fragment components are not allowed", raw)
 	}
 	// Reject percent-encoding in the path of secret uri.
 	if u.EscapedPath() != u.Path {
 		return SecretRef{}, fmt.Errorf("credential URI %q: path must not contain percent-encoding", raw)
 	}
 
-	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	for i, s := range segments {
 		if s == "" {
 			return SecretRef{}, fmt.Errorf("credential URI %q: empty path segment %d", raw, i)
@@ -104,11 +105,11 @@ func ParseURI(raw string) (SecretRef, error) {
 	if len(tail) != 3 {
 		return SecretRef{}, fmt.Errorf("credential URI %q: want %s/<namespace>/<secret>/<key>, got %d trailing segments", raw, LocalLocator, len(tail))
 	}
-	return SecretRef{
-		Namespace: tail[0],
-		Name:      tail[1],
-		Key:       tail[2],
-	}, nil
+	ref := SecretRef{Namespace: tail[0], Name: tail[1], Key: tail[2]}
+	if len(validation.IsDNS1123Label(ref.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || len(validation.IsConfigMapKey(ref.Key)) != 0 {
+		return SecretRef{}, fmt.Errorf("credential URI contains an invalid namespace, secret name, or key")
+	}
+	return ref, nil
 }
 
 // Server implements credproviderpb.CredentialProviderServer over the Kubernetes
@@ -118,12 +119,10 @@ type Server struct {
 
 	client kubernetes.Interface
 	// nsAuth restricts which namespaces an atespace may resolve secrets from.
-	// Nil disables authorization (dev only): every URI namespace is allowed.
 	nsAuth *NamespaceAuthorizer
 }
 
-// NewServer builds a Kubernetes-backed credential provider. nsAuth enforces the
-// atespace→namespace policy; pass nil to disable authorization (dev only).
+// NewServer builds a Kubernetes credential provider with a default-deny policy.
 func NewServer(client kubernetes.Interface, nsAuth *NamespaceAuthorizer) *Server {
 	return &Server{client: client, nsAuth: nsAuth}
 }
@@ -154,7 +153,7 @@ func (s *Server) FetchSecret(ctx context.Context, req *credproviderpb.FetchSecre
 		if k8serrors.IsForbidden(err) {
 			return nil, status.Errorf(codes.PermissionDenied, "not permitted to read secret %s/%s", ref.Namespace, ref.Name)
 		}
-		return nil, status.Errorf(codes.Unavailable, "reading secret %s/%s: %v", ref.Namespace, ref.Name, err)
+		return nil, status.Error(codes.Unavailable, "could not read secret from Kubernetes")
 	}
 
 	value, err := selectKey(secret.Data, ref.Key)
@@ -168,9 +167,6 @@ func (s *Server) FetchSecret(ctx context.Context, req *credproviderpb.FetchSecre
 // the attested actor SPIFFE ID and denies unless the URI's namespace is in that
 // atespace's allowed list.
 func (s *Server) authorize(ctx context.Context, actorSpiffeID, namespace string) error {
-	if s.nsAuth == nil {
-		return nil
-	}
 	actor, err := resources.ActorRefFromSPIFFEID(actorSpiffeID)
 	if err != nil {
 		slog.WarnContext(ctx, "credential request denied: unusable actor identity", slog.Any("err", err))
