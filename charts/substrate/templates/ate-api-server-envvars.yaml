@@ -15,11 +15,18 @@ limitations under the License.
 */}}
 
 {{- $secretEnabled := include "substrate.postgres.connectionStringSecretEnabled" . -}}
+{{- $ddlSecretEnabled := include "substrate.postgres.ddlConnectionStringSecretEnabled" . -}}
 {{- if and .Values.postgres.connectionString $secretEnabled }}
 {{- fail "postgres.connectionString and postgres.connectionStringSecretRef are mutually exclusive" }}
 {{- end }}
+{{- if and .Values.postgres.ddlConnectionString $ddlSecretEnabled }}
+{{- fail "postgres.ddlConnectionString and postgres.ddlConnectionStringSecretRef are mutually exclusive" }}
+{{- end }}
 {{- if and (not .Values.postgres.enabled) (empty .Values.postgres.connectionString) (not $secretEnabled) }}
 {{- fail "postgres.connectionString or postgres.connectionStringSecretRef is required when postgres.enabled=false" }}
+{{- end }}
+{{- if and (or .Values.postgres.ddlConnectionString $ddlSecretEnabled) (empty .Values.postgres.connectionString) (not $secretEnabled) }}
+{{- fail "postgres.connectionString or postgres.connectionStringSecretRef is required when a DDL connection is configured" }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap
@@ -29,5 +36,8 @@ metadata:
 data:
   {{- if not $secretEnabled }}
   ATE_API_POSTGRES_CONNECTION_STRING: {{ .Values.postgres.connectionString | default (printf "postgresql://postgres@%s.%s.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem" (include "substrate.fullname" (list "postgres" .)) .Release.Namespace) | quote }}
+  {{- end }}
+  {{- if and .Values.postgres.ddlConnectionString (not $ddlSecretEnabled) }}
+  ATE_API_POSTGRES_DDL_CONNECTION_STRING: {{ .Values.postgres.ddlConnectionString | quote }}
   {{- end }}
   ATE_API_POSTGRES_SCHEMA: {{ .Values.postgres.schema | quote }}

@@ -84,6 +84,12 @@ Plaintext HTTP URL that clients use to reach atenet-router.
 {{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
 {{- end -}}
 
+{{/* PostgreSQL DDL connection Secret, when configured. */}}
+{{- define "substrate.postgres.ddlConnectionStringSecretEnabled" -}}
+{{- $ref := .Values.postgres.ddlConnectionStringSecretRef | default dict -}}
+{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- end -}}
+
 {{/*
 OTLP endpoint a signal exports to, or empty when the signal is disabled or no
 endpoint resolves. The per-signal endpoint wins over the generic one, matching

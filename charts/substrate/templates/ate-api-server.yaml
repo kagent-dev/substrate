@@ -85,6 +85,7 @@ spec:
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
         - "--postgres-connection-string=@env"
+        - "--postgres-ddl-connection-string=@env"
         - "--postgres-schema=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
@@ -104,6 +105,14 @@ spec:
             secretKeyRef:
               name: {{ get $connectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
               key: {{ get $connectionStringSecretRef "key" | default "connectionString" | quote }}
+{{- end }}
+{{- $ddlConnectionStringSecretRef := .Values.postgres.ddlConnectionStringSecretRef }}
+{{- if include "substrate.postgres.ddlConnectionStringSecretEnabled" . }}
+        - name: ATE_API_POSTGRES_DDL_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ get $ddlConnectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              key: {{ get $ddlConnectionStringSecretRef "key" | default "ddlConnectionString" | quote }}
 {{- end }}
         - name: POD_NAME
           valueFrom:

@@ -36,8 +36,10 @@ See `values.yaml` for the full set; the important keys:
 | Key | Default | Notes |
 |-----|---------|-------|
 | `postgres.enabled` | `true` | Deploy the bundled PostgreSQL instance |
-| `postgres.connectionString` | `""` (in-cluster) | Override to use external PostgreSQL |
-| `postgres.connectionStringSecretRef` | disabled | Read an external PostgreSQL connection string from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
+| `postgres.connectionString` | `""` (in-cluster) | Runtime/DML connection for external PostgreSQL |
+| `postgres.connectionStringSecretRef` | disabled | Read the runtime/DML connection from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
+| `postgres.ddlConnectionString` | `""` (runtime connection) | Optional schema-owner connection for migrations and maintenance |
+| `postgres.ddlConnectionStringSecretRef` | disabled | Read the optional schema-owner connection string from a Secret |
 | `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |

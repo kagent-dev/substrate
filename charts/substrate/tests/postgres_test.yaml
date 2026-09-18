@@ -42,6 +42,21 @@ tests:
       path: data.ATE_API_POSTGRES_SCHEMA
       value: substrate
 
+- it: configures separate runtime and DDL connection strings
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      connectionString: postgresql://runtime@database:5432/agents
+      ddlConnectionString: postgresql://owner@database:5432/agents
+  asserts:
+  - equal:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+      value: postgresql://runtime@database:5432/agents
+  - equal:
+      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
+      value: postgresql://owner@database:5432/agents
+
 - it: omits bundled PostgreSQL for an external connection
   template: postgres.yaml
   set:
@@ -70,6 +85,39 @@ tests:
           secretKeyRef:
             name: shared-database
             key: url
+
+- it: reads separate runtime and DDL connections from a Secret
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        name: substrate-database
+        key: runtimeUrl
+      ddlConnectionStringSecretRef:
+        name: substrate-database
+        key: ddlUrl
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@env
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_CONNECTION_STRING
+        valueFrom:
+          secretKeyRef:
+            name: substrate-database
+            key: runtimeUrl
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_DDL_CONNECTION_STRING
+        valueFrom:
+          secretKeyRef:
+            name: substrate-database
+            key: ddlUrl
 
 - it: derives a release-scoped Secret name when enabled
   template: ate-api-server.yaml
@@ -123,3 +171,24 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: postgres.connectionString and postgres.connectionStringSecretRef are mutually exclusive
+
+- it: rejects a DDL connection without an explicit runtime connection
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      ddlConnectionString: postgresql://owner@database:5432/agents
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.connectionString or postgres.connectionStringSecretRef is required when a DDL connection is configured
+
+- it: rejects both a literal and Secret-backed DDL connection
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      connectionString: postgresql://runtime@database:5432/agents
+      ddlConnectionString: postgresql://owner@database:5432/agents
+      ddlConnectionStringSecretRef:
+        name: substrate-database
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.ddlConnectionString and postgres.ddlConnectionStringSecretRef are mutually exclusive
