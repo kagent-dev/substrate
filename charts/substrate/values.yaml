@@ -26,7 +26,20 @@ createNamespace: false
 postgres:
   enabled: true
   storageSize: 1Gi
+  # Runtime/DML connection. Also used for DDL when no DDL connection is set.
   connectionString: ""
+  # Read the connection string from a Secret instead of values/ConfigMap.
+  connectionStringSecretRef:
+    # When enabled with no name, use the release-scoped postgres-connection name.
+    enabled: false
+    name: ""
+    key: connectionString
+  # Optional DDL and maintenance connection. Defaults to connectionString.
+  ddlConnectionString: ""
+  ddlConnectionStringSecretRef:
+    enabled: false
+    name: ""
+    key: ddlConnectionString
   schema: public
   resources:
     requests:

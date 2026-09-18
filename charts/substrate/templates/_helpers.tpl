@@ -78,6 +78,18 @@ Plaintext HTTP URL that clients use to reach atenet-router.
 {{- printf "http://%s.%s.svc:80" (include "substrate.fullname" (list "atenet-router" .)) .Release.Namespace -}}
 {{- end -}}
 
+{{/* PostgreSQL connection Secret, when configured. */}}
+{{- define "substrate.postgres.connectionStringSecretEnabled" -}}
+{{- $ref := .Values.postgres.connectionStringSecretRef | default dict -}}
+{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- end -}}
+
+{{/* PostgreSQL DDL connection Secret, when configured. */}}
+{{- define "substrate.postgres.ddlConnectionStringSecretEnabled" -}}
+{{- $ref := .Values.postgres.ddlConnectionStringSecretRef | default dict -}}
+{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- end -}}
+
 {{/*
 OTLP endpoint a signal exports to, or empty when the signal is disabled or no
 endpoint resolves. The per-signal endpoint wins over the generic one, matching
