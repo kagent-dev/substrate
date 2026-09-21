@@ -275,7 +275,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 						}
 						for _, route := range listener.Routes {
 							for _, provider := range route.Policies.SubstrateEgress.CredentialProviders {
-								providers[listener.Protocol]++
+								providers[listener.Protocol+" "+provider.URIAuthority]++
 								if listener.Protocol == "HTTPS" {
 									if listener.TLS.Mode != "dynamicCa" || listener.TLS.Cert != "/run/egress-mitm/tls.crt" || listener.TLS.Key != "/run/egress-mitm/tls.key" {
 										t.Fatal("incorrect MITM configuration")
@@ -286,7 +286,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 								} else if listener.Protocol != "HTTP" {
 									t.Fatalf("credentials enabled on unexpected protocol %q", listener.Protocol)
 								}
-								if provider.URIAuthority != "kubernetes.io" || provider.Target.Host != tc.host {
+								if provider.Target.Host != tc.host {
 									t.Fatalf("incorrect provider: %+v", provider)
 								}
 								tls := provider.Target.Policies.BackendTLS
@@ -298,8 +298,16 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 					}
 				}
 			}
-			if providers["HTTP"] != 1 || providers["HTTPS"] != 1 {
-				t.Fatalf("providers=%v, want one per HTTP/HTTPS route", providers)
+			// Both provider names route to the one Deployment, on both routes.
+			for _, protocol := range []string{"HTTP", "HTTPS"} {
+				for _, authority := range []string{ProviderName, GoogleAccessTokenProviderName} {
+					if providers[protocol+" "+authority] != 1 {
+						t.Fatalf("providers=%v, want one %s provider on the %s route", providers, authority, protocol)
+					}
+				}
+			}
+			if len(providers) != 4 {
+				t.Fatalf("providers=%v, want exactly the two provider names per route", providers)
 			}
 			if mitmMounts != 1 || mitmVolumes != 1 || passthroughListeners != 0 {
 				t.Fatalf("MITM mounts=%d volumes=%d passthrough listeners=%d", mitmMounts, mitmVolumes, passthroughListeners)

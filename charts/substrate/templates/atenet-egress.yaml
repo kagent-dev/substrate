@@ -74,15 +74,20 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+              # One Deployment serves both provider names: kubernetes.io returns
+              # the Secret value and google-access-token.kubernetes.io returns a
+              # Google access token minted from the service account key it holds.
               credentialProviders:
-              - uriAuthority: kubernetes.io
+              {{- range (list "kubernetes.io" "google-access-token.kubernetes.io") }}
+              - uriAuthority: {{ . }}
                 target:
-                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
+                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" $) }}.{{ $.Release.Namespace }}.svc:50051
                   policies:
                     backendTLS:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+              {{- end }}
       - protocol: HTTP
         routes:
         - backends:
@@ -96,15 +101,20 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+              # One Deployment serves both provider names: kubernetes.io returns
+              # the Secret value and google-access-token.kubernetes.io returns a
+              # Google access token minted from the service account key it holds.
               credentialProviders:
-              - uriAuthority: kubernetes.io
+              {{- range (list "kubernetes.io" "google-access-token.kubernetes.io") }}
+              - uriAuthority: {{ . }}
                 target:
-                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
+                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" $) }}.{{ $.Release.Namespace }}.svc:50051
                   policies:
                     backendTLS:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+              {{- end }}
       - protocol: TCP
         tcpRoutes:
         - backends:

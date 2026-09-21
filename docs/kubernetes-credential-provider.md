@@ -12,6 +12,12 @@ The provider reads Kubernetes on every fetch and never persists or logs values.
 AGW caches successful credentials per actor and URI for five minutes, so rotation
 can take that long to reach injected requests.
 
+The same Deployment serves a second provider name for Google Cloud.
+`ate-secret://google-access-token.kubernetes.io/team-a-secrets/vertex/credentials.json`
+resolves the same entry, requires it to hold a Google service account key in JSON
+form, and returns an OAuth 2.0 access token for that service account instead of the
+key. See [Google access tokens](#google-access-tokens).
+
 Each request requires a trusted injector certificate with the configured SPIFFE
 identity, an explicit atespace-to-namespace grant for the attested actor, and
 Kubernetes `get` permission for the provider's ServiceAccount. Both installers
@@ -73,6 +79,36 @@ Its generated ConfigMap name changes with the policy, rolling the provider on
 reapplication. Direct ConfigMap edits require a rollout restart: policy and client
 CA files are loaded at startup. Serving certificates rotate through the existing
 certificate loader.
+
+## Google access tokens
+
+Google APIs, Vertex AI among them, accept OAuth 2.0 access tokens rather than
+service account keys, and minting one means signing a JWT with the key's private
+key. The `google-access-token.kubernetes.io` provider name does that inside the
+provider, so the key stays in the cluster and actors receive a token that expires
+within the hour. Set the injection header to `authorization` with prefix `Bearer `.
+
+On each fetch the provider reads the Secret, signs the key's JWT assertion and
+exchanges it at the key's `token_uri` (`https://oauth2.googleapis.com/token` for
+keys Google issues) for a token scoped to
+`https://www.googleapis.com/auth/cloud-platform`. The service account's IAM roles
+decide what the token may do. The `token_uri` has to be an HTTPS URL, and the Pod
+has to be able to reach it; the provider honors `HTTPS_PROXY` in its environment.
+
+Tokens live one hour. The provider caches each token per key and hands it out
+while at least fifteen minutes remain, which keeps AGW's five-minute cache from
+serving an expired token and exchanges a key about once every 45 minutes.
+Concurrent fetches of one key share a single exchange. The cache is keyed on the
+Secret's contents, so a rotated key is exchanged on its next fetch. A Secret that
+does not hold a service account key, or a key Google rejects, fails the fetch with
+`FAILED_PRECONDITION` naming the reason; an unreachable token endpoint fails it
+with `UNAVAILABLE`. The private key and the token are never logged.
+
+Authorization is unchanged: the injector identity, the atespace-to-namespace
+grant and the provider's Secret RBAC apply to both provider names. The
+agentgateway data plane routes both names to this Deployment. The Envoy data
+plane's `--credential-provider-name` flag names one provider, so it serves only
+the name it is given.
 
 ## Configure injection
 

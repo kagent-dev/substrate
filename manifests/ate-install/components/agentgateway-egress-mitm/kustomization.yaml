@@ -72,8 +72,19 @@ patches:
                         cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         root: /run/servicedns-ca/trust-bundle.pem
+                    # One Deployment serves both provider names: kubernetes.io returns
+                    # the Secret value and google-access-token.kubernetes.io returns a
+                    # Google access token minted from the service account key it holds.
                     credentialProviders:
                     - uriAuthority: kubernetes.io
+                      target:
+                        host: k8s-credential-provider.ate-system.svc:50051
+                        policies:
+                          backendTLS:
+                            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                            root: /run/servicedns-ca/trust-bundle.pem
+                    - uriAuthority: google-access-token.kubernetes.io
                       target:
                         host: k8s-credential-provider.ate-system.svc:50051
                         policies:
@@ -94,8 +105,19 @@ patches:
                         cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         root: /run/servicedns-ca/trust-bundle.pem
+                    # One Deployment serves both provider names: kubernetes.io returns
+                    # the Secret value and google-access-token.kubernetes.io returns a
+                    # Google access token minted from the service account key it holds.
                     credentialProviders:
                     - uriAuthority: kubernetes.io
+                      target:
+                        host: k8s-credential-provider.ate-system.svc:50051
+                        policies:
+                          backendTLS:
+                            cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                            key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+                            root: /run/servicedns-ca/trust-bundle.pem
+                    - uriAuthority: google-access-token.kubernetes.io
                       target:
                         host: k8s-credential-provider.ate-system.svc:50051
                         policies:
