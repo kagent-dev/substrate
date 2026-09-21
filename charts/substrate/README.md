@@ -49,11 +49,11 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.extraArgs` | `[]` | Additional command-line arguments appended to the ateapi defaults |
-| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics and the router access log |
+| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics, the actor lifecycle events and the router access log |
 | `otel.traces.enabled` | `true` | Set to `false` to export no traces from the router; the Go components do not honor this yet |
 | `otel.traces.endpoint` | `""` | OTLP endpoint for traces, overriding `otel.endpoint` |
 | `otel.traces.samplingRatio` | `0.01` | Fraction of parentless requests that start a trace, applied to the Go components and the router |
 | `otel.metrics.enabled` | `true` | Sets the OTLP metrics exporter to `none`; the Go components do not honor this yet |
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
-| `otel.logs.enabled` | `true` | Set to `false` to export no logs; the router access log is the only OTLP log source today |
+| `otel.logs.enabled` | `true` | Set to `false` to export no logs. Gates both OTLP log sources: ateapi's actor lifecycle events and the router access log |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |

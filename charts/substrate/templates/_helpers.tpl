@@ -124,6 +124,14 @@ Usage:
   value: {{ $cfg.endpoint | quote }}
 {{- end }}
 {{- end }}
+{{- if include "substrate.otel.signalEndpoint" (list "logs" .) }}
+{{- /* Only logs need turning on: serverboot defaults the component to none, so
+       an enabled signal exports nothing without this. Traces and metrics always
+       export, so they need no such branch -- keep this out of the range above.
+       Gated on an endpoint, since otlp without one retries localhost:4317. */}}
+- name: OTEL_LOGS_EXPORTER
+  value: otlp
+{{- end }}
 {{- if include "substrate.otel.signalEndpoint" (list "traces" .) }}
 - name: OTEL_TRACES_SAMPLER
   value: parentbased_traceidratio
