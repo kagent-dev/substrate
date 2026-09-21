@@ -60,6 +60,9 @@ ateApi:
 
 # Kubernetes Secret provider and AGW HTTP/HTTPS credential injection.
 # Includes get-only Secret RBAC. HTTPS requires egress-mitm-ca-pool and actor trust.
+# The provider also mints Google access tokens from service account key Secrets
+# (ate-secret://google-access-token.kubernetes.io/...), for which its Pod has to
+# reach the key's token endpoint, https://oauth2.googleapis.com by default.
 credentialProvider:
   namespacePolicies: []
   # - atespace: team-a

@@ -14,9 +14,11 @@
 
 // Command kubernetes-secrets is the Kubernetes-Secrets credential-provider
 // plugin: a gRPC service that resolves ate-secret:// URIs of the kubernetes.io
-// provider to Kubernetes Secret values. It is the only component in the egress
-// credential-injection path with Kubernetes access; the egress gateway and its
-// injector never read Secrets directly.
+// provider to Kubernetes Secret values, and URIs of the
+// google-access-token.kubernetes.io provider to Google access tokens minted
+// from the service account keys those Secrets hold. It is the only component
+// in the egress credential-injection path with Kubernetes access; the egress
+// gateway and its injector never read Secrets directly.
 package main
 
 import (
