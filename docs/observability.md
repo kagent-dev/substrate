@@ -178,7 +178,7 @@ The counter carries the same reason but no actor identity, so this record is the
 
 #### The same records over OTLP
 
-Both records also go out as OTLP log events, so a collector reads them without knowing substrate's stdout envelope. Set `OTEL_LOGS_EXPORTER=otlp` to turn it on; unset means `none`, which is what every environment but kind uses today. Only ateapi has a LoggerProvider — a worker pod cannot export a log record at all yet, because [the ateom relay](#the-ateom-otlp-relay) carries traces and metrics only.
+Both records also go out as OTLP log events, so a collector reads them without knowing substrate's stdout envelope. Set `OTEL_LOGS_EXPORTER=otlp` to turn it on; unset means `none`. The kind overlay sets it, and a chart install gets it from `otel.logs.enabled` once `otel.endpoint` resolves. Only ateapi has a LoggerProvider — a worker pod cannot export a log record at all yet, because [the ateom relay](#the-ateom-otlp-relay) carries traces and metrics only.
 
 Two `event.name` values, which is the OTLP LogRecord's own field rather than an attribute:
 
@@ -405,7 +405,7 @@ Telemetry is emitted the same way everywhere; only the backend differs between a
 | Path | service → in-cluster `opentelemetry-collector` | service → Google Managed Prometheus (GMP) |
 | Metrics | collector Prometheus exporter on `:8889` | Google Cloud Monitoring |
 | Traces | Jaeger UI | Google Cloud Trace |
-| Logs | pod stdout; ateapi's [actor lifecycle events](#the-same-records-over-otlp) also to the collector's `debug` exporter | pod stdout. No OTLP logs: `OTEL_LOGS_EXPORTER` is unset |
+| Logs | pod stdout; ateapi's [actor lifecycle events](#the-same-records-over-otlp) also to the collector's `debug` exporter | pod stdout. No OTLP logs unless `OTEL_LOGS_EXPORTER` is set |
 | Dashboards | Not supported | Google Cloud Monitoring (see [Dashboards](#5-dashboards)) |
 
 > In Kind, `ateapi`, `atelet`, `ate-controller`, and `atenet-router` are pointed at the in-cluster collector, and the controller propagates the endpoint to the ateom worker pods it creates, so all component telemetry lands locally.
