@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- $connectionStringSecretRef := .Values.postgres.connectionStringSecretRef -}}
+{{- $connectionStringSecretEnabled := include "substrate.postgres.connectionStringSecretEnabled" . -}}
+{{- $ddlConnectionStringSecretRef := .Values.postgres.ddlConnectionStringSecretRef -}}
+{{- $ddlConnectionStringSecretEnabled := include "substrate.postgres.ddlConnectionStringSecretEnabled" . -}}
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -84,9 +89,20 @@ spec:
         - "--grpc-listen-addr=0.0.0.0:443"
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
+{{- if $connectionStringSecretEnabled }}
+        - "--postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string"
+{{- else }}
         - "--postgres-connection-string=@env"
+{{- end }}
+{{- if $ddlConnectionStringSecretEnabled }}
+        - "--postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string"
+{{- else if .Values.postgres.ddlConnectionString }}
         - "--postgres-ddl-connection-string=@env"
+{{- end }}
         - "--postgres-schema=@env"
+{{- with .Values.postgres.pool.maxConnLifetime }}
+        - {{ printf "--postgres-max-conn-lifetime=%s" . | quote }}
+{{- end }}
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--egress-gateway-address={{ include "substrate.fullname" (list "atenet-egress" .) }}.{{ .Release.Namespace }}.svc:443"
@@ -98,22 +114,6 @@ spec:
 {{ toYaml . | indent 8 }}
 {{- end }}
         env:
-{{- $connectionStringSecretRef := .Values.postgres.connectionStringSecretRef }}
-{{- if include "substrate.postgres.connectionStringSecretEnabled" . }}
-        - name: ATE_API_POSTGRES_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: {{ get $connectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
-              key: {{ get $connectionStringSecretRef "key" | default "connectionString" | quote }}
-{{- end }}
-{{- $ddlConnectionStringSecretRef := .Values.postgres.ddlConnectionStringSecretRef }}
-{{- if include "substrate.postgres.ddlConnectionStringSecretEnabled" . }}
-        - name: ATE_API_POSTGRES_DDL_CONNECTION_STRING
-          valueFrom:
-            secretKeyRef:
-              name: {{ get $ddlConnectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
-              key: {{ get $ddlConnectionStringSecretRef "key" | default "ddlConnectionString" | quote }}
-{{- end }}
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -155,6 +155,16 @@ spec:
         - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
         - { name: podidentity,         mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
         - { name: authentication-config, mountPath: /etc/ateapi/authentication, readOnly: true }
+{{- if $connectionStringSecretEnabled }}
+        - name: postgres-runtime-connection
+          mountPath: /etc/ateapi/postgres/runtime
+          readOnly: true
+{{- end }}
+{{- if $ddlConnectionStringSecretEnabled }}
+        - name: postgres-ddl-connection
+          mountPath: /etc/ateapi/postgres/ddl
+          readOnly: true
+{{- end }}
         ports:
         - containerPort: 443
         - name: prometheus
@@ -216,6 +226,26 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+{{- if $connectionStringSecretEnabled }}
+      - name: postgres-runtime-connection
+        projected:
+          sources:
+          - secret:
+              name: {{ get $connectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              items:
+              - key: {{ get $connectionStringSecretRef "key" | default "connectionString" | quote }}
+                path: connection-string
+{{- end }}
+{{- if $ddlConnectionStringSecretEnabled }}
+      - name: postgres-ddl-connection
+        projected:
+          sources:
+          - secret:
+              name: {{ get $ddlConnectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              items:
+              - key: {{ get $ddlConnectionStringSecretRef "key" | default "ddlConnectionString" | quote }}
+                path: connection-string
+{{- end }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

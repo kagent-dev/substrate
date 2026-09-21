@@ -40,6 +40,10 @@ postgres:
     enabled: false
     name: ""
     key: ddlConnectionString
+  pool:
+    # Bounds how long established connections can keep an old credential.
+    # Leave empty to use the upstream pgx default.
+    maxConnLifetime: ""
   schema: public
   resources:
     requests:

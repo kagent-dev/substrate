@@ -27,6 +27,25 @@ tests:
       path: data.ATE_API_POSTGRES_SCHEMA
       value: public
 
+- it: uses the static runtime source and no DDL override by default
+  template: ate-api-server.yaml
+  documentIndex: 3
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-connection-string=@env
+  - notContains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@env
+  - notContains:
+      path: spec.template.spec.volumes
+      content:
+        name: postgres-runtime-connection
+  - notContains:
+      path: spec.template.spec.volumes
+      content:
+        name: postgres-ddl-connection
+
 - it: configures an external PostgreSQL connection string and schema
   template: ate-api-server-envvars.yaml
   set:
@@ -67,7 +86,7 @@ tests:
   - hasDocuments:
       count: 0
 
-- it: reads an explicitly named connection Secret
+- it: mounts an explicitly named runtime connection Secret
   template: ate-api-server.yaml
   documentIndex: 3
   set:
@@ -78,15 +97,36 @@ tests:
         key: url
   asserts:
   - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
+  - notContains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@env
+  - notContains:
       path: spec.template.spec.containers[0].env
       content:
         name: ATE_API_POSTGRES_CONNECTION_STRING
-        valueFrom:
-          secretKeyRef:
-            name: shared-database
-            key: url
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: postgres-runtime-connection
+        mountPath: /etc/ateapi/postgres/runtime
+        readOnly: true
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-runtime-connection")].subPath
+  - contains:
+      path: spec.template.spec.volumes
+      content:
+        name: postgres-runtime-connection
+        projected:
+          sources:
+          - secret:
+              name: shared-database
+              items:
+              - key: url
+                path: connection-string
 
-- it: reads separate runtime and DDL connections from a Secret
+- it: mounts separate runtime and DDL keys from one Secret
   template: ate-api-server.yaml
   documentIndex: 3
   set:
@@ -101,23 +141,148 @@ tests:
   asserts:
   - contains:
       path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@env
+      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
   - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string
+  - notContains:
       path: spec.template.spec.containers[0].env
       content:
         name: ATE_API_POSTGRES_CONNECTION_STRING
-        valueFrom:
-          secretKeyRef:
-            name: substrate-database
-            key: runtimeUrl
-  - contains:
+  - notContains:
       path: spec.template.spec.containers[0].env
       content:
         name: ATE_API_POSTGRES_DDL_CONNECTION_STRING
-        valueFrom:
-          secretKeyRef:
-            name: substrate-database
-            key: ddlUrl
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: postgres-runtime-connection
+        mountPath: /etc/ateapi/postgres/runtime
+        readOnly: true
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: postgres-ddl-connection
+        mountPath: /etc/ateapi/postgres/ddl
+        readOnly: true
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-runtime-connection")].subPath
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-ddl-connection")].subPath
+  - contains:
+      path: spec.template.spec.volumes
+      content:
+        name: postgres-runtime-connection
+        projected:
+          sources:
+          - secret:
+              name: substrate-database
+              items:
+              - key: runtimeUrl
+                path: connection-string
+  - contains:
+      path: spec.template.spec.volumes
+      content:
+        name: postgres-ddl-connection
+        projected:
+          sources:
+          - secret:
+              name: substrate-database
+              items:
+              - key: ddlUrl
+                path: connection-string
+
+- it: mounts runtime and DDL connections from different Secrets
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        name: runtime-database
+        key: url
+      ddlConnectionStringSecretRef:
+        name: ddl-database
+        key: url
+  asserts:
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-runtime-connection")].projected.sources[0].secret.name
+      value: runtime-database
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-ddl-connection")].projected.sources[0].secret.name
+      value: ddl-database
+
+- it: supports a runtime Secret with an inline DDL connection
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        name: runtime-database
+      ddlConnectionString: postgresql://owner@database:5432/agents
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@env
+
+- it: keeps only inline DDL credentials in the ConfigMap for mixed mode
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      connectionStringSecretRef:
+        name: runtime-database
+      ddlConnectionString: postgresql://owner@database:5432/agents
+  asserts:
+  - notExists:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+  - equal:
+      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
+      value: postgresql://owner@database:5432/agents
+
+- it: supports an inline runtime connection with a DDL Secret
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      connectionString: postgresql://runtime@database:5432/agents
+      ddlConnectionStringSecretRef:
+        name: ddl-database
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-connection-string=@env
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: postgres-ddl-connection
+        mountPath: /etc/ateapi/postgres/ddl
+        readOnly: true
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-ddl-connection")].subPath
+
+- it: keeps only inline runtime credentials in the ConfigMap for mixed mode
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      connectionString: postgresql://runtime@database:5432/agents
+      ddlConnectionStringSecretRef:
+        name: ddl-database
+  asserts:
+  - equal:
+      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+      value: postgresql://runtime@database:5432/agents
+  - notExists:
+      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
 
 - it: derives a release-scoped Secret name when enabled
   template: ate-api-server.yaml
@@ -129,13 +294,16 @@ tests:
         enabled: true
   asserts:
   - contains:
-      path: spec.template.spec.containers[0].env
+      path: spec.template.spec.volumes
       content:
-        name: ATE_API_POSTGRES_CONNECTION_STRING
-        valueFrom:
-          secretKeyRef:
-            name: RELEASE-NAME-postgres-connection
-            key: connectionString
+        name: postgres-runtime-connection
+        projected:
+          sources:
+          - secret:
+              name: RELEASE-NAME-postgres-connection
+              items:
+              - key: connectionString
+                path: connection-string
 
 - it: keeps credentials out of the ConfigMap in Secret mode
   template: ate-api-server-envvars.yaml
@@ -151,6 +319,18 @@ tests:
   - equal:
       path: data.ATE_API_POSTGRES_SCHEMA
       value: substrate
+
+- it: configures the maximum connection lifetime
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      pool:
+        maxConnLifetime: 10m
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-max-conn-lifetime=10m
 
 - it: rejects disabling bundled PostgreSQL without a connection
   template: ate-api-server-envvars.yaml

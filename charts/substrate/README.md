@@ -40,6 +40,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.connectionStringSecretRef` | disabled | Read the runtime/DML connection from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
 | `postgres.ddlConnectionString` | `""` (runtime connection) | Optional schema-owner connection for migrations and maintenance |
 | `postgres.ddlConnectionStringSecretRef` | disabled | Read the optional schema-owner connection string from a Secret |
+| `postgres.pool.maxConnLifetime` | `""` (pgx default) | Maximum physical connection lifetime; bounds Secret credential turnover |
 | `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
@@ -54,3 +55,16 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Set to `false` to export no logs; the router access log is the only OTLP log source today |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+
+## PostgreSQL credential rotation
+
+Secret-backed connection strings are mounted as projected files. Kubernetes
+updates these files when the Secret changes, and Substrate reads the current
+value when it opens a new physical connection. Inline connection strings are
+static until the pod restarts.
+
+`postgres.pool.maxConnLifetime` bounds how long established connections may
+continue using an old credential; rotation is not immediate. Keep old and new
+credentials valid long enough for Kubernetes projection and connection
+turnover. The host, port, database, user, and fallback targets must remain the
+same during rotation; changing any of them requires a restart.
