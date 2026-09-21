@@ -435,7 +435,8 @@ for a worked example.
 
 **Substrate exports one thing over OTLP: the actor lifecycle events**, from
 ateapi, through `serverboot.InitLogging`. They are off unless
-`OTEL_LOGS_EXPORTER=otlp` is set, which only the kind overlay does today. See
+`OTEL_LOGS_EXPORTER=otlp` is set. The kind overlay sets it, and the Helm chart
+sets it from `otel.logs.enabled` once `otel.endpoint` resolves. See
 [the same records over OTLP](../../observability.md#the-same-records-over-otlp).
 
 Everything else is stdout. `serverboot.InitLogger` writes structured JSON there,

@@ -77,7 +77,8 @@ ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 # traces.enabled and metrics.enabled set OTEL_<SIGNAL>_EXPORTER=none on the
 # Go components, which do not read it yet and keep exporting; the setting
 # takes effect on the router's agentgateway only. logs.enabled works in full,
-# since the agentgateway access log is the only OTLP log source.
+# and gates both OTLP log sources: ateapi's actor lifecycle events and the
+# router's agentgateway access log.
 otel:
   endpoint: ""
   traces:
