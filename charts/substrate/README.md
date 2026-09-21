@@ -19,6 +19,11 @@ By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
 using the chart `appVersion` as the tag. Override `image.registry` and
 `image.tag` to install from a different image repository or tag.
 
+The chart installs the Kubernetes credential provider and enables HTTPS egress
+interception. Create the `egress-mitm-ca-pool` Secret and configure actor trust
+as described in the [credential provider setup](../../docs/kubernetes-credential-provider.md).
+Namespace grants default to an empty list, denying credential access.
+
 ## Render manifests without applying
 
 ```bash
@@ -46,14 +51,15 @@ See `values.yaml` for the full set; the important keys:
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
+| `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.extraArgs` | `[]` | Additional command-line arguments appended to the ateapi defaults |
-| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics and the router access log |
+| `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics, the actor lifecycle events and the router access log |
 | `otel.traces.enabled` | `true` | Set to `false` to export no traces from the router; the Go components do not honor this yet |
 | `otel.traces.endpoint` | `""` | OTLP endpoint for traces, overriding `otel.endpoint` |
 | `otel.traces.samplingRatio` | `0.01` | Fraction of parentless requests that start a trace, applied to the Go components and the router |
 | `otel.metrics.enabled` | `true` | Sets the OTLP metrics exporter to `none`; the Go components do not honor this yet |
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
-| `otel.logs.enabled` | `true` | Set to `false` to export no logs; the router access log is the only OTLP log source today |
+| `otel.logs.enabled` | `true` | Set to `false` to export no logs. Gates both OTLP log sources: ateapi's actor lifecycle events and the router access log |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
 
 ## PostgreSQL credential rotation

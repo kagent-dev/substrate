@@ -15,8 +15,6 @@
 package controlapi
 
 import (
-	"time"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -25,8 +23,7 @@ import (
 )
 
 const (
-	byNamespaceAndName = "by-namespace-and-name"
-	byNode             = "by-node"
+	byNode = "by-node"
 )
 
 // AteletInformer creates a SharedInformerFactory and SharedIndexInformer for
@@ -46,23 +43,4 @@ func AteletInformer(kc kubernetes.Interface, ateletNamespace string) (informers.
 		},
 	})
 	return factory, ateletInformer
-}
-
-// WorkerPodInformer creates a SharedInformerFactory and SharedIndexInformer for Worker pods.
-func WorkerPodInformer(kc kubernetes.Interface) (informers.SharedInformerFactory, cache.SharedIndexInformer) {
-	factory := informers.NewSharedInformerFactoryWithOptions(kc, 5*time.Minute,
-		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
-			options.LabelSelector = "ate.dev/worker-pool"
-		}),
-	)
-	workerPodInformer := factory.Core().V1().Pods().Informer()
-	workerPodInformer.AddIndexers(cache.Indexers{
-		byNamespaceAndName: func(obj any) ([]string, error) {
-			pod := obj.(*corev1.Pod)
-			key := pod.ObjectMeta.Namespace + "/" + pod.ObjectMeta.Name
-			return []string{key}, nil
-		},
-	})
-
-	return factory, workerPodInformer
 }

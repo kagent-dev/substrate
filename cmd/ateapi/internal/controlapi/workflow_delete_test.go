@@ -170,6 +170,7 @@ func TestEnsureMarkedDeleting_StateMatrix(t *testing.T) {
 				ateapipb.ActorState_ACTOR_STATE_PAUSED:      true,
 				ateapipb.ActorState_ACTOR_STATE_SUSPENDED:   true,
 				ateapipb.ActorState_ACTOR_STATE_CRASHED:     true,
+				ateapipb.ActorState_ACTOR_STATE_REVERTING:   true,
 				ateapipb.ActorState_ACTOR_STATE_DELETING:    true, // skipped
 			},
 		},

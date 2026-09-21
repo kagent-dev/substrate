@@ -38,6 +38,8 @@ PRESERVED_FILES=(
   atenet-egress-with-sdsmint.yaml
   atenet-router.yaml
   atenet-router-monitoring.yaml
+  # The provider's upstream manifest lives in manifests/egress-credential-injection.
+  k8s-credential-provider.yaml
   pod-certificate-controller.yaml
   postgres.yaml
   sandboxconfig-gvisor.yaml
@@ -60,7 +62,8 @@ helm template substrate "${CHART_DIR}" \
   --namespace ate-system \
   --set auth.mode=mtls \
   --set createNamespace=true \
-  --set image.registry=ko://github.com/agent-substrate/substrate/cmd \
+  --set image.registry=ko://github.com \
+  --set image.repository=agent-substrate/substrate/cmd \
   --set image.tag="<none>" \
   > "${TMP_DIR}/all.yaml"
 

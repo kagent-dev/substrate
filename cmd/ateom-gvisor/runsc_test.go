@@ -53,8 +53,8 @@ esac
 	}
 	r := &runsc{path: path, actorUID: "test-actor"}
 	containers := []*ateompb.Container{{Name: "counter"}}
-	r.stopContainers(context.Background(), containers)
-	if err := r.cleanupContainers(context.Background(), containers); err != nil {
+	stopContainers(context.Background(), r, containers)
+	if err := cleanupContainers(context.Background(), r, containers); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path + ".stopped"); err != nil {
