@@ -100,6 +100,12 @@ spec:
 {{- else if .Values.postgres.ddlConnectionString }}
         - "--postgres-ddl-connection-string=@env"
 {{- end }}
+{{- with .Values.postgres.runtimeRole }}
+        - {{ printf "--postgres-runtime-role=%s" . | quote }}
+{{- end }}
+{{- with .Values.postgres.ddlRole }}
+        - {{ printf "--postgres-ddl-role=%s" . | quote }}
+{{- end }}
         - "--postgres-schema=@env"
 {{- with .Values.postgres.pool.maxConnLifetime }}
         - {{ printf "--postgres-max-conn-lifetime=%s" . | quote }}

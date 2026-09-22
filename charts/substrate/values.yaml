@@ -40,6 +40,12 @@ postgres:
     enabled: false
     name: ""
     key: ddlConnectionString
+  # Stable NOLOGIN role assumed by runtime connections. Set this when rotated
+  # credentials may change the login username.
+  runtimeRole: ""
+  # Stable NOLOGIN role assumed by DDL connections. When the DDL connection is
+  # omitted, this defaults to runtimeRole.
+  ddlRole: ""
   pool:
     # Bounds how long established connections can keep an old credential.
     # Leave empty to use the upstream pgx default.

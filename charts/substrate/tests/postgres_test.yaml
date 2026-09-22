@@ -76,6 +76,21 @@ tests:
       path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
       value: postgresql://owner@database:5432/agents
 
+- it: configures stable PostgreSQL roles for rotating login users
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      runtimeRole: substrate_runtime
+      ddlRole: substrate_ddl
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-runtime-role=substrate_runtime
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-ddl-role=substrate_ddl
+
 - it: omits bundled PostgreSQL for an external connection
   template: postgres.yaml
   set:

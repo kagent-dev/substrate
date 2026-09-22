@@ -45,6 +45,8 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.connectionStringSecretRef` | disabled | Read the runtime/DML connection from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
 | `postgres.ddlConnectionString` | `""` (runtime connection) | Optional schema-owner connection for migrations and maintenance |
 | `postgres.ddlConnectionStringSecretRef` | disabled | Read the optional schema-owner connection string from a Secret |
+| `postgres.runtimeRole` | `""` | Stable `NOLOGIN` role assumed by runtime connections; required when rotation changes login usernames |
+| `postgres.ddlRole` | `""` (runtime role when the DDL connection is omitted) | Stable owner role assumed by migration and maintenance connections |
 | `postgres.pool.maxConnLifetime` | `""` (pgx default) | Maximum physical connection lifetime; bounds Secret credential turnover |
 | `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
@@ -72,7 +74,19 @@ static until the pod restarts.
 `postgres.pool.maxConnLifetime` bounds how long established connections may
 continue using an old credential; rotation is not immediate. Keep old and new
 credentials valid long enough for Kubernetes projection and connection
-turnover. The user rotates with the password, so a rotation that issues a new
-user each cycle works as long as the previous user can still log in while
-established connections drain. The host, port, database, and fallback targets
-must remain the same during rotation; changing any of them requires a restart.
+turnover.
+
+When rotation changes login usernames, configure `postgres.runtimeRole` and
+`postgres.ddlRole` as stable `NOLOGIN` roles. Before publishing a new Secret,
+grant each incoming login membership in its stable role. Substrate runs
+`SET ROLE` on every new connection, so missing membership rejects that
+connection before it enters the pool. DDL objects remain owned by the stable
+DDL role, and grants remain attached to the stable runtime role.
+
+Neither Substrate nor this chart creates the stable roles or grants role
+membership. Database provisioning must create the roles before installation;
+the credential rotator must grant each generated login membership before it
+publishes the updated Secret.
+
+Without stable roles, changing a username requires a restart. The host, port,
+database, and fallback targets always require a restart.
