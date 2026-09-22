@@ -97,8 +97,7 @@ func logActorState(ctx context.Context, actor *ateapipb.Actor, opName, state str
 	attrs = append(attrs,
 		slog.String(string(ateattr.ActorOperationNameKey), ateattr.NormalizeOperationName(opName)),
 		slog.String(string(ateattr.ActorStateKey), state))
-	slog.LogAttrs(ctx, slog.LevelInfo, actorevent.StateChangedBody, attrs...)
-	actorevent.Emit(ctx, actorevent.StateChanged, attrs)
+	actorevent.Log(ctx, actorevent.StateChanged, attrs)
 }
 
 // ActorWorkflow handles the workflows for actor's resume / suspend operations.
@@ -164,6 +163,7 @@ type actorWorkflowStore interface {
 	CreateTag(ctx context.Context, tag *ateapipb.Tag) (*ateapipb.Tag, error)
 	GetTag(ctx context.Context, tagRef resources.TagRef) (*ateapipb.Tag, error)
 	UpdateTag(ctx context.Context, tagRef resources.TagRef, precondition store.Precondition, mutate func(toUpdate *ateapipb.Tag) error) (*ateapipb.Tag, error)
+	DeleteTag(ctx context.Context, tagRef resources.TagRef) (*ateapipb.Tag, error)
 	GetActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef) (*ateapipb.ActorTemplate, error)
 	AcquireLease(ctx context.Context, key string) (*store.Lease, error)
 }

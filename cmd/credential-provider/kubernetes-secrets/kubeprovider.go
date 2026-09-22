@@ -13,10 +13,9 @@
 // limitations under the License.
 
 // This file implements the CredentialProvider plugin API backed by Kubernetes
-// Secrets. It resolves ate-secret:// URIs of the provider "kubernetes.io" to a
-// Secret value read straight from the Kubernetes API — so Substrate never
-// stores the secret, it only brokers a read the provider is authorized to
-// perform.
+// Secrets. It resolves ate-secret:// URIs of the provider "k8s.io" to a Secret
+// value read straight from the Kubernetes API — so Substrate never stores the
+// secret, it only brokers a read the provider is authorized to perform.
 package main
 
 import (
@@ -39,23 +38,32 @@ import (
 )
 
 // ProviderName is the ate-secret:// URI host this backend serves.
-const ProviderName = "kubernetes.io"
+const ProviderName = "k8s.io"
 
 // uriScheme is the only scheme a credential URI may carry.
 const uriScheme = "ate-secret"
 
-// SecretRef is a parsed ate-secret:// URI for the kubernetes.io provider.
+// LocalLocator is the reserved leading path segment naming the local Kubernetes
+// API server the provider runs in — the only cluster served today.
+const LocalLocator = "default"
+
+// SecretRef is a parsed ate-secret:// URI for the k8s.io provider.
 //
-//	ate-secret://kubernetes.io/<namespace>/<secret>[/<key>]
+// Only Secrets in the local cluster are addressable today:
+//
+//	ate-secret://k8s.io/default/<namespace>/<secret>/<key>
+//
+// Future work: the secret uri can grow a "cluster/<cluster>" locator for fetching remote Secrets.
+//
+//	ate-secret://k8s.io/cluster/<cluster>/<namespace>/<secret>/<key>
 type SecretRef struct {
 	Namespace string
 	Name      string
-	// Key is the data key within the Secret, or "" when the URI omits it (only
-	// allowed when the secret contains one entry).
+	// Key is the data key within the Secret to return.
 	Key string
 }
 
-// ParseURI parses a ate-secret:// URI of the kubernetes.io provider. It
+// ParseURI parses an ate-secret:// URI of the k8s.io provider. It
 // rejects any other scheme or provider name.
 func ParseURI(raw string) (SecretRef, error) {
 	u, err := url.Parse(raw)
@@ -68,31 +76,37 @@ func ParseURI(raw string) (SecretRef, error) {
 	if u.Host != ProviderName {
 		return SecretRef{}, fmt.Errorf("credential URI %q: provider is %q, this provider serves %q", raw, u.Host, ProviderName)
 	}
-
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
-		return SecretRef{}, fmt.Errorf("credential URI must not contain user info, a query, or a fragment")
+	// The grammar is scheme/host/path only; a query or fragment means the caller
+	// assumed a syntax this provider does not honor, so reject it rather than
+	// silently ignore it.
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		return SecretRef{}, fmt.Errorf("credential URI %q: user info, query, and fragment components are not allowed", raw)
+	}
+	// Reject percent-encoding in the path of secret uri.
+	if u.EscapedPath() != u.Path {
+		return SecretRef{}, fmt.Errorf("credential URI %q: path must not contain percent-encoding", raw)
 	}
 
 	segments := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
-	// <namespace>/<secret> is the minimum; an optional 3rd segment is the data
-	// key.
-	if len(segments) < 2 || len(segments) > 3 {
-		return SecretRef{}, fmt.Errorf("credential URI %q: want <namespace>/<secret>[/<key>], got %d path segments", raw, len(segments))
-	}
 	for i, s := range segments {
 		if s == "" {
 			return SecretRef{}, fmt.Errorf("credential URI %q: empty path segment %d", raw, i)
 		}
 	}
 
-	ref := SecretRef{
-		Namespace: segments[0],
-		Name:      segments[1],
+	// The path must begin with the "default" locator; only local Secrets are
+	// served. See SecretRef for the planned "cluster/<cluster>" remote form.
+	if segments[0] != LocalLocator {
+		return SecretRef{}, fmt.Errorf("credential URI %q: path must begin with %q (only local Secrets are supported), got %q", raw, LocalLocator, segments[0])
 	}
-	if len(segments) == 3 {
-		ref.Key = segments[2]
+
+	// tail is <namespace>/<secret>/<key>.
+	tail := segments[1:]
+	if len(tail) != 3 {
+		return SecretRef{}, fmt.Errorf("credential URI %q: want %s/<namespace>/<secret>/<key>, got %d trailing segments", raw, LocalLocator, len(tail))
 	}
-	if len(validation.IsDNS1123Label(ref.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || (ref.Key != "" && len(validation.IsConfigMapKey(ref.Key)) != 0) {
+	ref := SecretRef{Namespace: tail[0], Name: tail[1], Key: tail[2]}
+	if len(validation.IsDNS1123Label(ref.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || len(validation.IsConfigMapKey(ref.Key)) != 0 {
 		return SecretRef{}, fmt.Errorf("credential URI contains an invalid namespace, secret name, or key")
 	}
 	return ref, nil
@@ -166,21 +180,12 @@ func (s *Server) authorize(ctx context.Context, actorSpiffeID, namespace string)
 	return nil
 }
 
-// selectKey resolves which Secret data entry to return: the URI's explicit key,
-// else the sole key of a single-key Secret. A URI without a key resolving a
-// multi-key Secret is an error.
-func selectKey(data map[string][]byte, uriKey string) ([]byte, error) {
-	if uriKey == "" {
-		if len(data) != 1 {
-			return nil, fmt.Errorf("no key given and the secret has %d keys; specify one in the URI", len(data))
-		}
-		for _, v := range data {
-			return v, nil
-		}
-	}
-	v, ok := data[uriKey]
+// selectKey returns the named data entry, or an error when the Secret has no
+// such key.
+func selectKey(data map[string][]byte, key string) ([]byte, error) {
+	v, ok := data[key]
 	if !ok {
-		return nil, fmt.Errorf("key %q not present", uriKey)
+		return nil, fmt.Errorf("key %q not present", key)
 	}
 	return v, nil
 }

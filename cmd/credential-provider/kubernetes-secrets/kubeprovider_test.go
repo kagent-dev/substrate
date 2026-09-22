@@ -44,30 +44,30 @@ func TestParseURI(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "with key",
-			uri:  "ate-secret://kubernetes.io/ns1/example-api/token",
+			name: "local with key",
+			uri:  "ate-secret://k8s.io/default/ns1/example-api/token",
 			want: SecretRef{Namespace: "ns1", Name: "example-api", Key: "token"},
 		},
-		{
-			name: "without key",
-			uri:  "ate-secret://kubernetes.io/ns1/example-api",
-			want: SecretRef{Namespace: "ns1", Name: "example-api"},
-		},
-		{name: "wrong scheme", uri: "https://kubernetes.io/ns1/example-api", wantErr: true},
-		{name: "wrong provider", uri: "ate-secret://vault.io/ns1/example-api", wantErr: true},
-		{name: "too few segments", uri: "ate-secret://kubernetes.io/ns1", wantErr: true},
-		{name: "too many segments", uri: "ate-secret://kubernetes.io/a/b/c/d", wantErr: true},
-		{name: "user info", uri: "ate-secret://user@kubernetes.io/ns1/api/token", wantErr: true},
-		{name: "query", uri: "ate-secret://kubernetes.io/ns1/api?key=token", wantErr: true},
-		{name: "empty query", uri: "ate-secret://kubernetes.io/ns1/api?", wantErr: true},
-		{name: "fragment", uri: "ate-secret://kubernetes.io/ns1/api#token", wantErr: true},
-		{name: "empty fragment", uri: "ate-secret://kubernetes.io/ns1/api#", wantErr: true},
-		{name: "trailing slash", uri: "ate-secret://kubernetes.io/ns1/api/", wantErr: true},
-		{name: "empty namespace", uri: "ate-secret://kubernetes.io//api/token", wantErr: true},
-		{name: "invalid namespace", uri: "ate-secret://kubernetes.io/NS/api/token", wantErr: true},
-		{name: "path traversal", uri: "ate-secret://kubernetes.io/ns1/../token", wantErr: true},
-		{name: "encoded slash in key", uri: "ate-secret://kubernetes.io/ns1/api/a%2Fb", wantErr: true},
-		{name: "invalid key", uri: "ate-secret://kubernetes.io/ns1/api/key%20name", wantErr: true},
+		{name: "key required", uri: "ate-secret://k8s.io/default/ns1/example-api", wantErr: true},
+		{name: "wrong scheme", uri: "https://k8s.io/default/ns1/example-api/token", wantErr: true},
+		{name: "wrong provider", uri: "ate-secret://vault.io/default/ns1/example-api/token", wantErr: true},
+		{name: "missing locator", uri: "ate-secret://k8s.io/ns1/example-api/token", wantErr: true},
+		{name: "remote form not yet supported", uri: "ate-secret://k8s.io/cluster/remote-east/ns1/example-api/token", wantErr: true},
+		{name: "too few segments", uri: "ate-secret://k8s.io/default/ns1", wantErr: true},
+		{name: "too many segments", uri: "ate-secret://k8s.io/default/ns1/example-api/token/extra", wantErr: true},
+		{name: "query not allowed", uri: "ate-secret://k8s.io/default/ns1/example-api/token?cluster=remote", wantErr: true},
+		{name: "fragment not allowed", uri: "ate-secret://k8s.io/default/ns1/example-api/token#x", wantErr: true},
+		{name: "percent-encoded separator", uri: "ate-secret://k8s.io/default/ns1/example-api/tok%2Fen", wantErr: true},
+		{name: "percent-encoding of any kind", uri: "ate-secret://k8s.io/default/ns1/example-api/tok%2Den", wantErr: true},
+		{name: "space in path", uri: "ate-secret://k8s.io/default/ns1/example-api/tok en", wantErr: true},
+
+		{name: "user info", uri: "ate-secret://user@k8s.io/default/ns1/api/token", wantErr: true},
+		{name: "empty query", uri: "ate-secret://k8s.io/default/ns1/api/token?", wantErr: true},
+		{name: "empty fragment", uri: "ate-secret://k8s.io/default/ns1/api/token#", wantErr: true},
+		{name: "trailing slash", uri: "ate-secret://k8s.io/default/ns1/api/token/", wantErr: true},
+		{name: "empty namespace", uri: "ate-secret://k8s.io/default//api/token", wantErr: true},
+		{name: "invalid namespace", uri: "ate-secret://k8s.io/default/NS/api/token", wantErr: true},
+		{name: "path traversal", uri: "ate-secret://k8s.io/default/ns1/../token", wantErr: true},
 		{name: "unparseable", uri: "://://", wantErr: true},
 	}
 	for _, tc := range tests {
@@ -156,24 +156,24 @@ func TestFetchSecretAuthorization(t *testing.T) {
 		{
 			name:          "allowed",
 			actorSpiffeID: teamAURI,
-			uri:           "ate-secret://kubernetes.io/ns1/example-api/token",
+			uri:           "ate-secret://k8s.io/default/ns1/example-api/token",
 		},
 		{
 			name:          "namespace not permitted",
 			actorSpiffeID: teamAURI,
-			uri:           "ate-secret://kubernetes.io/ns2/example-api/token",
+			uri:           "ate-secret://k8s.io/default/ns2/example-api/token",
 			wantCode:      codes.PermissionDenied,
 		},
 		{
 			name:          "unknown atespace",
 			actorSpiffeID: teamBURI,
-			uri:           "ate-secret://kubernetes.io/ns1/example-api/token",
+			uri:           "ate-secret://k8s.io/default/ns1/example-api/token",
 			wantCode:      codes.PermissionDenied,
 		},
 		{
 			name:          "garbage identity",
 			actorSpiffeID: "not-a-spiffe-uri",
-			uri:           "ate-secret://kubernetes.io/ns1/example-api/token",
+			uri:           "ate-secret://k8s.io/default/ns1/example-api/token",
 			wantCode:      codes.PermissionDenied,
 		},
 	}
@@ -204,7 +204,7 @@ func TestFetchSecretAuthorization(t *testing.T) {
 	t.Run("nil authorizer denies", func(t *testing.T) {
 		srv := NewServer(fake.NewSimpleClientset(secret), nil)
 		if _, err := srv.FetchSecret(context.Background(), &credproviderpb.FetchSecretRequest{
-			Uri:           "ate-secret://kubernetes.io/ns1/example-api/token",
+			Uri:           "ate-secret://k8s.io/default/ns1/example-api/token",
 			ActorSpiffeId: teamAURI,
 		}); status.Code(err) != codes.PermissionDenied {
 			t.Fatalf("nil authorizer should deny, got %v", err)
@@ -235,27 +235,27 @@ func TestFetchSecret(t *testing.T) {
 	}{
 		{
 			name: "explicit key",
-			uri:  "ate-secret://kubernetes.io/ns1/example-api/token",
+			uri:  "ate-secret://k8s.io/default/ns1/example-api/token",
 			want: "s3cr3t",
 		},
 		{
-			name: "single-key fallback",
-			uri:  "ate-secret://kubernetes.io/ns1/example-api",
-			want: "s3cr3t",
+			name:     "key required",
+			uri:      "ate-secret://k8s.io/default/ns1/example-api",
+			wantCode: codes.InvalidArgument,
 		},
 		{
 			name:     "no key, multiple keys",
-			uri:      "ate-secret://kubernetes.io/ns1/multi",
-			wantCode: codes.NotFound,
+			uri:      "ate-secret://k8s.io/default/ns1/multi",
+			wantCode: codes.InvalidArgument,
 		},
 		{
 			name:     "missing key",
-			uri:      "ate-secret://kubernetes.io/ns1/example-api/nope",
+			uri:      "ate-secret://k8s.io/default/ns1/example-api/nope",
 			wantCode: codes.NotFound,
 		},
 		{
 			name:     "secret not found",
-			uri:      "ate-secret://kubernetes.io/ns1/absent/token",
+			uri:      "ate-secret://k8s.io/default/ns1/absent/token",
 			wantCode: codes.NotFound,
 		},
 		{
@@ -331,7 +331,7 @@ func TestFetchSecretKubernetesErrors(t *testing.T) {
 			client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, tc.err })
 			srv := NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
 			_, err := srv.FetchSecret(t.Context(), &credproviderpb.FetchSecretRequest{
-				Uri: "ate-secret://kubernetes.io/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a",
+				Uri: "ate-secret://k8s.io/default/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a",
 			})
 			if status.Code(err) != tc.code {
 				t.Fatalf("FetchSecret: %v, want %v", err, tc.code)
@@ -347,7 +347,7 @@ func TestFetchSecretObservesRotation(t *testing.T) {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns1"}, Data: map[string][]byte{"token": []byte("first")}}
 	client := fake.NewSimpleClientset(secret)
 	srv := NewServer(client, &NamespaceAuthorizer{allowed: map[string]map[string]struct{}{"team-a": {"ns1": {}}}})
-	req := &credproviderpb.FetchSecretRequest{Uri: "ate-secret://kubernetes.io/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a"}
+	req := &credproviderpb.FetchSecretRequest{Uri: "ate-secret://k8s.io/default/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a"}
 	first, err := srv.FetchSecret(t.Context(), req)
 	if err != nil || string(first.GetOpaqueBytes()) != "first" {
 		t.Fatalf("first fetch: %v, %v", first, err)

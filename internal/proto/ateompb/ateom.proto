@@ -131,7 +131,7 @@ message RunWorkloadRequest {
   WorkloadSpec spec = 7;
 
   // runtime_asset_paths maps a runtime asset name (e.g. "cloud-hypervisor",
-  // "virtiofsd", "kata-kernel", "kata-image", "kata-config")
+  // "virtiofsd", "kata-kernel", "kata-image")
   // to the local on-disk path atelet fetched it to (content-addressed, like
   // runsc_path). Empty for the gVisor runtime, which uses runsc_path.
   map<string, string> runtime_asset_paths = 8;
@@ -142,7 +142,7 @@ message RunWorkloadRequest {
   // The actor's declared size, from the ActorTemplate's resource limits. ateom
   // sizes the sandbox to these (cgroup caps via the OCI spec, and for the
   // micro-VM the VM's vCPU count and memory). Zero means "unset": keep the
-  // runtime default (unlimited for gVisor, the kata config for the micro-VM).
+  // runtime default (unlimited for gVisor, ateom's own default for the micro-VM).
   int64 cpu_milli = 11;    // CPU limit in millicores (1000 = one core).
   int64 memory_bytes = 12; // Memory limit in bytes.
 }
@@ -225,13 +225,12 @@ message ImageVolumeMount {
 message Readyz {
   HTTPGetAction http_get = 1;
   // How long to keep polling before giving up and failing the actor start.
-  // Zero means the ateom's default.
   int32 timeout_seconds = 2;
 }
 
 // HTTPGetAction performs an HTTP GET against the container.
 message HTTPGetAction {
-  // Path to access on the HTTP server. Empty means "/readyz".
+  // Path to access on the HTTP server.
   string path = 1;
   // TCP port to connect to (1..65535).
   int32 port = 2;

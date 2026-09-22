@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Command kubernetes-secrets is the Kubernetes-Secrets credential-provider
-// plugin: a gRPC service that resolves ate-secret:// URIs of the kubernetes.io
+// plugin: a gRPC service that resolves ate-secret:// URIs of the k8s.io
 // provider to Kubernetes Secret values. It is the only component in the egress
 // credential-injection path with Kubernetes access; the egress gateway and its
 // injector never read Secrets directly.
@@ -22,12 +22,10 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -58,6 +56,8 @@ var (
 	nsPolicyFile     = pflag.String("namespace-policy-file", "", "path to the atespace→namespace authorization YAML (required)")
 	logLevel         = pflag.String("log-level", "info", "one of debug, info, warn, error")
 	drainGrace       = pflag.Duration("drain-grace", 5*time.Second, "how long to wait for in-flight RPCs on shutdown before a hard stop")
+	kubeAPIQPS       = pflag.Float32("kube-api-qps", 50, "Sustained queries per second allowed against the Kubernetes API.")
+	kubeAPIBurst     = pflag.Int("kube-api-burst", 100, "Burst queries allowed against the Kubernetes API.")
 )
 
 func main() {
@@ -95,11 +95,12 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("kubernetes client: %w", err)
 	}
 
+	var nsAuth *NamespaceAuthorizer
 	if *nsPolicyFile == "" {
 		return fmt.Errorf("--namespace-policy-file is required")
 	}
 
-	nsAuth, err := LoadNamespaceAuthorizer(*nsPolicyFile)
+	nsAuth, err = LoadNamespaceAuthorizer(*nsPolicyFile)
 	if err != nil {
 		return fmt.Errorf("namespace policy: %w", err)
 	}
@@ -149,10 +150,18 @@ func run(ctx context.Context) error {
 }
 
 func newKubeClient() (kubernetes.Interface, error) {
+	if *kubeAPIQPS <= 0 || *kubeAPIBurst <= 0 {
+		return nil, fmt.Errorf("--kube-api-qps and --kube-api-burst must be positive")
+	}
+
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("in-cluster config: %w", err)
 	}
+
+	cfg.QPS = *kubeAPIQPS
+	cfg.Burst = *kubeAPIBurst
+
 	return kubernetes.NewForConfig(cfg)
 }
 
@@ -173,22 +182,32 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		return nil, fmt.Errorf("--injector-spiffe-id must be a SPIFFE URI")
 	}
 
-	ca, err := os.ReadFile(*clientCAFile)
-	if err != nil {
-		return nil, fmt.Errorf("read --client-ca-file: %w", err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(ca) {
-		return nil, fmt.Errorf("no certificates in --client-ca-file %q", *clientCAFile)
+	// Load the client CA pool once so a missing or empty projection fails the
+	// pod promptly; GetConfigForClient below reloads it for every connection.
+	loadPool := credbundle.PoolLoader(*clientCAFile)
+	if _, err := loadPool(); err != nil {
+		return nil, err
 	}
 
+	serverCert := credbundle.Loader(*serverBundle)
+	verifySAN := verifyClientSAN(*injectorSPIFFEID)
+
+	// GetConfigForClient builds the config anew per connection: a certificate
+	// signed by a newly published CA verifies without a restart.
 	cfg := &tls.Config{
-		MinVersion:     tls.VersionTLS13,
-		GetCertificate: credbundle.Loader(*serverBundle),
-		// Require a client certificate that chains to the trust bundle.
-		ClientAuth:       tls.RequireAndVerifyClientCert,
-		ClientCAs:        pool,
-		VerifyConnection: verifyClientSAN(*injectorSPIFFEID),
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			pool, err := loadPool()
+			if err != nil {
+				return nil, err
+			}
+			return &tls.Config{
+				MinVersion:       tls.VersionTLS13,
+				GetCertificate:   serverCert,
+				ClientAuth:       tls.RequireAndVerifyClientCert,
+				ClientCAs:        pool,
+				VerifyConnection: verifySAN,
+			}, nil
+		},
 	}
 	slog.InfoContext(ctx, "verifying caller client certificates",
 		slog.String("ca", *clientCAFile), slog.String("required_san", *injectorSPIFFEID))

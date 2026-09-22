@@ -116,7 +116,7 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 			if tc.secret != "" {
 				rule.Hostnames.Effects = &ateapipb.EgressRuleEffects{InjectStaticHeaders: []*ateapipb.CredentialHeaderInjection{{
 					Header: "authorization", Prefix: "Bearer ",
-					CredentialUri: fmt.Sprintf("ate-secret://kubernetes.io/%s/%s/token", tc.secretNamespace, tc.secret),
+					CredentialUri: fmt.Sprintf("ate-secret://k8s.io/default/%s/%s/token", tc.secretNamespace, tc.secret),
 				}}}
 			}
 			e2e.EnsureEgressPolicy(t, ctx, clients, actor, rule)

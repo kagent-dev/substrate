@@ -6,8 +6,8 @@ The `k8s-credential-provider` Deployment follows the provider from
 with its own ServiceAccount and projected serving certificate. AGW calls it
 directly over mTLS to inject credentials into HTTP and intercepted HTTPS requests.
 
-`ate-secret://kubernetes.io/team-a-secrets/example-api/token` resolves the `token`
-entry in that Kubernetes Secret. Omitting the key requires exactly one data entry.
+`ate-secret://k8s.io/default/team-a-secrets/example-api/token` resolves the `token`
+entry in that Kubernetes Secret. The `default` locator and an explicit key are required.
 The provider reads Kubernetes on every fetch and never persists or logs values.
 AGW caches successful credentials per actor and URI for five minutes, so rotation
 can take that long to reach injected requests.
@@ -70,14 +70,13 @@ hack/install-ate.sh --deploy-atenet \
 
 The policy file uses `policies:` with the same list of grants as the Helm values.
 Its generated ConfigMap name changes with the policy, rolling the provider on
-reapplication. Direct ConfigMap edits require a rollout restart: policy and client
-CA files are loaded at startup. Serving certificates rotate through the existing
-certificate loader.
+reapplication. Direct policy ConfigMap edits require a rollout restart. Client CA
+bundles and serving certificates reload automatically for new TLS connections.
 
 ## Configure injection
 
 Create the Secret and set an actor's egress policy header injection to use credential URI
-`ate-secret://kubernetes.io/team-a-secrets/example-api/token`, header
+`ate-secret://k8s.io/default/team-a-secrets/example-api/token`, header
 `authorization`, and prefix `Bearer `. Namespace grants alone do not create an
 egress policy. No ext_proc injector is needed.
 

@@ -17,6 +17,7 @@ package controllers
 import (
 	"slices"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -37,6 +38,21 @@ const ateomOTelResourceAttributes = "k8s.namespace.name=$(POD_NAMESPACE),k8s.pod
 // workerTerminationGracePeriodSeconds is the hardcoded pod termination grace
 // period for worker pods (60 minutes).
 const workerTerminationGracePeriodSeconds int64 = 3600
+
+// Rollout settings for the pool's Deployment. A pool edit rolls the workers
+// through the eviction path, so the strategy is chosen for the actors on them:
+//
+//   - maxSurge 0 with a 10% maxUnavailable, which Kubernetes raises to at
+//     least one pod. To make the roll smooth, make it gradual, maxSurge should
+//     be 0 to avoid any potential stall for small size WorkerPool.
+//   - progressDeadlineSeconds above the 3600s pod grace period, with room for
+//     the replacement to start, so a batch waiting out the drain does not have
+//     kubectl rollout status report a failed rollout.
+const (
+	workerRolloutMaxSurge                = 0
+	workerRolloutMaxUnavailable          = "10%"
+	workerRolloutProgressDeadlineSeconds = int32(4800)
+)
 
 // ateomOTelSettings is the telemetry configuration propagated to ateom worker
 // pods. A zero value leaves the pods without telemetry env.
@@ -203,6 +219,12 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 			WithBlockOwnerDeletion(true)).
 		WithSpec(appsv1ac.DeploymentSpec().
 			WithReplicas(wp.Spec.Replicas).
+			WithStrategy(appsv1ac.DeploymentStrategy().
+				WithType(appsv1.RollingUpdateDeploymentStrategyType).
+				WithRollingUpdate(appsv1ac.RollingUpdateDeployment().
+					WithMaxSurge(intstr.FromInt32(workerRolloutMaxSurge)).
+					WithMaxUnavailable(intstr.FromString(workerRolloutMaxUnavailable)))).
+			WithProgressDeadlineSeconds(workerRolloutProgressDeadlineSeconds).
 			WithSelector(metav1ac.LabelSelector().
 				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
 			WithTemplate(corev1ac.PodTemplateSpec().

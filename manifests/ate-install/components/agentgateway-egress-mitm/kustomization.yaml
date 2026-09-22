@@ -73,7 +73,7 @@ patches:
                         key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         root: /run/servicedns-ca/trust-bundle.pem
                     credentialProviders:
-                    - uriAuthority: kubernetes.io
+                    - uriAuthority: k8s.io
                       target:
                         host: k8s-credential-provider.ate-system.svc:50051
                         policies:
@@ -95,7 +95,7 @@ patches:
                         key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                         root: /run/servicedns-ca/trust-bundle.pem
                     credentialProviders:
-                    - uriAuthority: kubernetes.io
+                    - uriAuthority: k8s.io
                       target:
                         host: k8s-credential-provider.ate-system.svc:50051
                         policies:

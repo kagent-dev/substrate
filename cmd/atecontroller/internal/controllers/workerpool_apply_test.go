@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -435,6 +436,30 @@ func TestTerminationGracePeriodSeconds(t *testing.T) {
 	}
 }
 
+// TestRolloutStrategy pins the rollout settings a pool edit rolls workers
+// with: delete first, never surge, and a progress deadline that outlasts the
+// actors' drain window.
+func TestRolloutStrategy(t *testing.T) {
+	wp := testWorkerPoolApplyConfig(nil)
+	spec := buildDeploymentApplyConfig(wp, ateomOTelSettings{}).Spec
+	if spec.Strategy == nil || spec.Strategy.RollingUpdate == nil {
+		t.Fatalf("Strategy.RollingUpdate not set")
+	}
+	if got := *spec.Strategy.Type; got != appsv1.RollingUpdateDeploymentStrategyType {
+		t.Errorf("Strategy.Type = %q, want RollingUpdate", got)
+	}
+	ru := spec.Strategy.RollingUpdate
+	if got := ru.MaxSurge.String(); got != "0" {
+		t.Errorf("MaxSurge = %q, want 0", got)
+	}
+	if got := ru.MaxUnavailable.String(); got != "10%" {
+		t.Errorf("MaxUnavailable = %q, want 10%%", got)
+	}
+	if spec.ProgressDeadlineSeconds == nil || *spec.ProgressDeadlineSeconds <= int32(workerTerminationGracePeriodSeconds) {
+		t.Errorf("ProgressDeadlineSeconds = %v, want above the %ds grace period", spec.ProgressDeadlineSeconds, workerTerminationGracePeriodSeconds)
+	}
+}
+
 // TestBuildDeploymentApplyConfigOTelEndpoint asserts the OTLP endpoint and the
 // resource identity are set on the ateom container only when an endpoint is
 // configured, and that every ref the value substitutes is declared ahead of it.
@@ -805,6 +830,12 @@ func expectedDeploymentApplyConfig(mutatePodSpec func(*corev1ac.PodSpecApplyConf
 			WithBlockOwnerDeletion(true)).
 		WithSpec(appsv1ac.DeploymentSpec().
 			WithReplicas(wp.Spec.Replicas).
+			WithStrategy(appsv1ac.DeploymentStrategy().
+				WithType(appsv1.RollingUpdateDeploymentStrategyType).
+				WithRollingUpdate(appsv1ac.RollingUpdateDeployment().
+					WithMaxSurge(intstr.FromInt32(0)).
+					WithMaxUnavailable(intstr.FromString("10%")))).
+			WithProgressDeadlineSeconds(4800).
 			WithSelector(metav1ac.LabelSelector().
 				WithMatchLabels(map[string]string{"ate.dev/worker-pool": wp.Name})).
 			WithTemplate(corev1ac.PodTemplateSpec().

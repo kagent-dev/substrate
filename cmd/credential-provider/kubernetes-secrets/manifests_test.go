@@ -286,7 +286,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 								} else if listener.Protocol != "HTTP" {
 									t.Fatalf("credentials enabled on unexpected protocol %q", listener.Protocol)
 								}
-								if provider.URIAuthority != "kubernetes.io" || provider.Target.Host != tc.host {
+								if provider.URIAuthority != "k8s.io" || provider.Target.Host != tc.host {
 									t.Fatalf("incorrect provider: %+v", provider)
 								}
 								tls := provider.Target.Policies.BackendTLS

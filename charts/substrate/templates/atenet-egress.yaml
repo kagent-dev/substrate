@@ -75,7 +75,7 @@ data:
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
               credentialProviders:
-              - uriAuthority: kubernetes.io
+              - uriAuthority: k8s.io
                 target:
                   host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
                   policies:
@@ -97,7 +97,7 @@ data:
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
               credentialProviders:
-              - uriAuthority: kubernetes.io
+              - uriAuthority: k8s.io
                 target:
                   host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
                   policies:
