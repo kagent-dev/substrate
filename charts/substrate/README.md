@@ -72,5 +72,7 @@ static until the pod restarts.
 `postgres.pool.maxConnLifetime` bounds how long established connections may
 continue using an old credential; rotation is not immediate. Keep old and new
 credentials valid long enough for Kubernetes projection and connection
-turnover. The host, port, database, user, and fallback targets must remain the
-same during rotation; changing any of them requires a restart.
+turnover. The user rotates with the password, so a rotation that issues a new
+user each cycle works as long as the previous user can still log in while
+established connections drain. The host, port, database, and fallback targets
+must remain the same during rotation; changing any of them requires a restart.
