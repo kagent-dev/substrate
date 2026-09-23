@@ -26,7 +26,7 @@ tests:
       path: data.ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING
   - equal:
       path: data.ATE_API_POSTGRES_SCHEMA
-      value: public
+      value: substrate
 
 - it: uses separate managed identities by default
   template: ate-api-server.yaml

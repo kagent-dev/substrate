@@ -55,7 +55,7 @@ postgres:
     # Bounds how long established connections can keep an old credential.
     # Leave empty to use the upstream pgx default.
     maxConnLifetime: ""
-  schema: public
+  schema: substrate
   resources:
     requests:
       cpu: "1"

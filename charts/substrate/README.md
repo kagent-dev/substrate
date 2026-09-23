@@ -48,7 +48,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections; configurable when bootstrap is disabled |
 | `postgres.adminSecretRef` | `postgres-admin` | Select the administrator Secret |
 | `postgres.pool.maxConnLifetime` | `""` (pgx default) | Maximum physical connection lifetime; bounds Secret credential turnover |
-| `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema; Kagent's umbrella chart sets `substrate` for its shared database |
+| `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
