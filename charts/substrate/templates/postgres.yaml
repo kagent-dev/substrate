@@ -34,9 +34,8 @@ data:
     # health checks, the workload's idempotent database bootstrap, and the
     # tls-reloader sidecar's configuration reloads.
     local all all trust
-    # PostgreSQL verifies client certificates against the pod-identity CA. It
-    # does not need its own serving CA because it never verifies its server certificate.
-    hostssl all all all trust clientcert=verify-ca
+    # PostgreSQL requires a password and a pod-identity client certificate.
+    hostssl all all all scram-sha-256 clientcert=verify-ca
   reload-tls.sh: |
     # PostgreSQL opens ssl_cert_file, ssl_key_file and ssl_ca_file at startup
     # and on SIGHUP, and nowhere else. The kubelet replaces the projected pod
@@ -67,7 +66,7 @@ data:
       # Starting empty also means a restart of this container costs one
       # redundant reload rather than a missed one.
       if [ "${current}" != "${reloaded}" ] \
-        && psql -U postgres -d postgres -Atc 'SELECT pg_reload_conf()' >/dev/null 2>&1; then
+        && psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atc 'SELECT pg_reload_conf()' >/dev/null 2>&1; then
         reloaded="${current}"
         echo "$(date -u +%FT%TZ) reloaded TLS configuration"
       fi
@@ -130,6 +129,14 @@ spec:
         command:
         - /bin/sh
         - /etc/postgresql/reload-tls.sh
+        env:
+        - name: POSTGRES_DB
+          value: {{ .Values.postgres.database | quote }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "substrate.postgres.adminSecretName" . }}
+              key: {{ .Values.postgres.adminSecretRef.usernameKey }}
         volumeMounts:
         - name: config
           mountPath: /etc/postgresql
@@ -149,25 +156,19 @@ spec:
       containers:
       - name: postgres
         image: {{ include "substrate.thirdPartyImage" (list .Values.images.postgres .) }}
-        lifecycle:
-          postStart:
-            exec:
-              command:
-              - /bin/sh
-              - -ec
-              - |
-                until psql -U postgres -d postgres -Atc 'SELECT 1' >/dev/null 2>&1; do
-                  sleep 1
-                done
-                if ! psql -U postgres -d postgres -Atc \
-                  "SELECT 1 FROM pg_database WHERE datname = 'atepg'" | grep -qx 1; then
-                  createdb -U postgres atepg
-                fi
         env:
         - name: POSTGRES_DB
-          value: atepg
-        - name: POSTGRES_HOST_AUTH_METHOD
-          value: trust
+          value: {{ .Values.postgres.database | quote }}
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "substrate.postgres.adminSecretName" . }}
+              key: {{ .Values.postgres.adminSecretRef.usernameKey }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "substrate.postgres.adminSecretName" . }}
+              key: {{ .Values.postgres.adminSecretRef.passwordKey }}
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         ports:
@@ -175,12 +176,12 @@ spec:
           containerPort: 5432
         readinessProbe:
           exec:
-            command: ["/bin/sh", "-ec", "psql -U postgres -d atepg -Atc 'SELECT 1' >/dev/null"]
+            command: ["/bin/sh", "-ec", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
           initialDelaySeconds: 2
           periodSeconds: 2
         livenessProbe:
           exec:
-            command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            command: ["/bin/sh", "-ec", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
           initialDelaySeconds: 10
           periodSeconds: 10
         args: ["-c", "config_file=/etc/postgresql/postgresql.conf"]

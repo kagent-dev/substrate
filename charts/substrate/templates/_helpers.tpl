@@ -78,16 +78,25 @@ Plaintext HTTP URL that clients use to reach atenet-router.
 {{- printf "http://%s.%s.svc:80" (include "substrate.fullname" (list "atenet-router" .)) .Release.Namespace -}}
 {{- end -}}
 
-{{/* PostgreSQL connection Secret, when configured. */}}
-{{- define "substrate.postgres.connectionStringSecretEnabled" -}}
-{{- $ref := .Values.postgres.connectionStringSecretRef | default dict -}}
-{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- define "substrate.postgres.adminSecretName" -}}
+{{- .Values.postgres.adminSecretRef.name | default "postgres-admin" -}}
 {{- end -}}
 
-{{/* PostgreSQL DDL connection Secret, when configured. */}}
-{{- define "substrate.postgres.ddlConnectionStringSecretEnabled" -}}
-{{- $ref := .Values.postgres.ddlConnectionStringSecretRef | default dict -}}
-{{- if or (get $ref "enabled") (get $ref "name") -}}true{{- end -}}
+{{- define "substrate.postgres.readWriteSecretName" -}}
+{{- .Values.postgres.readWriteConnectionStringSecretRef.name | default (include "substrate.fullname" (list "postgres-readwrite" .)) -}}
+{{- end -}}
+
+{{- define "substrate.postgres.ownerSecretName" -}}
+{{- .Values.postgres.ownerConnectionStringSecretRef.name | default (include "substrate.fullname" (list "postgres-owner" .)) -}}
+{{- end -}}
+
+{{/* Fixed bundled identities. Callers supply only the database endpoint. */}}
+{{- define "substrate.postgres.readWriteConnectionString" -}}
+{{- printf "postgresql://substrate_readwrite_user:substrate-readwrite@%s:5432/%s?%s" .host .database .params -}}
+{{- end -}}
+
+{{- define "substrate.postgres.ownerConnectionString" -}}
+{{- printf "postgresql://substrate_admin_user:substrate-admin@%s:5432/%s?%s" .host .database .params -}}
 {{- end -}}
 
 {{/*

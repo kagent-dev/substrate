@@ -25,27 +25,32 @@ createNamespace: false
 
 postgres:
   enabled: true
+  # Bundled PostgreSQL creates this database; both managed connection Secrets use it.
+  database: atepg
   storageSize: 1Gi
-  # Runtime/DML connection. Also used for DDL when no DDL connection is set.
-  connectionString: ""
-  # Read the connection string from a Secret instead of values/ConfigMap.
-  connectionStringSecretRef:
-    # When enabled with no name, use the release-scoped postgres-connection name.
-    enabled: false
+  # Read the read/write connection string from a Secret.
+  readWriteConnectionStringSecretRef:
+    # With bundled bootstrap, leave empty for the chart-managed fixed login.
+    # With bootstrap disabled, provide an existing Secret.
     name: ""
-    key: connectionString
-  # Optional DDL and maintenance connection. Defaults to connectionString.
-  ddlConnectionString: ""
-  ddlConnectionStringSecretRef:
-    enabled: false
+    key: readWriteConnectionString
+  # Read the owner connection string from a Secret.
+  ownerConnectionStringSecretRef:
+    # With bundled bootstrap, leave empty for the chart-managed fixed login.
+    # With bootstrap disabled, provide an existing Secret.
     name: ""
-    key: ddlConnectionString
-  # Stable NOLOGIN role assumed by runtime connections. Set this when rotated
-  # credentials may change the login username.
-  runtimeRole: ""
-  # Stable NOLOGIN role assumed by DDL connections. When the DDL connection is
-  # omitted, this defaults to runtimeRole.
-  ddlRole: ""
+    key: ownerConnectionString
+  # Create missing fixed identities and schema. Set false when using operator-managed users.
+  bootstrap: true
+  # Roles assumed on each connection. Use distinct roles for installs sharing a
+  # database; bootstrap requires these fixed defaults.
+  readWriteRole: substrate_readwrite
+  ownerRole: substrate_owner
+  adminSecretRef:
+    # When empty with bundled PostgreSQL, the chart creates a managed Secret.
+    name: ""
+    usernameKey: POSTGRES_USER
+    passwordKey: POSTGRES_PASSWORD
   pool:
     # Bounds how long established connections can keep an old credential.
     # Leave empty to use the upstream pgx default.
@@ -89,7 +94,7 @@ credentialProvider:
   #   allowedNamespaces: [team-a-secrets]
 
 # Name of a ConfigMap in the release namespace that supplies per-environment
-# overrides for ate-api-server (ATE_API_POSTGRES_CONNECTION_STRING, ...).
+# overrides for ate-api-server (ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING, ...).
 # Mounted via envFrom with optional=true. Created by the chart from these values.
 ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 

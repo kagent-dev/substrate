@@ -16,324 +16,243 @@ suite: PostgreSQL configuration
 templates:
 - ate-api-server-envvars.yaml
 - ate-api-server.yaml
+- postgres-secrets.yaml
 - postgres.yaml
 tests:
-- it: configures the bundled PostgreSQL database by default
+- it: uses the managed schema by default
   template: ate-api-server-envvars.yaml
   asserts:
-  - isNotNull:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
+  - notExists:
+      path: data.ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING
   - equal:
       path: data.ATE_API_POSTGRES_SCHEMA
       value: public
 
-- it: uses the static runtime source and no DDL override by default
+- it: uses separate managed identities by default
   template: ate-api-server.yaml
   documentIndex: 3
   asserts:
   - contains:
       path: spec.template.spec.containers[0].args
-      content: --postgres-connection-string=@env
+      content: --postgres-read-write-connection-string=@file:/etc/ateapi/postgres/read-write/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-connection-string=@file:/etc/ateapi/postgres/owner/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=substrate_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=substrate_owner
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-bootstrap=true
+  - notExists:
+      path: spec.template.spec.initContainers
   - notContains:
       path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@env
-  - notContains:
-      path: spec.template.spec.volumes
       content:
-        name: postgres-runtime-connection
-  - notContains:
-      path: spec.template.spec.volumes
+        --postgres-bootstrap
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
       content:
-        name: postgres-ddl-connection
+        name: postgres-admin
+        mountPath: /etc/ateapi/postgres/admin
+        readOnly: true
 
-- it: configures an external PostgreSQL connection string and schema
-  template: ate-api-server-envvars.yaml
-  set:
-    postgres:
-      enabled: false
-      connectionString: postgresql://user:pass@database:5432/agents
-      schema: substrate
-  asserts:
-  - equal:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
-      value: postgresql://user:pass@database:5432/agents
-  - equal:
-      path: data.ATE_API_POSTGRES_SCHEMA
-      value: substrate
-
-- it: configures separate runtime and DDL connection strings
-  template: ate-api-server-envvars.yaml
-  set:
-    postgres:
-      enabled: false
-      connectionString: postgresql://runtime@database:5432/agents
-      ddlConnectionString: postgresql://owner@database:5432/agents
-  asserts:
-  - equal:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
-      value: postgresql://runtime@database:5432/agents
-  - equal:
-      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
-      value: postgresql://owner@database:5432/agents
-
-- it: configures stable PostgreSQL roles for rotating login users
+- it: rejects custom roles while bootstrap creates fixed identities
   template: ate-api-server.yaml
-  documentIndex: 3
   set:
-    postgres:
-      runtimeRole: substrate_runtime
-      ddlRole: substrate_ddl
+    postgres.ownerRole: tenant_owner
   asserts:
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-runtime-role=substrate_runtime
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-role=substrate_ddl
+  - failedTemplate:
+      errorMessage: postgres bootstrap requires readWriteRole=substrate_readwrite and ownerRole=substrate_owner
 
-- it: omits bundled PostgreSQL for an external connection
+- it: creates the managed administrator Secret
+  template: postgres-secrets.yaml
+  documentIndex: 0
+  asserts:
+  - equal:
+      path: metadata.name
+      value: postgres-admin
+  - equal:
+      path: stringData.POSTGRES_USER
+      value: postgres
+  - equal:
+      path: stringData.POSTGRES_PASSWORD
+      value: postgres
+
+- it: creates the managed read-write Secret
+  template: postgres-secrets.yaml
+  documentIndex: 1
+  asserts:
+  - equal:
+      path: metadata.name
+      value: RELEASE-NAME-postgres-readwrite
+  - matchRegex:
+      path: stringData.readWriteConnectionString
+      pattern: ^postgresql://substrate_readwrite_user:substrate-readwrite@
+  - matchRegex:
+      path: stringData.readWriteConnectionString
+      pattern: channel_binding=disable$
+
+- it: creates the managed owner Secret
+  template: postgres-secrets.yaml
+  documentIndex: 2
+  asserts:
+  - equal:
+      path: metadata.name
+      value: RELEASE-NAME-postgres-owner
+  - matchRegex:
+      path: stringData.ownerConnectionString
+      pattern: ^postgresql://substrate_admin_user:substrate-admin@
+  - matchRegex:
+      path: stringData.ownerConnectionString
+      pattern: channel_binding=disable$
+
+- it: configures the bundled database from the administrator Secret
   template: postgres.yaml
-  set:
-    postgres:
-      enabled: false
-      connectionString: postgresql://user:pass@database:5432/agents
-  asserts:
-  - hasDocuments:
-      count: 0
-
-- it: mounts an explicitly named runtime connection Secret
-  template: ate-api-server.yaml
-  documentIndex: 3
-  set:
-    postgres:
-      enabled: false
-      connectionStringSecretRef:
-        name: shared-database
-        key: url
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
-  - notContains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@env
-  - notContains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: ATE_API_POSTGRES_CONNECTION_STRING
-  - contains:
-      path: spec.template.spec.containers[0].volumeMounts
-      content:
-        name: postgres-runtime-connection
-        mountPath: /etc/ateapi/postgres/runtime
-        readOnly: true
-  - notExists:
-      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-runtime-connection")].subPath
-  - contains:
-      path: spec.template.spec.volumes
-      content:
-        name: postgres-runtime-connection
-        projected:
-          sources:
-          - secret:
-              name: shared-database
-              items:
-              - key: url
-                path: connection-string
-
-- it: mounts separate runtime and DDL keys from one Secret
-  template: ate-api-server.yaml
-  documentIndex: 3
-  set:
-    postgres:
-      enabled: false
-      connectionStringSecretRef:
-        name: substrate-database
-        key: runtimeUrl
-      ddlConnectionStringSecretRef:
-        name: substrate-database
-        key: ddlUrl
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string
-  - notContains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: ATE_API_POSTGRES_CONNECTION_STRING
-  - notContains:
-      path: spec.template.spec.containers[0].env
-      content:
-        name: ATE_API_POSTGRES_DDL_CONNECTION_STRING
-  - contains:
-      path: spec.template.spec.containers[0].volumeMounts
-      content:
-        name: postgres-runtime-connection
-        mountPath: /etc/ateapi/postgres/runtime
-        readOnly: true
-  - contains:
-      path: spec.template.spec.containers[0].volumeMounts
-      content:
-        name: postgres-ddl-connection
-        mountPath: /etc/ateapi/postgres/ddl
-        readOnly: true
-  - notExists:
-      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-runtime-connection")].subPath
-  - notExists:
-      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-ddl-connection")].subPath
-  - contains:
-      path: spec.template.spec.volumes
-      content:
-        name: postgres-runtime-connection
-        projected:
-          sources:
-          - secret:
-              name: substrate-database
-              items:
-              - key: runtimeUrl
-                path: connection-string
-  - contains:
-      path: spec.template.spec.volumes
-      content:
-        name: postgres-ddl-connection
-        projected:
-          sources:
-          - secret:
-              name: substrate-database
-              items:
-              - key: ddlUrl
-                path: connection-string
-
-- it: mounts runtime and DDL connections from different Secrets
-  template: ate-api-server.yaml
-  documentIndex: 3
-  set:
-    postgres:
-      enabled: false
-      connectionStringSecretRef:
-        name: runtime-database
-        key: url
-      ddlConnectionStringSecretRef:
-        name: ddl-database
-        key: url
+  documentIndex: 2
   asserts:
   - equal:
-      path: spec.template.spec.volumes[?(@.name == "postgres-runtime-connection")].projected.sources[0].secret.name
-      value: runtime-database
+      path: spec.template.spec.containers[0].env[0].value
+      value: atepg
   - equal:
-      path: spec.template.spec.volumes[?(@.name == "postgres-ddl-connection")].projected.sources[0].secret.name
-      value: ddl-database
+      path: spec.template.spec.containers[0].env[1].valueFrom.secretKeyRef.name
+      value: postgres-admin
+  - equal:
+      path: spec.template.spec.containers[0].env[2].valueFrom.secretKeyRef.key
+      value: POSTGRES_PASSWORD
 
-- it: supports a runtime Secret with an inline DDL connection
+- it: rejects operator-managed Secrets during bundled bootstrap
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres.readWriteConnectionStringSecretRef.name: custom-readwrite
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.bootstrap requires the chart-managed application Secrets; disable bootstrap for operator-managed Secrets
+
+- it: supports an external BYO database without bootstrap
   template: ate-api-server.yaml
   documentIndex: 3
   set:
     postgres:
       enabled: false
-      connectionStringSecretRef:
-        name: runtime-database
-      ddlConnectionString: postgresql://owner@database:5432/agents
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+        key: connectionString
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
+        key: connectionString
+      readWriteRole: tenant_readwrite
+      ownerRole: tenant_owner
+  asserts:
+  - notExists:
+      path: spec.template.spec.initContainers
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=tenant_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=tenant_owner
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: substrate-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: substrate-owner
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.items[1]
+
+- it: supports operator-managed users with bundled PostgreSQL
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: true
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: rotated-readwrite
+      ownerConnectionStringSecretRef:
+        name: rotated-owner
   asserts:
   - contains:
       path: spec.template.spec.containers[0].args
-      content: --postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string
+      content: --postgres-bootstrap=false
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: rotated-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: rotated-owner
+
+- it: supports break-glass bootstrap for an external database
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      bootstrap: true
+      adminSecretRef:
+        name: external-postgres-admin
+        usernameKey: DB_USER
+        passwordKey: DB_PASSWORD
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
+  asserts:
   - contains:
       path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@env
+      content: --postgres-bootstrap=true
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.name
+      value: external-postgres-admin
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.items[0].key
+      value: DB_USER
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.items[1].key
+      value: DB_PASSWORD
 
-- it: keeps only inline DDL credentials in the ConfigMap for mixed mode
+- it: requires an owner Secret for an external database
   template: ate-api-server-envvars.yaml
   set:
     postgres:
       enabled: false
-      connectionStringSecretRef:
-        name: runtime-database
-      ddlConnectionString: postgresql://owner@database:5432/agents
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
   asserts:
-  - notExists:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
-  - equal:
-      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
-      value: postgresql://owner@database:5432/agents
+  - failedTemplate:
+      errorMessage: postgres.ownerConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
 
-- it: supports an inline runtime connection with a DDL Secret
-  template: ate-api-server.yaml
-  documentIndex: 3
-  set:
-    postgres:
-      enabled: false
-      connectionString: postgresql://runtime@database:5432/agents
-      ddlConnectionStringSecretRef:
-        name: ddl-database
-  asserts:
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-connection-string=@env
-  - contains:
-      path: spec.template.spec.containers[0].args
-      content: --postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string
-  - contains:
-      path: spec.template.spec.containers[0].volumeMounts
-      content:
-        name: postgres-ddl-connection
-        mountPath: /etc/ateapi/postgres/ddl
-        readOnly: true
-  - notExists:
-      path: spec.template.spec.containers[0].volumeMounts[?(@.name == "postgres-ddl-connection")].subPath
-
-- it: keeps only inline runtime credentials in the ConfigMap for mixed mode
+- it: requires a read-write Secret when bundled bootstrap is disabled
   template: ate-api-server-envvars.yaml
   set:
     postgres:
-      enabled: false
-      connectionString: postgresql://runtime@database:5432/agents
-      ddlConnectionStringSecretRef:
-        name: ddl-database
+      bootstrap: false
+      ownerConnectionStringSecretRef:
+        name: rotated-owner
   asserts:
-  - equal:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
-      value: postgresql://runtime@database:5432/agents
-  - notExists:
-      path: data.ATE_API_POSTGRES_DDL_CONNECTION_STRING
+  - failedTemplate:
+      errorMessage: postgres.readWriteConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
 
-- it: derives a release-scoped Secret name when enabled
-  template: ate-api-server.yaml
-  documentIndex: 3
-  set:
-    postgres:
-      enabled: false
-      connectionStringSecretRef:
-        enabled: true
-  asserts:
-  - contains:
-      path: spec.template.spec.volumes
-      content:
-        name: postgres-runtime-connection
-        projected:
-          sources:
-          - secret:
-              name: RELEASE-NAME-postgres-connection
-              items:
-              - key: connectionString
-                path: connection-string
-
-- it: keeps credentials out of the ConfigMap in Secret mode
+- it: requires an owner Secret when bundled bootstrap is disabled
   template: ate-api-server-envvars.yaml
   set:
     postgres:
-      enabled: false
-      schema: substrate
-      connectionStringSecretRef:
-        name: shared-database
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: rotated-readwrite
   asserts:
-  - notExists:
-      path: data.ATE_API_POSTGRES_CONNECTION_STRING
-  - equal:
-      path: data.ATE_API_POSTGRES_SCHEMA
-      value: substrate
+  - failedTemplate:
+      errorMessage: postgres.ownerConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
 
 - it: configures the maximum connection lifetime
   template: ate-api-server.yaml
@@ -347,43 +266,15 @@ tests:
       path: spec.template.spec.containers[0].args
       content: --postgres-max-conn-lifetime=10m
 
-- it: rejects disabling bundled PostgreSQL without a connection
+- it: requires an administrator Secret for external bootstrap
   template: ate-api-server-envvars.yaml
   set:
     postgres:
       enabled: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
   asserts:
   - failedTemplate:
-      errorMessage: postgres.connectionString or postgres.connectionStringSecretRef is required when postgres.enabled=false
-
-- it: rejects configuring both a literal connection and a Secret
-  template: ate-api-server-envvars.yaml
-  set:
-    postgres:
-      connectionString: postgresql://user:pass@database:5432/agents
-      connectionStringSecretRef:
-        name: shared-database
-  asserts:
-  - failedTemplate:
-      errorMessage: postgres.connectionString and postgres.connectionStringSecretRef are mutually exclusive
-
-- it: rejects a DDL connection without an explicit runtime connection
-  template: ate-api-server-envvars.yaml
-  set:
-    postgres:
-      ddlConnectionString: postgresql://owner@database:5432/agents
-  asserts:
-  - failedTemplate:
-      errorMessage: postgres.connectionString or postgres.connectionStringSecretRef is required when a DDL connection is configured
-
-- it: rejects both a literal and Secret-backed DDL connection
-  template: ate-api-server-envvars.yaml
-  set:
-    postgres:
-      connectionString: postgresql://runtime@database:5432/agents
-      ddlConnectionString: postgresql://owner@database:5432/agents
-      ddlConnectionStringSecretRef:
-        name: substrate-database
-  asserts:
-  - failedTemplate:
-      errorMessage: postgres.ddlConnectionString and postgres.ddlConnectionStringSecretRef are mutually exclusive
+      errorMessage: postgres.adminSecretRef.name is required when bootstrap is enabled without bundled PostgreSQL

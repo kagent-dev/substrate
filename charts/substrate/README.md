@@ -41,14 +41,14 @@ See `values.yaml` for the full set; the important keys:
 | Key | Default | Notes |
 |-----|---------|-------|
 | `postgres.enabled` | `true` | Deploy the bundled PostgreSQL instance |
-| `postgres.connectionString` | `""` (in-cluster) | Runtime/DML connection for external PostgreSQL |
-| `postgres.connectionStringSecretRef` | disabled | Read the runtime/DML connection from a Secret; its name defaults to `<release>-postgres-connection` when enabled |
-| `postgres.ddlConnectionString` | `""` (runtime connection) | Optional schema-owner connection for migrations and maintenance |
-| `postgres.ddlConnectionStringSecretRef` | disabled | Read the optional schema-owner connection string from a Secret |
-| `postgres.runtimeRole` | `""` | Stable `NOLOGIN` role assumed by runtime connections; required when rotation changes login usernames |
-| `postgres.ddlRole` | `""` (runtime role when the DDL connection is omitted) | Stable owner role assumed by migration and maintenance connections |
+| `postgres.readWriteConnectionStringSecretRef` | managed Secret | Read the read/write connection from a Secret |
+| `postgres.ownerConnectionStringSecretRef` | managed Secret | Read the owner connection from a Secret |
+| `postgres.bootstrap` | `true` | Create missing fixed users, roles, schema, and grants on startup; the direct `ateapi` binary defaults to `false` |
+| `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by read/write connections; configurable when bootstrap is disabled |
+| `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections; configurable when bootstrap is disabled |
+| `postgres.adminSecretRef` | `postgres-admin` | Select the administrator Secret |
 | `postgres.pool.maxConnLifetime` | `""` (pgx default) | Maximum physical connection lifetime; bounds Secret credential turnover |
-| `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
+| `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema; Kagent's umbrella chart sets `substrate` for its shared database |
 | `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
@@ -66,27 +66,42 @@ See `values.yaml` for the full set; the important keys:
 
 ## PostgreSQL credential rotation
 
-Secret-backed connection strings are mounted as projected files. Kubernetes
-updates these files when the Secret changes, and Substrate reads the current
-value when it opens a new physical connection. Inline connection strings are
-static until the pod restarts.
+The bundled PostgreSQL pod creates `postgres.database` (`atepg` by default). The chart uses the same database name in both managed connection Secrets. Under Kagent, the umbrella chart supplies its bundled PostgreSQL Service address and `kagent` database name to Substrate's fixed credential templates.
+
+The Substrate binary also has these fixed development usernames and passwords. During bootstrap it checks both connection Secrets against those constants, then uses the constants to create missing users. Bootstrap runs on every `ateapi` pod start while `postgres.bootstrap=true`. It never changes an existing user's password. To use different credentials, create the users yourself and disable bootstrap.
+
+The chart's default administrator and application passwords are fixed, published values. This bundled bootstrap setup is for development and evaluation, not production. For production, provision unique users and permissions outside Substrate, supply connection Secrets, and set `postgres.bootstrap=false`.
+
+The Substrate binary executes `cmd/ateapi/internal/store/atepg/identity.sql` from the Substrate repository during bootstrap. Operators can run that same file after supplying its transaction-local settings; it is separate from table migrations.
+For manual provisioning with custom chart role names, set the optional
+`substrate.bootstrap_owner_role` and `substrate.bootstrap_readwrite_role`
+transaction-local settings before running the file. They default to the fixed
+development names; bundled binary bootstrap passes those names explicitly.
+
+Substrate mounts connection Secrets as projected files. Kubernetes updates
+these files when the Secret changes. Substrate reads the current value for
+each new physical connection.
 
 `postgres.pool.maxConnLifetime` bounds how long established connections may
 continue using an old credential; rotation is not immediate. Keep old and new
 credentials valid long enough for Kubernetes projection and connection
 turnover.
 
-When rotation changes login usernames, configure `postgres.runtimeRole` and
-`postgres.ddlRole` as stable `NOLOGIN` roles. Before publishing a new Secret,
-grant each incoming login membership in its stable role. Substrate runs
-`SET ROLE` on every new connection, so missing membership rejects that
-connection before it enters the pool. DDL objects remain owned by the stable
-DDL role, and grants remain attached to the stable runtime role.
+When rotation changes a login username, grant the applicable configured group
+role. Bootstrap uses the fixed `substrate_readwrite` and `substrate_owner` roles.
 
-Neither Substrate nor this chart creates the stable roles or grants role
-membership. Database provisioning must create the roles before installation;
-the credential rotator must grant each generated login membership before it
-publishes the updated Secret.
+For bundled PostgreSQL, first create replacement logins and connection Secrets.
+Then set `postgres.bootstrap=false` and set both connection Secret references
+in the same Helm upgrade. PostgreSQL remains bundled, but Substrate stops
+creating or verifying the fixed login users. The bundled PostgreSQL pod still
+uses its administrator Secret; the API server no longer mounts it. Bootstrap
+never changes the password of an existing login.
 
-Without stable roles, changing a username requires a restart. The host, port,
-database, and fallback targets always require a restart.
+Substrate runs `SET ROLE` for each new connection. It rejects a login without
+the required membership.
+
+Set `postgres.bootstrap=false` for a BYO database. Create both group roles and
+all grants before installation, then set `postgres.readWriteRole` and
+`postgres.ownerRole` to those names. Use distinct roles and table schemas for
+separate installs sharing one database. Give each install separate logins and
+grant each login membership only in its install's roles.

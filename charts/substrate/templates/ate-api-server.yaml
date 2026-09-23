@@ -14,10 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- $connectionStringSecretRef := .Values.postgres.connectionStringSecretRef -}}
-{{- $connectionStringSecretEnabled := include "substrate.postgres.connectionStringSecretEnabled" . -}}
-{{- $ddlConnectionStringSecretRef := .Values.postgres.ddlConnectionStringSecretRef -}}
-{{- $ddlConnectionStringSecretEnabled := include "substrate.postgres.ddlConnectionStringSecretEnabled" . -}}
+{{- $readWriteConnectionStringSecretRef := .Values.postgres.readWriteConnectionStringSecretRef -}}
+{{- $ownerConnectionStringSecretRef := .Values.postgres.ownerConnectionStringSecretRef -}}
+{{- $bootstrapEnabled := .Values.postgres.bootstrap -}}
+{{- if not (kindIs "bool" $bootstrapEnabled) -}}
+{{- fail "postgres.bootstrap must be true or false" -}}
+{{- end -}}
+{{- if and $bootstrapEnabled (or (ne .Values.postgres.readWriteRole "substrate_readwrite") (ne .Values.postgres.ownerRole "substrate_owner")) -}}
+{{- fail "postgres bootstrap requires readWriteRole=substrate_readwrite and ownerRole=substrate_owner" -}}
+{{- end -}}
 
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -90,23 +95,16 @@ spec:
         - "--grpc-listen-addr=0.0.0.0:443"
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
-{{- if $connectionStringSecretEnabled }}
-        - "--postgres-connection-string=@file:/etc/ateapi/postgres/runtime/connection-string"
-{{- else }}
-        - "--postgres-connection-string=@env"
-{{- end }}
-{{- if $ddlConnectionStringSecretEnabled }}
-        - "--postgres-ddl-connection-string=@file:/etc/ateapi/postgres/ddl/connection-string"
-{{- else if .Values.postgres.ddlConnectionString }}
-        - "--postgres-ddl-connection-string=@env"
-{{- end }}
-{{- with .Values.postgres.runtimeRole }}
-        - {{ printf "--postgres-runtime-role=%s" . | quote }}
-{{- end }}
-{{- with .Values.postgres.ddlRole }}
-        - {{ printf "--postgres-ddl-role=%s" . | quote }}
-{{- end }}
+        - "--postgres-read-write-connection-string=@file:/etc/ateapi/postgres/read-write/connection-string"
+        - "--postgres-owner-connection-string=@file:/etc/ateapi/postgres/owner/connection-string"
+        - {{ printf "--postgres-read-write-role=%s" .Values.postgres.readWriteRole | quote }}
+        - {{ printf "--postgres-owner-role=%s" .Values.postgres.ownerRole | quote }}
         - "--postgres-schema=@env"
+        - {{ printf "--postgres-bootstrap=%t" $bootstrapEnabled | quote }}
+{{- if $bootstrapEnabled }}
+        - "--postgres-admin-username-file=/etc/ateapi/postgres/admin/username"
+        - "--postgres-admin-password-file=/etc/ateapi/postgres/admin/password"
+{{- end }}
 {{- with .Values.postgres.pool.maxConnLifetime }}
         - {{ printf "--postgres-max-conn-lifetime=%s" . | quote }}
 {{- end }}
@@ -162,14 +160,15 @@ spec:
         - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
         - { name: podidentity,         mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
         - { name: authentication-config, mountPath: /etc/ateapi/authentication, readOnly: true }
-{{- if $connectionStringSecretEnabled }}
-        - name: postgres-runtime-connection
-          mountPath: /etc/ateapi/postgres/runtime
+        - name: postgres-read-write-connection
+          mountPath: /etc/ateapi/postgres/read-write
           readOnly: true
-{{- end }}
-{{- if $ddlConnectionStringSecretEnabled }}
-        - name: postgres-ddl-connection
-          mountPath: /etc/ateapi/postgres/ddl
+        - name: postgres-owner-connection
+          mountPath: /etc/ateapi/postgres/owner
+          readOnly: true
+{{- if $bootstrapEnabled }}
+        - name: postgres-admin
+          mountPath: /etc/ateapi/postgres/admin
           readOnly: true
 {{- end }}
         ports:
@@ -233,25 +232,33 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
-{{- if $connectionStringSecretEnabled }}
-      - name: postgres-runtime-connection
+      - name: postgres-read-write-connection
         projected:
           sources:
           - secret:
-              name: {{ get $connectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              name: {{ include "substrate.postgres.readWriteSecretName" . | quote }}
               items:
-              - key: {{ get $connectionStringSecretRef "key" | default "connectionString" | quote }}
+              - key: {{ get $readWriteConnectionStringSecretRef "key" | default "readWriteConnectionString" | quote }}
                 path: connection-string
-{{- end }}
-{{- if $ddlConnectionStringSecretEnabled }}
-      - name: postgres-ddl-connection
+      - name: postgres-owner-connection
         projected:
           sources:
           - secret:
-              name: {{ get $ddlConnectionStringSecretRef "name" | default (include "substrate.fullname" (list "postgres-connection" .)) | quote }}
+              name: {{ include "substrate.postgres.ownerSecretName" . | quote }}
               items:
-              - key: {{ get $ddlConnectionStringSecretRef "key" | default "ddlConnectionString" | quote }}
+              - key: {{ get $ownerConnectionStringSecretRef "key" | default "ownerConnectionString" | quote }}
                 path: connection-string
+{{- if $bootstrapEnabled }}
+      - name: postgres-admin
+        projected:
+          sources:
+          - secret:
+              name: {{ include "substrate.postgres.adminSecretName" . | quote }}
+              items:
+              - key: {{ .Values.postgres.adminSecretRef.usernameKey | quote }}
+                path: username
+              - key: {{ .Values.postgres.adminSecretRef.passwordKey | quote }}
+                path: password
 {{- end }}
 ---
 apiVersion: policy/v1
