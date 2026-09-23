@@ -79,6 +79,33 @@ func TestProviderManifests(t *testing.T) {
 				} else if err != nil {
 					t.Fatal(err)
 				}
+				if tc.tool == "helm" && doc.Kind == "Deployment" {
+					for _, container := range doc.Spec.Template.Spec.Containers {
+						var required []string
+						switch container.Name {
+						case "ate-api-server":
+							required = []string{"--atelet-service-account=" + tc.prefix + "atelet"}
+						case "ate-controller":
+							required = []string{
+								"--atelet-service-account=" + tc.prefix + "atelet",
+								"--router-service-account=" + tc.prefix + "atenet-router",
+							}
+							if !slices.ContainsFunc(container.Env, func(env corev1.EnvVar) bool {
+								return env.Name == "POD_NAMESPACE" && env.ValueFrom != nil &&
+									env.ValueFrom.FieldRef != nil && env.ValueFrom.FieldRef.FieldPath == "metadata.namespace"
+							}) {
+								t.Error("controller must resolve worker identities from its pod namespace")
+							}
+						case "atenet-router":
+							required = []string{"--router-service-name=" + tc.prefix + "atenet-router"}
+						}
+						for _, arg := range required {
+							if !slices.Contains(container.Args, arg) {
+								t.Errorf("%s missing %s", container.Name, arg)
+							}
+						}
+					}
+				}
 				switch doc.Kind {
 				case "ServiceAccount":
 					if doc.Metadata.Name == tc.prefix+"k8s-credential-provider" {
