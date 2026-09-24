@@ -1,0 +1,183 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The PodMonitors of the six workloads that serve metrics. Two things here are
+# easy to get wrong and silent when wrong, so each is pinned per workload:
+#
+#   the port NAME, because a PodMonitor addresses a named container port and no
+#   two sources agree — ate-api-server and atelet name theirs `prometheus`, the
+#   others `metrics`, and the agentgateway sidecars of the router and the
+#   egress add `gw-metrics` and `stats`;
+#
+#   the pod LABEL, because every workload carries a bare `app: <component>`
+#   except the credential provider, whose label is the substrate.fullname
+#   helper's output and so depends on the release name.
+#
+# A wrong name or label yields a monitor that matches nothing, and no error.
+suite: metrics PodMonitors
+templates:
+- podmonitor.yaml
+tests:
+- it: renders nothing by default
+  asserts:
+  - hasDocuments:
+      count: 0
+
+- it: renders one PodMonitor per workload that serves metrics
+  set:
+    metrics.podMonitor.enabled: true
+  asserts:
+  - hasDocuments:
+      count: 6
+
+- it: addresses the port name ate-api-server's pod declares
+  set:
+    metrics.podMonitor.enabled: true
+  documentIndex: 0
+  asserts:
+  - isKind:
+      of: PodMonitor
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: ate-api-server
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: prometheus
+  - equal:
+      path: spec.podMetricsEndpoints[0].path
+      value: /metrics
+
+- it: addresses ate-controller's controller-runtime metrics port
+  set:
+    metrics.podMonitor.enabled: true
+  documentIndex: 1
+  asserts:
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: ate-controller
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: metrics
+
+- it: addresses the port name the atelet's pod declares
+  set:
+    metrics.podMonitor.enabled: true
+  documentIndex: 2
+  asserts:
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: atelet
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: prometheus
+
+- it: scrapes both the egress ext-proc and its agentgateway sidecar
+  set:
+    metrics.podMonitor.enabled: true
+  documentIndex: 3
+  asserts:
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: atenet-egress
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: metrics
+  - equal:
+      path: spec.podMetricsEndpoints[1].port
+      value: stats
+
+- it: scrapes both the router and its agentgateway sidecar
+  set:
+    metrics.podMonitor.enabled: true
+  documentIndex: 4
+  asserts:
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: atenet-router
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: metrics
+  - equal:
+      path: spec.podMetricsEndpoints[1].port
+      value: gw-metrics
+
+# The credential provider's pod label is the substrate.fullname helper's
+# output, not the bare component name: bare under the canonical release name
+# `substrate`, release-prefixed under any other. Both are pinned, because a
+# label that does not track the helper yields a monitor matching nothing.
+- it: selects the credential provider by the bare name under the canonical release
+  set:
+    metrics.podMonitor.enabled: true
+  release:
+    name: substrate
+  documentIndex: 5
+  asserts:
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: k8s-credential-provider
+  - equal:
+      path: spec.podMetricsEndpoints[0].port
+      value: metrics
+
+- it: selects the credential provider by the prefixed name under any other release
+  set:
+    metrics.podMonitor.enabled: true
+  release:
+    name: ate
+  documentIndex: 5
+  asserts:
+  - equal:
+      path: metadata.name
+      value: ate-k8s-credential-provider
+  - equal:
+      path: spec.selector.matchLabels.app
+      value: ate-k8s-credential-provider
+
+- it: scopes every monitor to the release namespace
+  set:
+    metrics.podMonitor.enabled: true
+  release:
+    namespace: ate-system
+  asserts:
+  - equal:
+      path: metadata.namespace
+      value: ate-system
+  - equal:
+      path: spec.namespaceSelector.matchNames[0]
+      value: ate-system
+
+- it: leaves the interval out when it is unset, so Prometheus' own default holds
+  set:
+    metrics.podMonitor.enabled: true
+  asserts:
+  - notExists:
+      path: spec.podMetricsEndpoints[0].interval
+
+- it: carries the interval on every endpoint, and the discovery labels
+  set:
+    metrics.podMonitor.enabled: true
+    metrics.podMonitor.interval: 60s
+    metrics.podMonitor.labels:
+      release: prometheus
+  documentIndex: 4
+  asserts:
+  - equal:
+      path: spec.podMetricsEndpoints[0].interval
+      value: 60s
+  - equal:
+      path: spec.podMetricsEndpoints[1].interval
+      value: 60s
+  - equal:
+      path: metadata.labels.release
+      value: prometheus
