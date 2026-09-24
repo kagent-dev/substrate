@@ -104,6 +104,7 @@ spec:
     metadata:
       labels:
         app: {{ $name }}
+        {{- with include "substrate.podLabels" $ }}{{- . | nindent 8 }}{{- end }}
     spec:
       securityContext:
         # Group ownership of the projected certificate below, and of the data

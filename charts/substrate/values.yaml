@@ -106,6 +106,13 @@ global:
   # -- Fallback imagePullPolicy where a container does not set one.
   imagePullPolicy: ""
 
+# Labels added to every long-running pod the chart renders, next to the chart's
+# own `app` label, which they cannot replace. For example the label a
+# multi-tenant telemetry collector routes a pod's OTLP export by. The
+# rustfs-bucket-init Job does not get them: a Job's pod template is immutable,
+# so a change would fail the upgrade.
+podLabels: {}
+
 # Pull secrets for every pod this chart renders. Merged with global.imagePullSecrets.
 imagePullSecrets: []
 
