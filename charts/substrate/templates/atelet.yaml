@@ -110,6 +110,11 @@ spec:
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atelet" .) }}
       priorityClassName: {{ include "substrate.fullname" (list "ate-node-critical" .) }}
+      # Run on nodes reserved for any WorkerPool sandbox class.
+      tolerations:
+      - key: ate.dev/sandboxClass
+        operator: Exists
+        effect: NoSchedule
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
       - name: atelet
