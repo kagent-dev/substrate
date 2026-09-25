@@ -74,6 +74,12 @@ is present (skipped for --kind, and by NO_DEV_ENV=1).`,
 	// setup is implied by an argument-less invocation; the user picks one.
 }
 
+// Root is the command tree, for callers that need to inspect it rather than
+// run it. hack/install-ate.sh translates the historical installer flags into
+// ate-setup command lines, and its test resolves each one against this to check
+// it still names a command that exists.
+func Root() *cobra.Command { return rootCmd }
+
 // Execute runs the command tree.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
@@ -85,17 +91,24 @@ func Execute() {
 func init() {
 	f := rootCmd.PersistentFlags()
 	f.BoolVar(&opts.Kind, "kind", false,
-		"Target a local Kind cluster: use the kind overlays, the local registry, and host-architecture builds")
+		"Target a local Kind cluster: use the kind overlays, the local registry, and host-architecture builds (or ATE_INSTALL_KIND=true)")
 	f.StringVar(&opts.Kubeconfig, "kubeconfig", "", "Path to the kubeconfig file")
 	f.StringVar(&opts.Context, "context", "", "Name of the kubeconfig context to use (defaults to KUBECTL_CONTEXT)")
 	f.StringVar(&opts.Router, "atenet-dataplane", "", "Atenet ingress and egress dataplane: envoy or agentgateway (default envoy)")
 	f.StringVar(&opts.RolloutTimeout, "rollout-timeout", "", "Timeout for workload rollouts as a duration string (e.g. 60s, 5m)")
 	f.IntVar(&opts.PodcertWorkersPerSigner, "podcert-workers-per-signer", 0, "Number of worker goroutines per signer in podcertificate-controller")
+	f.StringVar(&opts.ClusterSize, "cluster-size", "",
+		"Coarse-grained sizing of Substrate for larger clusters: size0 or size10 (default size0). The larger the number, the larger the cluster")
+	f.BoolVar(&opts.CordonControlPlane, "cordon-control-plane", false,
+		"Pin each control plane pod to its own node. Assumes a pool labeled and tainted "+
+			"ate.dev/workloadType=ate-control-plane:NoSchedule with one node per pod "+
+			"(7 at the shipped replica counts) plus a spare, since rollouts surge a new pod first")
 	f.BoolVar(&opts.ExperimentalUseSDSMint, "experimental-use-sdsmint", false, "Deploy egress gateway with dynamic per-SNI certificate minting")
 	f.StringVar(&opts.AdditionalEgressExtprocService, "experimental-additional-egress-extproc-service", "", "Run an additional ext_proc authorization filter served by NS/SVC:PORT (requires --experimental-use-sdsmint)")
 	f.BoolVar(&opts.ExperimentalEgressCredentialInjection, "experimental-egress-credential-injection", false, "Point the egress gateway's MITM-leg handler at a credential provider so a matching EgressPolicy rule injects its credential (requires --experimental-use-sdsmint and --atenet-dataplane=envoy)")
 	f.StringVar(&opts.CredentialProviderName, "credential-provider-name", "", "Credential provider the injector serves, as a ate-secret:// prefix (default ate-secret://k8s.io)")
 	f.StringVar(&opts.CredentialProviderAddress, "credential-provider-address", "", "Address the egress gateway dials the credential provider at (default k8s-credential-provider.ate-system.svc:50051)")
+	f.StringVar(&opts.OtlpEndpoint, "otlp-endpoint", "", "Send control plane telemetry to this OTLP collector instead of the cluster default (defaults to ATE_OTLP_ENDPOINT)")
 	f.BoolVar(&opts.NoDevEnv, "no-dev-env", false, "Do not source .ate-dev-env.sh")
 
 	f.StringVar(&opts.ImageRepo, "image-repo", "",

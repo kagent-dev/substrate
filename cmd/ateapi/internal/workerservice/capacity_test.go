@@ -22,7 +22,6 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/ateletauth/ateletauthtest"
-	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/storetest"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -30,37 +29,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	capWorkerName = "8f1c2d34-5e6a-4b7c-9d8e-0f1a2b3c4d5e"
-	capNode       = "node-1"
-)
-
-// seedReportedWorker registers a Worker on nodeName that has already reported
-// capacity: identity from the pod, the way the syncer writes it, plus the
-// result of an earlier report. A Worker that has never reported carries none,
-// so what a fresh report replaces is what this seeds.
-func seedReportedWorker(t *testing.T, st store.Interface, nodeName string, capacity *ateapipb.WorkerResources) *ateapipb.Worker {
-	t.Helper()
-	created, err := st.CreateWorker(context.Background(), &ateapipb.Worker{
-		Metadata:        &ateapipb.ResourceMetadata{Name: capWorkerName},
-		WorkerNamespace: "ate-system",
-		WorkerPool:      "pool-1",
-		WorkerPod:       "worker-pod-1",
-		WorkerPodUid:    capWorkerName,
-		NodeName:        nodeName,
-		Ip:              "10.1.2.3",
-		SandboxClass:    "gvisor",
-		Status:          &ateapipb.WorkerStatus{State: ateapipb.WorkerState_WORKER_STATE_ACTIVE, Capacity: capacity},
-	})
-	if err != nil {
-		t.Fatalf("seeding worker: %v", err)
-	}
-	return created
-}
-
 func setRequest(actors int32) *ateapipb.SetWorkerCapacityRequest {
 	return &ateapipb.SetWorkerCapacityRequest{
-		Worker:   &ateapipb.ObjectRef{Name: capWorkerName},
+		Worker:   &ateapipb.ObjectRef{Name: testWorkerName},
 		Capacity: &ateapipb.WorkerResources{Actors: actors},
 	}
 }
@@ -70,10 +41,10 @@ func setRequest(actors int32) *ateapipb.SetWorkerCapacityRequest {
 func TestSetWorkerCapacity(t *testing.T) {
 	st, cleanup := storetest.SetupTestStore(t)
 	defer cleanup()
-	s := New(st)
-	seedReportedWorker(t, st, capNode, &ateapipb.WorkerResources{Actors: 1, Resources: resources.CPUMemory(2000, 0)})
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, nil)
+	seedReportedWorker(t, st, testNode, &ateapipb.WorkerResources{Actors: 1, Resources: resources.CPUMemory(2000, 0)})
 
-	got, err := s.SetWorkerCapacity(ateletauthtest.ContextWith(ateletauthtest.CertOn(t, capNode)), setRequest(4094))
+	got, err := s.SetWorkerCapacity(ateletauthtest.ContextWith(ateletauthtest.CertOn(t, testNode)), setRequest(4094))
 	if err != nil {
 		t.Fatalf("SetWorkerCapacity() failed: %v", err)
 	}
@@ -94,8 +65,8 @@ func TestSetWorkerCapacity(t *testing.T) {
 func TestSetWorkerCapacity_OtherNodeIsNotFound(t *testing.T) {
 	st, cleanup := storetest.SetupTestStore(t)
 	defer cleanup()
-	s := New(st)
-	seedReportedWorker(t, st, capNode, &ateapipb.WorkerResources{Actors: 1})
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, nil)
+	seedReportedWorker(t, st, testNode, &ateapipb.WorkerResources{Actors: 1})
 
 	_, err := s.SetWorkerCapacity(ateletauthtest.ContextWith(ateletauthtest.CertOn(t, "some-other-node")), setRequest(4094))
 	if got := status.Code(err); got != codes.NotFound {
@@ -103,7 +74,7 @@ func TestSetWorkerCapacity_OtherNodeIsNotFound(t *testing.T) {
 	}
 
 	// And the report must not have landed.
-	after, err := st.GetWorker(context.Background(), capWorkerName)
+	after, err := st.GetWorker(context.Background(), testWorkerName)
 	if err != nil {
 		t.Fatalf("GetWorker: %v", err)
 	}
@@ -118,15 +89,15 @@ func TestSetWorkerCapacity_OtherNodeIsNotFound(t *testing.T) {
 func TestSetWorkerCapacity_UnchangedDoesNotWrite(t *testing.T) {
 	st, cleanup := storetest.SetupTestStore(t)
 	defer cleanup()
-	s := New(st)
-	seeded := seedReportedWorker(t, st, capNode, &ateapipb.WorkerResources{Actors: 4094})
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, nil)
+	seeded := seedReportedWorker(t, st, testNode, &ateapipb.WorkerResources{Actors: 4094})
 
 	for range 3 {
-		if _, err := s.SetWorkerCapacity(ateletauthtest.ContextWith(ateletauthtest.CertOn(t, capNode)), setRequest(4094)); err != nil {
+		if _, err := s.SetWorkerCapacity(ateletauthtest.ContextWith(ateletauthtest.CertOn(t, testNode)), setRequest(4094)); err != nil {
 			t.Fatalf("SetWorkerCapacity() failed: %v", err)
 		}
 	}
-	after, err := st.GetWorker(context.Background(), capWorkerName)
+	after, err := st.GetWorker(context.Background(), testWorkerName)
 	if err != nil {
 		t.Fatalf("GetWorker: %v", err)
 	}
@@ -138,9 +109,9 @@ func TestSetWorkerCapacity_UnchangedDoesNotWrite(t *testing.T) {
 func TestSetWorkerCapacity_Errors(t *testing.T) {
 	st, cleanup := storetest.SetupTestStore(t)
 	defer cleanup()
-	s := New(st)
-	seedReportedWorker(t, st, capNode, &ateapipb.WorkerResources{Actors: 1})
-	authed := ateletauthtest.ContextWith(ateletauthtest.CertOn(t, capNode))
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, nil)
+	seedReportedWorker(t, st, testNode, &ateapipb.WorkerResources{Actors: 1})
+	authed := ateletauthtest.ContextWith(ateletauthtest.CertOn(t, testNode))
 
 	tests := []struct {
 		name string
@@ -153,7 +124,7 @@ func TestSetWorkerCapacity_Errors(t *testing.T) {
 			Capacity: &ateapipb.WorkerResources{Actors: 2},
 		}, codes.InvalidArgument},
 		{"no capacity", authed, &ateapipb.SetWorkerCapacityRequest{
-			Worker: &ateapipb.ObjectRef{Name: capWorkerName},
+			Worker: &ateapipb.ObjectRef{Name: testWorkerName},
 		}, codes.InvalidArgument},
 		{"absent worker", authed, &ateapipb.SetWorkerCapacityRequest{
 			Worker:   &ateapipb.ObjectRef{Name: "3b9f1e77-2c4d-4a80-91be-6d5c8f0a7e21"},
@@ -176,9 +147,9 @@ func TestSetWorkerCapacity_Errors(t *testing.T) {
 func TestSetWorkerCapacity_RejectsNonsense(t *testing.T) {
 	st, cleanup := storetest.SetupTestStore(t)
 	defer cleanup()
-	s := New(st)
-	seeded := seedReportedWorker(t, st, capNode, &ateapipb.WorkerResources{Actors: 4094})
-	authed := ateletauthtest.ContextWith(ateletauthtest.CertOn(t, capNode))
+	s := New(st, &fakeSuspender{}, testAteletSPIFFEID, nil)
+	seeded := seedReportedWorker(t, st, testNode, &ateapipb.WorkerResources{Actors: 4094})
+	authed := ateletauthtest.ContextWith(ateletauthtest.CertOn(t, testNode))
 
 	for _, tc := range []struct {
 		name     string
@@ -193,7 +164,7 @@ func TestSetWorkerCapacity_RejectsNonsense(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := s.SetWorkerCapacity(authed, &ateapipb.SetWorkerCapacityRequest{
-				Worker:   &ateapipb.ObjectRef{Name: capWorkerName},
+				Worker:   &ateapipb.ObjectRef{Name: testWorkerName},
 				Capacity: tc.capacity,
 			})
 			if got := status.Code(err); got != codes.InvalidArgument {
@@ -202,7 +173,7 @@ func TestSetWorkerCapacity_RejectsNonsense(t *testing.T) {
 		})
 	}
 
-	after, err := st.GetWorker(context.Background(), capWorkerName)
+	after, err := st.GetWorker(context.Background(), testWorkerName)
 	if err != nil {
 		t.Fatalf("GetWorker: %v", err)
 	}

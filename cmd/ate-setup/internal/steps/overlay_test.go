@@ -16,9 +16,13 @@ package steps
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
@@ -280,4 +284,335 @@ func extProcCluster(filter map[string]any) string {
 	envoyGRPC, _ := grpcService["envoy_grpc"].(map[string]any)
 	name, _ := envoyGRPC["cluster_name"].(string)
 	return name
+}
+
+// The plain GKE install renders the base kustomization, not the raw
+// directory: the directory would re-apply pod-certificate-controller.yaml and
+// undo the size10 flags and the WORKERS_PER_SIGNER value.
+func TestSystemOverlayDefaultIsBase(t *testing.T) {
+	if got := SystemOverlay(&config.Config{Router: config.RouterEnvoy}); got != installDir+"/base" {
+		t.Errorf("SystemOverlay(envoy, GKE) = %q, want %s/base", got, installDir)
+	}
+}
+
+// pinnedWorkloads returns the Deployment and StatefulSet names in a rendered
+// manifest that carry the cordon-control-plane node pinning, and every
+// workload name seen.
+func pinnedWorkloads(t *testing.T, manifest []byte) (pinned, all []string) {
+	t.Helper()
+	for _, doc := range strings.Split(string(manifest), "\n---\n") {
+		var obj struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						NodeSelector map[string]string `json:"nodeSelector"`
+						Tolerations  []map[string]any  `json:"tolerations"`
+						Affinity     map[string]any    `json:"affinity"`
+					} `json:"spec"`
+				} `json:"template"`
+			} `json:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+			t.Fatalf("rendered document is not valid YAML: %v", err)
+		}
+		if obj.Kind != "Deployment" && obj.Kind != "StatefulSet" {
+			continue
+		}
+		all = append(all, obj.Metadata.Name)
+		podSpec := obj.Spec.Template.Spec
+		if podSpec.NodeSelector["ate.dev/workloadType"] == "ate-control-plane" &&
+			len(podSpec.Tolerations) > 0 && podSpec.Affinity["podAntiAffinity"] != nil {
+			pinned = append(pinned, obj.Metadata.Name)
+		}
+	}
+	return pinned, all
+}
+
+// Under --cordon-control-plane every control plane apply path has to carry the
+// pinning, since each workload reaches the cluster through a different one:
+// the system bundle, the lone redeploy files, the podcert overlay, the
+// postgres file, and the egress variants.
+func TestRenderCordonControlPlane(t *testing.T) {
+	root := repoRoot(t)
+	for _, tc := range []struct {
+		name string
+		cfg  config.Config
+		path func(e *Env) string
+		want []string
+	}{
+		{
+			name: "base bundle",
+			cfg:  config.Config{Router: config.RouterEnvoy},
+			path: func(e *Env) string { return e.Cfg.Path(SystemOverlay(e.Cfg)) },
+			want: []string{"ate-api-server", "ate-controller", "atenet-router"},
+		},
+		{
+			name: "kind bundle",
+			cfg:  config.Config{Router: config.RouterEnvoy, Kind: true},
+			path: func(e *Env) string { return e.Cfg.Path(SystemOverlay(e.Cfg)) },
+			want: []string{"ate-api-server", "ate-controller", "atenet-router"},
+		},
+		{
+			name: "agentgateway bundle",
+			cfg:  config.Config{Router: config.RouterAgentgateway},
+			path: func(e *Env) string { return e.Cfg.Path(SystemOverlay(e.Cfg)) },
+			want: []string{"ate-api-server", "ate-controller", "atenet-router"},
+		},
+		{
+			name: "api server file",
+			path: func(e *Env) string { return e.Cfg.Manifest("ate-api-server.yaml") },
+			want: []string{"ate-api-server"},
+		},
+		{
+			name: "podcert file",
+			path: func(e *Env) string { return e.Cfg.Manifest("pod-certificate-controller.yaml") },
+			want: []string{"podcertificate-controller"},
+		},
+		{
+			name: "podcert size10 overlay",
+			cfg:  config.Config{ClusterSize: config.ClusterSizeSize10},
+			path: func(e *Env) string { return e.Cfg.Manifest("podcert-size10") },
+			want: []string{"podcertificate-controller"},
+		},
+		{
+			name: "postgres file",
+			path: func(e *Env) string { return e.postgresManifestPath() },
+			want: []string{"postgres"},
+		},
+		{
+			name: "egress file",
+			path: func(e *Env) string { return e.atenetEgressManifestPath() },
+			want: []string{"atenet-egress"},
+		},
+		{
+			name: "egress sdsmint file",
+			cfg:  config.Config{ExperimentalUseSDSMint: true},
+			path: func(e *Env) string { return e.atenetEgressManifestPath() },
+			want: []string{"atenet-egress"},
+		},
+		{
+			name: "agentgateway egress overlay",
+			path: func(e *Env) string { return e.Cfg.Path(installDir + "/agentgateway-egress") },
+			want: []string{"atenet-egress"},
+		},
+		{
+			name: "agentgateway egress mitm overlay",
+			cfg:  config.Config{Router: config.RouterAgentgateway, ExperimentalUseSDSMint: true},
+			path: func(e *Env) string { return e.Cfg.Path(installDir + "/agentgateway-egress-mitm") },
+			want: []string{"atenet-egress"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			cfg.Root = root
+			cfg.CordonControlPlane = true
+			e := &Env{Cfg: &cfg}
+
+			rendered, err := e.render(tc.path(e))
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			pinned, all := pinnedWorkloads(t, rendered)
+			for _, name := range tc.want {
+				if !slices.Contains(all, name) {
+					t.Errorf("rendered manifest has no workload %s (found %v)", name, all)
+				}
+				if !slices.Contains(pinned, name) {
+					t.Errorf("workload %s is not pinned to the control plane pool", name)
+				}
+			}
+			// The DaemonSet-shaped and demo workloads stay off the pool; only
+			// the named control plane workloads are pinned.
+			for _, name := range pinned {
+				if !slices.Contains(tc.want, name) {
+					t.Errorf("workload %s is pinned but is not a control plane workload", name)
+				}
+			}
+		})
+	}
+}
+
+// The extproc-patched egress manifest arrives as bytes, and the pinning has to
+// reach it too.
+func TestRenderBytesCordonControlPlane(t *testing.T) {
+	e := &Env{Cfg: &config.Config{
+		Root:                           repoRoot(t),
+		CordonControlPlane:             true,
+		ExperimentalUseSDSMint:         true,
+		AdditionalEgressExtprocService: "ate-system/foo:50051",
+	}}
+	patched, err := e.patchAtenetEgressManifest()
+	if err != nil {
+		t.Fatalf("patchAtenetEgressManifest: %v", err)
+	}
+	rendered, err := e.renderBytes(patched)
+	if err != nil {
+		t.Fatalf("renderBytes: %v", err)
+	}
+	pinned, _ := pinnedWorkloads(t, rendered)
+	if !slices.Contains(pinned, "atenet-egress") {
+		t.Errorf("atenet-egress is not pinned in the composed extproc manifest (pinned: %v)", pinned)
+	}
+	if !strings.Contains(string(rendered), additionalEgressExtprocCluster) {
+		t.Error("composition dropped the spliced extproc cluster")
+	}
+}
+
+// Without the flag, render is a plain read or build and adds nothing.
+func TestRenderWithoutCordonLeavesManifestsAlone(t *testing.T) {
+	e := &Env{Cfg: &config.Config{Root: repoRoot(t)}}
+	rendered, err := e.render(e.Cfg.Manifest("ate-api-server.yaml"))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if pinned, _ := pinnedWorkloads(t, rendered); len(pinned) != 0 {
+		t.Errorf("render without --cordon-control-plane pinned %v", pinned)
+	}
+	raw, err := os.ReadFile(e.Cfg.Manifest("ate-api-server.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rendered) != string(raw) {
+		t.Error("render of a plain file without --cordon-control-plane is not the file's bytes")
+	}
+}
+
+// The two sdsmint switches are coupled: the MITM overlay mounts the CA pool
+// Secret EnsureEgressMITMCAPoolSecret generates, so selecting one without the
+// other leaves atenet-egress waiting on a Secret nobody creates.
+func TestAgentgatewayEgressMITMOverlay(t *testing.T) {
+	cfg := &config.Config{
+		Root:                   repoRoot(t),
+		Router:                 config.RouterAgentgateway,
+		ExperimentalUseSDSMint: true,
+	}
+	e := &Env{Cfg: cfg, Kube: fakeKube(t)}
+
+	built, err := e.Kustomize(installDir + "/agentgateway-egress-mitm")
+	if err != nil {
+		t.Fatalf("Kustomize(agentgateway-egress-mitm) = %v", err)
+	}
+	if !strings.Contains(string(built), SecretEgressMITMCAPool) {
+		t.Errorf("the MITM overlay does not mount the %s Secret", SecretEgressMITMCAPool)
+	}
+
+	if err := e.EnsureEgressMITMCAPoolSecret(t.Context()); err != nil {
+		t.Fatalf("EnsureEgressMITMCAPoolSecret() error = %v", err)
+	}
+	exists, err := e.Kube.SecretExists(t.Context(), NamespaceAteSystem, SecretEgressMITMCAPool)
+	if err != nil {
+		t.Fatalf("SecretExists() error = %v", err)
+	}
+	if !exists {
+		t.Errorf("no %s Secret was generated for the agentgateway dataplane", SecretEgressMITMCAPool)
+	}
+}
+
+// otelConfig seeds the ConfigMap every component reads its collector address
+// from.
+func otelConfig(endpoint string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: NamespaceAteSystem, Name: otelConfigMap},
+		Data:       map[string]string{otelEndpointKey: endpoint},
+	}
+}
+
+// restartedAt reports whether a workload's pod template carries the restart
+// annotation.
+func restartedAt(t *testing.T, e *Env, kind, name string) bool {
+	t.Helper()
+	var annotations map[string]string
+	switch kind {
+	case "deployment":
+		dep, err := e.Kube.GetDeployment(t.Context(), NamespaceAteSystem, name)
+		if err != nil || dep == nil {
+			t.Fatalf("GetDeployment(%s) = %v, %v", name, dep, err)
+		}
+		annotations = dep.Spec.Template.Annotations
+	case "daemonset":
+		ds, err := e.Kube.Typed.AppsV1().DaemonSets(NamespaceAteSystem).Get(t.Context(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("getting daemonset %s: %v", name, err)
+		}
+		annotations = ds.Spec.Template.Annotations
+	}
+	_, ok := annotations["kubectl.kubernetes.io/restartedAt"]
+	return ok
+}
+
+func TestApplyOtelEndpointOverride(t *testing.T) {
+	const endpoint = "http://collector.benchmark.svc:4317"
+
+	t.Run("no endpoint configured is a no-op", func(t *testing.T) {
+		e := &Env{Cfg: &config.Config{}, Kube: fakeKube(t, otelConfig("http://default:4317"))}
+		if err := e.applyOtelEndpointOverride(t.Context()); err != nil {
+			t.Fatalf("applyOtelEndpointOverride() error = %v", err)
+		}
+		cm, _ := e.Kube.GetConfigMap(t.Context(), NamespaceAteSystem, otelConfigMap)
+		if cm.Data[otelEndpointKey] != "http://default:4317" {
+			t.Errorf("%s = %q, want the cluster default untouched", otelEndpointKey, cm.Data[otelEndpointKey])
+		}
+	})
+
+	// Restarting when nothing changed makes the restart race the rollout the
+	// caller is about to wait on, and `rollout status` then times out.
+	t.Run("already correct restarts nothing", func(t *testing.T) {
+		e := &Env{
+			Cfg:  &config.Config{OtlpEndpoint: endpoint},
+			Kube: fakeKube(t, otelConfig(endpoint), apiServerDeployment()),
+		}
+		if err := e.applyOtelEndpointOverride(t.Context()); err != nil {
+			t.Fatalf("applyOtelEndpointOverride() error = %v", err)
+		}
+		if restartedAt(t, e, "deployment", "ate-api-server") {
+			t.Error("ate-api-server was restarted even though the endpoint was unchanged")
+		}
+	})
+
+	t.Run("patches and restarts the consumers", func(t *testing.T) {
+		// The atelet DaemonSet name carries a substrate version suffix, so it
+		// can only be found by label.
+		atelet := &appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: NamespaceAteSystem,
+				Name:      "atelet-v1-2-3",
+				Labels:    map[string]string{"app": "atelet"},
+			},
+		}
+		e := &Env{
+			Cfg:  &config.Config{OtlpEndpoint: endpoint},
+			Kube: fakeKube(t, otelConfig("http://default:4317"), apiServerDeployment(), atelet),
+		}
+
+		if err := e.applyOtelEndpointOverride(t.Context()); err != nil {
+			t.Fatalf("applyOtelEndpointOverride() error = %v", err)
+		}
+
+		cm, _ := e.Kube.GetConfigMap(t.Context(), NamespaceAteSystem, otelConfigMap)
+		if cm.Data[otelEndpointKey] != endpoint {
+			t.Errorf("%s = %q, want %q", otelEndpointKey, cm.Data[otelEndpointKey], endpoint)
+		}
+		// ate-controller and atenet-router are absent here: a deploy of one
+		// component has only that component, which is not an error.
+		if !restartedAt(t, e, "deployment", "ate-api-server") {
+			t.Error("ate-api-server was not restarted")
+		}
+		if !restartedAt(t, e, "daemonset", "atelet-v1-2-3") {
+			t.Error("the atelet DaemonSet was not restarted")
+		}
+	})
+}
+
+func TestPatchEnvoyDataplaneImage(t *testing.T) {
+	e := &Env{}
+	raw := []byte("containers:\n- name: envoy\n  image: ${ENVOY_DATAPLANE_IMAGE}\n")
+	want := "containers:\n- name: envoy\n  image: gcr.io/example/envoy-dataplane@sha256:abc123\n"
+	got := string(e.patchEnvoyDataplaneImage(raw, "gcr.io/example/envoy-dataplane@sha256:abc123"))
+	if got != want {
+		t.Errorf("patchEnvoyDataplaneImage() = %q, want %q", got, want)
+	}
 }

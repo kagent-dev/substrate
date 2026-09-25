@@ -24,7 +24,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/agent-substrate/substrate/internal/ateerrors"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/resources"
 
@@ -55,6 +54,23 @@ const (
 	TemplateAtespaceKey   = attribute.Key("ate.template.atespace")
 	ActorVersionKey       = attribute.Key("ate.actor.version")
 )
+
+// TemplateUnknown is the fallback for a template dimension the emitter cannot
+// resolve. "unknown" is a legal atespace or template name, so a real object
+// with that name collides with the fallback. Like ate.sandbox.class="unknown",
+// the registry accepts that collision to keep the dimension bounded and
+// non-empty.
+const TemplateUnknown = "unknown"
+
+// NormalizeTemplateDimension returns dim, or TemplateUnknown when dim is empty.
+// Only the router calls it today. The other metrics that carry ate.template.*
+// emit the raw value.
+func NormalizeTemplateDimension(dim string) string {
+	if dim == "" {
+		return TemplateUnknown
+	}
+	return dim
+}
 
 // ReservedNamespace is substrate's. A producer that merges untrusted fields into a
 // record drops everything under it, so nothing a workload sets can read as
@@ -142,75 +158,20 @@ func ActorStateValue(state ateapipb.ActorState) string {
 // pool is node state every actor shares. For the same reason it is the only
 // ate.* label on its counter.
 const (
-	ActorOperationNameKey   = attribute.Key("ate.actor.operation.name")
-	WorkerPoolNamespaceKey  = attribute.Key("ate.workerpool.namespace")
-	WorkerPoolNameKey       = attribute.Key("ate.workerpool.name")
-	WorkerStateKey          = attribute.Key("ate.worker.state")
-	SandboxClassKey         = attribute.Key("ate.sandbox.class")
-	SnapshotKindKey         = attribute.Key("ate.snapshot.kind")
-	SnapshotScopeKey        = attribute.Key("ate.snapshot.scope")
-	SnapshotPhaseKey        = attribute.Key("ate.snapshot.phase")
-	ImageCacheOutcomeKey    = attribute.Key("ate.imagecache.outcome")
-	SchedulerOutcomeKey     = attribute.Key("ate.scheduler.outcome")
-	SchedulingConstraintKey = attribute.Key("ate.scheduling.constraint")
-	RouterResumeKey         = attribute.Key("ate.router.resume")
-	RouterOutcomeKey        = attribute.Key("ate.router.outcome")
-	FailureReasonKey        = attribute.Key("ate.failure.reason")
-	FailureDomainKey        = attribute.Key("ate.failure.domain")
-	StatsSourceKey          = attribute.Key("ate.stats.source")
+	ActorOperationNameKey  = attribute.Key("ate.actor.operation.name")
+	WorkerPoolNamespaceKey = attribute.Key("ate.workerpool.namespace")
+	WorkerPoolNameKey      = attribute.Key("ate.workerpool.name")
+	WorkerStateKey         = attribute.Key("ate.worker.state")
+	SandboxClassKey        = attribute.Key("ate.sandbox.class")
+	SnapshotKindKey        = attribute.Key("ate.snapshot.kind")
+	SnapshotScopeKey       = attribute.Key("ate.snapshot.scope")
+	SnapshotPhaseKey       = attribute.Key("ate.snapshot.phase")
+	ImageCacheOutcomeKey   = attribute.Key("ate.imagecache.outcome")
+	SchedulerOutcomeKey    = attribute.Key("ate.scheduler.outcome")
+	RouterResumeKey        = attribute.Key("ate.router.resume")
+	RouterOutcomeKey       = attribute.Key("ate.router.outcome")
+	StatsSourceKey         = attribute.Key("ate.stats.source")
 )
-
-// Values for FailureDomainKey. A strict function of the reason, so it costs no
-// series. Emitted rather than derived downstream: a component ahead of ateapi
-// can report a reason this build rejects, which ExtractReason turns into
-// Unknown, and a consumer matching on the reason would file it as infrastructure.
-const (
-	FailureDomainInfrastructure = "infrastructure"
-	FailureDomainWorkload       = "workload"
-	FailureDomainUnknown        = "unknown"
-)
-
-// workloadReasons are the failures the actor's owner fixes rather than the
-// platform operator: a misdeclared ActorTemplate as much as a process that will
-// not start. Membership, not a name prefix, decides the domain.
-//
-// ReasonInvalidSandboxAsset is deliberately absent: it reads a SandboxConfig,
-// which is cluster-scoped, so no actor can cause it or fix it.
-var workloadReasons = []ateerrors.Reason{
-	ateerrors.ReasonInvalidContainerConfig,
-	ateerrors.ReasonInvalidObjectURL,
-	ateerrors.ReasonWorkloadNotReady,
-}
-
-// FailureAttributes returns the reason and its domain together, so no producer
-// can emit half the pair. Same rule as WorkerPoolAttributes.
-func FailureAttributes(reason string) []attribute.KeyValue {
-	return []attribute.KeyValue{
-		FailureReasonKey.String(reason),
-		FailureDomainKey.String(FailureDomain(reason)),
-	}
-}
-
-// FailureLogAttrs is FailureAttributes for a slog record.
-func FailureLogAttrs(reason string) []slog.Attr {
-	return []slog.Attr{
-		slog.String(string(FailureReasonKey), reason),
-		slog.String(string(FailureDomainKey), FailureDomain(reason)),
-	}
-}
-
-// FailureDomain classifies a reason value. An unrecognized reason reports
-// FailureDomainUnknown rather than infrastructure, so a taxonomy gap stays
-// visible instead of inflating one side.
-func FailureDomain(reason string) string {
-	if slices.Contains(workloadReasons, ateerrors.Reason(reason)) {
-		return FailureDomainWorkload
-	}
-	if ateerrors.IsValidReason(reason) && reason != ReasonUnknown {
-		return FailureDomainInfrastructure
-	}
-	return FailureDomainUnknown
-}
 
 // Values for StatsSourceKey, mirroring ateompb.StatsSource. The two sources do
 // not measure the same thing (the cgroup source charges the sandbox runtime's
@@ -223,29 +184,21 @@ const (
 	StatsSourceGuestAgent  = "guest-agent"
 )
 
-// Values for SchedulingConstraintKey.
-const (
-	ConstraintNone          = "none"
-	ConstraintRequiredNodes = "required_nodes"
-	ConstraintSelector      = "selector"
-)
-
-// Control-plane failure reasons for ate.actor.crashes metric.
-const (
-	ReasonCorruptedAssignment = string(ateerrors.ReasonCorruptedAssignment)
-	ReasonWorkerReassigned    = string(ateerrors.ReasonWorkerReassigned)
-	ReasonWorkerPodGone       = string(ateerrors.ReasonWorkerPodGone)
-	ReasonUnknown             = string(ateerrors.ReasonUnknown)
-)
-
 // Values for RouterResumeKey.
 const (
-	// RouterResumeNone indicates the actor was already running (steady-state route).
+	// RouterResumeNone indicates the resume completed and found the actor already
+	// running (steady-state route).
 	RouterResumeNone = "none"
-	// RouterResumeTriggered indicates this request won the singleflight lock and initiated cold activation.
+	// RouterResumeTriggered indicates this request won the singleflight lock and
+	// completed a cold activation.
 	RouterResumeTriggered = "triggered"
-	// RouterResumeJoined indicates this request parked on an in-flight singleflight resume.
+	// RouterResumeJoined indicates this request waited on another request's
+	// singleflight resume, which completed a cold activation.
 	RouterResumeJoined = "joined"
+	// RouterResumeUnknown indicates the resume did not complete, so the router
+	// cannot tell whether an activation ran. The resume failed, or the request
+	// stopped first, or the direction never resumes an actor.
+	RouterResumeUnknown = "unknown"
 )
 
 // Values for ImageCacheOutcomeKey. A hit is a complete image record; a miss
@@ -264,11 +217,12 @@ const (
 // meaning success, never as a parallel _failures counter.
 const ErrorTypeKey = attribute.Key("error.type")
 
-// Values for WorkerStateKey. Only idle and assigned are representable today;
-// starting and unhealthy workers are not modeled in the cache.
+// Values for WorkerStateKey. Unschedulable wins over occupancy.
 const (
-	WorkerStateIdle     = "idle"
-	WorkerStateAssigned = "assigned"
+	WorkerStateIdle          = "idle"
+	WorkerStatePartial       = "partial"
+	WorkerStateAtCapacity    = "at_capacity"
+	WorkerStateUnschedulable = "unschedulable"
 )
 
 // Values for ActorOperationNameKey: the actor lifecycle operations ateapi
@@ -366,17 +320,6 @@ const (
 	SnapshotPhasePersist = "persist"
 	SnapshotPhaseTotal   = "total"
 )
-
-// FailureReason classifies err onto the bounded ateerrors taxonomy, reading the
-// wrapped Reason or the AIP-193 ErrorInfo detail. An error carrying neither
-// reports ReasonUnknown rather than anything derived from its message, which is
-// what keeps the label bounded.
-func FailureReason(err error) string {
-	if r := ateerrors.ExtractReason(err); r != "" {
-		return r
-	}
-	return ReasonUnknown
-}
 
 // SandboxClassUnknown is the NormalizeSandboxClass fallback.
 const SandboxClassUnknown = "unknown"
@@ -491,15 +434,11 @@ func ActorRefLogAttrs(actorRef resources.ActorRef) []slog.Attr {
 // The worker-pool pair is omitted while the actor holds no assignment, so a
 // crash before the actor reaches a worker reports no pool rather than an
 // empty-string one.
-func ActorMetricAttributes(a *ateapipb.Actor, sandboxClass, operationName, reason string) []attribute.KeyValue {
+func ActorMetricAttributes(a *ateapipb.Actor, sandboxClass, operationName string) []attribute.KeyValue {
 	if a == nil {
 		return nil
 	}
 
-	// Default values for unknown/unset attributes.
-	if reason == "" {
-		reason = ReasonUnknown
-	}
 	operationName = NormalizeOperationName(operationName)
 
 	ass := a.GetStatus().GetWorkerAssignment()
@@ -509,6 +448,5 @@ func ActorMetricAttributes(a *ateapipb.Actor, sandboxClass, operationName, reaso
 		SandboxClassAttribute(sandboxClass),
 		ActorOperationNameKey.String(operationName),
 	}
-	attrs = append(attrs, FailureAttributes(reason)...)
 	return append(attrs, WorkerPoolAttributes(ass.GetWorkerNamespace(), ass.GetWorkerPool())...)
 }

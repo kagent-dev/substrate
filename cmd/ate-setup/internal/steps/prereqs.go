@@ -16,6 +16,7 @@ package steps
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/log"
 )
@@ -33,14 +34,14 @@ var trustBundleNames = []string{
 func (e *Env) EnsureAPIServerPrerequisites(ctx context.Context) error {
 	log.Step("ensure_apiserver_prerequisites")
 
-	if err := e.ensureSecret(ctx, NamespaceAteSystem, SecretActorIDJWTPool, e.CreateJWTAuthorityPoolSecret); err != nil {
+	if err := e.ensureSecret(ctx, e.Namespace(), SecretActorIDJWTPool, e.CreateJWTAuthorityPoolSecret); err != nil {
 		return err
 	}
-	if err := e.ensureSecret(ctx, NamespaceAteSystem, SecretActorIDCAPool, e.CreateActorIDCAPoolSecret); err != nil {
+	if err := e.ensureSecret(ctx, e.Namespace(), SecretActorIDCAPool, e.CreateActorIDCAPoolSecret); err != nil {
 		return err
 	}
 	// Derived from actor-id-ca-pool above, so it must come after it.
-	if err := e.ensureSecret(ctx, NamespaceAteSystem, SecretActorIDCACerts, e.CreateActorIDCACertsSecret); err != nil {
+	if err := e.ensureSecret(ctx, e.Namespace(), SecretActorIDCACerts, e.CreateActorIDCACertsSecret); err != nil {
 		return err
 	}
 	if err := e.ensureSecret(ctx, NamespacePodCert, SecretServiceDNSCA, e.CreatePodCertificateControllerCAs); err != nil {
@@ -52,7 +53,7 @@ func (e *Env) EnsureAPIServerPrerequisites(ctx context.Context) error {
 		return err
 	}
 
-	exists, err := e.Kube.ConfigMapExists(ctx, NamespaceAteSystem, ConfigMapAPIAuthn)
+	exists, err := e.Kube.ConfigMapExists(ctx, e.Namespace(), ConfigMapAPIAuthn)
 	if err != nil {
 		return err
 	}
@@ -81,8 +82,24 @@ func (e *Env) EnsurePodCertificateCAs(ctx context.Context) error {
 // has published both identity bundles.
 func (e *Env) WaitForPodCertificateTrustBundles(ctx context.Context) error {
 	log.Infof("Waiting for podcertificate ClusterTrustBundles to be ready...")
-	return e.Kube.WaitClusterTrustBundles(ctx, trustBundleNames, e.Cfg.WaitTimeout(BootstrapTimeout))
+	err := e.Kube.WaitClusterTrustBundles(ctx, trustBundleNames, e.Cfg.WaitTimeout(TrustBundleTimeout))
+	if err != nil {
+		return fmt.Errorf("%w\n%s", err, trustBundleDiagnostics)
+	}
+	return nil
 }
+
+// trustBundleDiagnostics is appended to a trust bundle timeout. By this point
+// the controller's rollout has already succeeded, so a missing bundle points
+// at the controller running but not producing, and these are the places to
+// look.
+const trustBundleDiagnostics = `The podcertificate-controller pod is likely Ready but not producing bundles
+(missing CA-pool secret, crash-looping after first Ready, RBAC denial, or a
+name mismatch after an upgrade). Investigate with:
+  kubectl get clustertrustbundles -A
+  kubectl -n podcertificate-controller-system logs deploy/podcertificate-controller --tail=200
+  kubectl -n podcertificate-controller-system get pods,secrets,configmaps
+  kubectl -n podcertificate-controller-system get events --sort-by=.lastTimestamp | tail -20`
 
 // ensureSecret runs create when the named Secret is absent.
 func (e *Env) ensureSecret(ctx context.Context, namespace, name string, create func(context.Context) error) error {

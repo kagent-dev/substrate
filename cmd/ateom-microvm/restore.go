@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-substrate/substrate/internal/ateomstats"
+
 	"github.com/agent-substrate/substrate/internal/ateomnet"
 
 	"github.com/agent-substrate/substrate/cmd/ateom-microvm/internal/ch"
@@ -33,9 +35,9 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateompath"
 	"github.com/agent-substrate/substrate/internal/imagecache"
 	"github.com/agent-substrate/substrate/internal/proto/ateompb"
-	"github.com/agent-substrate/substrate/internal/readyz"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/sizing"
+	"github.com/agent-substrate/substrate/internal/wakeupprobe"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -49,7 +51,7 @@ import (
 // front.
 //
 // It is still the right choice on a VMM that prefaults, where OnDemand is not merely
-// wasteful but unusable: the prefault storm starves the guest and its readiness probe
+// wasteful but unusable: the prefault storm starves the guest and its wakeup probe
 // never passes.
 func restoreMemMode(ctx context.Context, info ch.VMMInfo) string {
 	if !info.PrefaultsUnconditionally() {
@@ -79,21 +81,21 @@ func restoreMemMode(ctx context.Context, info ch.VMMInfo) string {
 // Contract with atelet: the snapshot's files have been downloaded to RestoreStateDir,
 // and the durable-dir volume directories re-created (empty).
 func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.RestoreWorkloadRequest) (resp *ateompb.RestoreWorkloadResponse, retErr error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if err := s.rejectIfDraining(); err != nil {
-		return nil, err
+	if !s.locks.Lock(ctx, req.GetActorUid()) {
+		return nil, status.Error(codes.Canceled, "gave up waiting for the actor's lock")
 	}
+	defer s.locks.Unlock(req.GetActorUid())
 
-	// Same as RunWorkload: a restore is a boot, and graceful shutdown cancels it
-	// rather than queueing behind it.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s.setActiveRPC(rpcRestoreWorkload, cancel)
-	defer s.clearActiveRPC()
+	// Register for startup cancellation before checking for shutdown.
+	release, err := s.beginRPC(req.GetActorUid(), rpcRestoreWorkload, cancel)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
-	if err := s.deactivateActorNetworking(ctx); err != nil {
+	if err := s.deactivateActorNetworking(ctx, ateomstats.ActorAttributionFromRequest(req)); err != nil {
 		return nil, err
 	}
 
@@ -114,14 +116,23 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 	attribution := p.actorAttribution()
 	s.actorLogger.EmitLifecycleLog(ctx, "Actor restoring", attribution)
 
-	// Same as RunWorkload: retain before the restore, drop again if it fails. A
-	// Full-scope resume reaches "executing" in a different way than a cold boot
-	// does, but the window between accepting the actor and serving it is the same
-	// window, and a poll landing in it should name the actor either way.
-	s.activeActor.Store(&attribution)
+	// A VM still running for this actor would be dropped from tracking by the
+	// re-host below and left running, so stop it first.
+	if s.runningVM(attribution.UID) != nil {
+		if err := s.stopActorVM(ctx, attribution.UID); err != nil {
+			return nil, fmt.Errorf("while stopping the actor's previous micro-VM: %w", err)
+		}
+	}
+	// Publish attribution before restore so stats can include startup usage.
+	if _, err := s.hostActor(ctx, attribution); err != nil {
+		return nil, err
+	}
 	defer func() {
 		if retErr != nil {
-			s.activeActor.Store(nil)
+			// Detached: the RPC's context may be what failed it.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cleanupCancel()
+			_ = s.unhostActor(cleanupCtx, attribution.UID)
 		}
 	}()
 
@@ -147,7 +158,7 @@ func (s *AteomService) RestoreWorkload(ctx context.Context, req *ateompb.Restore
 		}
 	case ateompb.SnapshotScope_SNAPSHOT_SCOPE_DATA:
 		// A Data snapshot holds no guest state, so this is a cold boot that
-		// happens to start with the volumes already populated. readyz gating comes
+		// happens to start with the volumes already populated. wakeup probe gating comes
 		// with the cold-boot path, so the actor is serving when we return.
 		if err := s.coldBootActorRetrying(ctx, p); err != nil {
 			return nil, err
@@ -182,7 +193,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	if err != nil {
 		return err
 	}
-	kata.CleanupSandboxState(ctx, actorUID)
+	s.cleanupSandboxState(ctx, actorUID)
 
 	// Repoint the snapshot's vsock socket to this actor's VMDir (the disk + kernel
 	// paths are content-addressed/per-actor and already line up on the same node).
@@ -250,7 +261,12 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 		return untarErr
 	}
 	tUpper := time.Now()
-	vfsdCmd, err := s.stageMergedRootfs(ctx, rr, actorUID, ctrs, containers)
+	leaf, err := s.actorLeaf(actorUID, p.size)
+	if err != nil {
+		return err
+	}
+	defer leaf.Close()
+	vfsdCmd, err := s.stageMergedRootfs(ctx, rr, actorUID, ctrs, containers, leaf.SysProcAttr())
 	if err != nil {
 		return err
 	}
@@ -264,25 +280,16 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	tLowers := time.Now()
 	tDurable := tLowers
 
-	// Networking: rebuild the per-activation veth + tap; the snapshot's virtio-net
-	// is fd-backed, so CH needs fresh tap FDs (net_fds) on restore.
-	if err := ateomnet.SetupActorNetwork(ctx, ateomnet.NetworkConfig{
-		InteriorNetNS:      s.interiorNetNS,
-		HostVethHWAddr:     hostVethHWAddr,
-		SweepInteriorLinks: true,
-		EgressRedirectPort: s.egressRedirectPort(p.egressGateway != nil),
-	}); err != nil {
-		return fmt.Errorf("while setting up actor network: %w", err)
-	}
+	// Networking: rebuild the actor's namespace; the snapshot's virtio-net is
+	// fd-backed, so CH needs fresh tap FDs (net_fds) on restore. The caller
+	// unhosts on failure, once the defers here have stopped the actor's
+	// processes.
 	defer func() {
 		if retErr != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
-			if cleanupErr := s.deactivateActorNetworking(cleanupCtx); cleanupErr != nil {
+			if cleanupErr := s.deactivateActorNetworking(cleanupCtx, p.attribution()); cleanupErr != nil {
 				slog.WarnContext(cleanupCtx, "Failed to deactivate actor networking after Restore failure", slog.Any("err", cleanupErr))
-			}
-			if cleanupErr := ateomnet.CleanupActorNetwork(cleanupCtx, s.interiorNetNS); cleanupErr != nil {
-				slog.WarnContext(cleanupCtx, "Failed to clean up actor network after Restore failure", slog.Any("err", cleanupErr))
 			}
 			// Detach any bundle rootfs overlays mounted by buildActorContainers
 			// before the failure, mirroring teardownActor's cleanup.
@@ -303,7 +310,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 		}
 	}()
 	for i, nd := range netDevs {
-		files, terr := s.setupRestoreTap(ctx, fmt.Sprintf("tap%d_kata", i), nd.QueuePairs)
+		files, terr := setupActorTap(ctx, s.sandboxNetNS(actorUID), fmt.Sprintf("tap%d_kata", i), nd.QueuePairs)
 		if terr != nil {
 			return fmt.Errorf("while building restore tap for %s: %w", nd.ID, terr)
 		}
@@ -321,6 +328,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	tTap := time.Now()
 	chCmd, client, err := ch.LaunchVMM(ctx, ch.LaunchVMMOptions{
 		Binary: rr.chBinary, APISocket: apiSocket, Stdout: slogWriter{ctx}, Stderr: slogWriter{ctx},
+		SysProcAttr: leaf.SysProcAttr(),
 	})
 	if err != nil {
 		return fmt.Errorf("while launching VMM for restore: %w", err)
@@ -328,6 +336,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	defer func() {
 		if retErr != nil && chCmd.Process != nil {
 			_ = chCmd.Process.Kill()
+			_, _ = chCmd.Process.Wait()
 		}
 	}()
 	// How guest RAM comes back depends on the VMM (see restoreMemMode), and the rest
@@ -353,9 +362,9 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	}
 	tResume := time.Now()
 
-	// Block until every readyz-enabled container reports 200.
-	if err := readyz.WaitAll(ctx, containers, ateomnet.ActorVethIP); err != nil {
-		return fmt.Errorf("while waiting for container readyz: %w", err)
+	// Block until every wakeup-probe-enabled container reports 200.
+	if err := wakeupprobe.WaitAll(ctx, containers, ateomnet.ActorVethIP, wakeupprobe.DialFunc(s.sandboxDialer(actorUID))); err != nil {
+		return fmt.Errorf("while waiting for container wakeup probe: %w", err)
 	}
 
 	// Where a resume goes. Like the boot phases, this used to be a single total,
@@ -372,7 +381,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 		slog.Duration("vmm_launch", tLaunch.Sub(tTap)),
 		slog.Duration("vm_restore", tVMRestore.Sub(tLaunch)),
 		slog.Duration("resume", tResume.Sub(tVMRestore)),
-		slog.Duration("readyz", time.Since(tResume)),
+		slog.Duration("wakeup_probe", time.Since(tResume)),
 		slog.Duration("total", time.Since(tStart)))
 
 	// An eager restore has read the whole snapshot into guest memory, and nothing
@@ -416,10 +425,10 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 		}
 	}
 
-	if err := s.activateActorNetworking(p.actorRef.Atespace, p.actorRef.Name, egress); err != nil {
+	if err := s.activateActorNetworking(p.attribution(), egress); err != nil {
 		return err
 	}
-	s.running[actorUID] = ra
+	s.setRunningVM(actorUID, ra)
 
 	// Publish the guest to GetWorkloadStats, past the last error return above
 	// for the same reason as in coldBootActor. Skipped when the dial failed:
@@ -428,7 +437,7 @@ func (s *AteomService) restoreFullScope(ctx context.Context, p actorBootParams, 
 	// its own — whatever kept the agent from answering a 15s retry loop would
 	// keep it from answering that one too.
 	if ra.guestAgent != nil {
-		s.guestStats.Store(&guestStatsTarget{actorUID: actorUID, agent: ra.guestAgent, workloadIDs: ra.workloadIDs})
+		s.setGuestStats(actorUID, &guestStatsTarget{actorUID: actorUID, agent: ra.guestAgent, workloadIDs: ra.workloadIDs})
 	}
 
 	slog.InfoContext(ctx, "Actor restored (overlay rootfs)",

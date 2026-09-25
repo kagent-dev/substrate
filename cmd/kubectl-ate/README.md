@@ -109,7 +109,7 @@ kubectl ate get workers -l <label-selector>
 | `ATESPACE` | The atespace the actor belongs to. Part of the actor's identity; folded into the storage key as `actor:<atespace>:<name>`. |
 | `NAME` | The actor's name. User-provided for application actors; UUID for the golden actor that each template materialises while building its golden tag. |
 | `TEMPLATE` | The `ActorTemplate` the actor was created from, displayed as `<atespace>/<name>`. |
-| `STATE` | One of `ACTOR_STATE_RESUMING`, `ACTOR_STATE_RUNNING`, `ACTOR_STATE_SUSPENDING`, `ACTOR_STATE_SUSPENDED`. |
+| `STATE` | Current lifecycle state (`ACTOR_STATE_RESUMING`, `ACTOR_STATE_RUNNING`, `ACTOR_STATE_SUSPENDING`, `ACTOR_STATE_SUSPENDED`, `ACTOR_STATE_PAUSING`, `ACTOR_STATE_PAUSED`, `ACTOR_STATE_CRASHED`, `ACTOR_STATE_DELETING`, `ACTOR_STATE_REVERTING`). |
 | `WORKER POD` | The worker pod (namespace/name) currently hosting the actor. Empty while suspended. |
 | `WORKER IP` | The pod IP of that worker. Empty while suspended. |
 | `VERSION` | Monotonic integer that increments on every state transition (resume / suspend / checkpoint). Useful for distinguishing snapshots. |
@@ -202,6 +202,9 @@ kubectl ate resume actor my-actor -a <atespace>
 # Suspend an actor (snapshots its state to storage and frees the worker)
 kubectl ate suspend actor my-actor -a <atespace>
 
+# Revert an actor to its last external snapshot (discards live, paused, or crashed state and returns to SUSPENDED)
+kubectl ate revert actor my-actor -a <atespace>
+
 # Delete an actor (by default, requires the actor to be SUSPENDED or CRASHED).
 kubectl ate delete actor my-actor -a <atespace>
 
@@ -231,6 +234,46 @@ kubectl ate update tag <tag-name> -a <atespace> --scope atespace
 kubectl ate create actor <actor-name> -a <atespace> --template <template-name> --tag <tag-name>
 kubectl ate delete tag <tag-name> -a <atespace>
 ```
+
+### Egress Policies
+
+<!-- TODO(#1550): link docs/egress-policy.md for the rule types and their evaluation order once that page exists. -->
+
+An actor has at most one egress policy.
+
+```bash
+# Get an actor's egress policy.
+kubectl ate get egress-policy <actor-name> -a <atespace>
+kubectl ate get egress-policy <actor-name> -a <atespace> -o yaml
+
+# Create an egress policy.
+kubectl ate create egress-policy <actor-name> -a <atespace> -f policy.yaml
+
+# Copy the egress policy of another actor.
+kubectl ate get egress-policy <src-actor> -a <atespace> -o yaml | \
+  kubectl ate create egress-policy <actor-name> -a <atespace> -f -
+
+# Replace an actor's egress policy: dump it, edit the rules, send it back.
+kubectl ate get egress-policy <actor-name> -a <atespace> -o yaml > policy.yaml
+$EDITOR policy.yaml
+kubectl ate update egress-policy <actor-name> -a <atespace> -f policy.yaml
+```
+
+#### Details
+
+* `create` can take a manifest with no `metadata`, taking `name` and `atespace` from the command line.
+* `update` replaces the entire policy and the manifest metadata must match `uid`
+  and `version` for the `EgressPolicy` being updated.
+
+#### `kubectl ate get egress-policy` output columns
+
+| Column | Meaning |
+|---|---|
+| `ATESPACE` | The atespace the actor and its policy belong to. |
+| `ACTOR` | The actor the policy applies to. |
+| `RULES` | Number of rules; `-o yaml` shows them in evaluation order. |
+| `VERSION` | The policy's version, bumped on every update. |
+| `AGE` | Time elapsed since the policy was created. |
 
 ### Logs
 

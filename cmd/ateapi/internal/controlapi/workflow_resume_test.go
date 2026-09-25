@@ -101,33 +101,24 @@ func TestResumeActor_RunningFastPathDoesNotAcquireLease(t *testing.T) {
 	}
 }
 
-// TestFinalizeRunning_RecordsSprintTemplate verifies committing RUNNING stamps
-// the template the sprint booted with, overwriting the previous sprint's
-// record, so the next resume can detect a repointed template by UID.
-func TestFinalizeRunning_RecordsSprintTemplate(t *testing.T) {
+// TestFinalizeRunning_CommitsRunning verifies the last step of a resume moves
+// the actor out of RESUMING against a freshly read version.
+func TestFinalizeRunning_CommitsRunning(t *testing.T) {
 	ctx := context.Background()
 	persistence := newTestPersistence(t)
 	storetest.MustCreateActor(t, ctx, persistence, &ateapipb.Actor{
 		Metadata:      &ateapipb.ResourceMetadata{Atespace: "team-a", Name: "id1"},
 		ActorTemplate: &ateapipb.ObjectRef{Atespace: "team-a", Name: "tmpl-2"},
-		Status: &ateapipb.ActorStatus{
-			State:                   ateapipb.ActorState_ACTOR_STATE_RESUMING,
-			CurrentActorTemplateUid: "tmpl-uid-1",
-		},
+		Status:        &ateapipb.ActorStatus{State: ateapipb.ActorState_ACTOR_STATE_RESUMING},
 	})
 	w := &ActorWorkflow{store: persistence}
 
-	got, err := w.finalizeRunning(ctx, resources.ActorRef{Atespace: "team-a", Name: "id1"}, &ateapipb.ActorTemplate{
-		Metadata: &ateapipb.ResourceMetadata{Atespace: "team-a", Name: "tmpl-2", Uid: "tmpl-uid-2"},
-	})
+	got, err := w.finalizeRunning(ctx, resources.ActorRef{Atespace: "team-a", Name: "id1"})
 	if err != nil {
 		t.Fatalf("finalizeRunning: %v", err)
 	}
 	if got.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_RUNNING {
 		t.Errorf("state = %v, want RUNNING", got.GetStatus().GetState())
-	}
-	if uid := got.GetStatus().GetCurrentActorTemplateUid(); uid != "tmpl-uid-2" {
-		t.Errorf("CurrentActorTemplateUid = %q, want %q", uid, "tmpl-uid-2")
 	}
 }
 
@@ -748,15 +739,18 @@ func TestResumeActor_CrashesOnMissingWorkerAssignment(t *testing.T) {
 	if got.GetStatus().GetState() != ateapipb.ActorState_ACTOR_STATE_CRASHED {
 		t.Errorf("stored state = %v, want %v", got.GetStatus().GetState(), ateapipb.ActorState_ACTOR_STATE_CRASHED)
 	}
+	if msg, want := got.GetStatus().GetCrash().GetMessage(), "resume failed: "+crashMessageWorkerAssignmentMissing; msg != want {
+		t.Errorf("crash message = %q, want %q", msg, want)
+	}
 }
 
-// TestValidateAssignedWorker_WorkerOwnership verifies that RESUMING recovery
-// only proceeds on a worker whose assignment still names this actor: the
+// TestValidateAssignedWorker verifies that RESUMING recovery only proceeds on
+// a live, non-draining worker whose assignment still names this actor: the
 // recovery path loads the worker by pod name only, so the assignment may have
 // been cleared and the worker re-claimed by another actor in the meantime. On
 // a mismatch the actor is crashed and the worker — which is not ours — must
 // not be written.
-func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
+func TestValidateAssignedWorker(t *testing.T) {
 	ownAssignment := &ateapipb.ActorAssignment{
 		Actor:    &ateapipb.ObjectRef{Atespace: "team-a", Name: "shared"},
 		ActorUid: "own-actor-uid",
@@ -769,14 +763,21 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 		Actor:    &ateapipb.ObjectRef{Atespace: "team-a", Name: "shared"},
 		ActorUid: "stale-incarnation-uid",
 	}
+	activeStatus := &ateapipb.WorkerStatus{State: ateapipb.WorkerState_WORKER_STATE_ACTIVE, Capacity: &ateapipb.WorkerResources{Actors: 1}}
+	drainingStatus := &ateapipb.WorkerStatus{State: ateapipb.WorkerState_WORKER_STATE_DRAINING, Capacity: &ateapipb.WorkerResources{Actors: 1}}
 
 	tests := []struct {
-		name         string
+		name string
+		// workerStatus is the stored worker's status, nil for a worker that
+		// is gone.
+		workerStatus *ateapipb.WorkerStatus
 		sandboxClass string
 		assignment   *ateapipb.ActorAssignment
 		// wantCode is codes.OK when validateAssignedWorker must return nil.
 		wantCode       codes.Code
 		wantActorState ateapipb.ActorState
+		// wantCrashMessage is the crash recorded when the actor is crashed.
+		wantCrashMessage string
 		// wantAssignment is the assignment expected on the stored worker
 		// afterwards; wantWorkerWrite false additionally asserts the worker
 		// version did not move (no write at all).
@@ -784,31 +785,54 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 		wantWorkerWrite bool
 	}{
 		{
-			name:           "crashes actor and leaves worker untouched when assigned to another actor",
-			sandboxClass:   "gvisor",
-			assignment:     otherAssignment,
-			wantCode:       codes.Aborted,
-			wantActorState: ateapipb.ActorState_ACTOR_STATE_CRASHED,
-			wantAssignment: otherAssignment,
+			name:             "crashes actor when worker is gone",
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerGone,
 		},
 		{
-			name:           "crashes actor and leaves worker untouched when assigned to previous incarnation of same actor",
-			sandboxClass:   "gvisor",
-			assignment:     staleIncarnationAssignment,
-			wantCode:       codes.Aborted,
-			wantActorState: ateapipb.ActorState_ACTOR_STATE_CRASHED,
-			wantAssignment: staleIncarnationAssignment,
+			name:             "crashes actor and leaves worker untouched when worker is draining",
+			workerStatus:     drainingStatus,
+			sandboxClass:     "gvisor",
+			assignment:       ownAssignment,
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerDraining,
+			wantAssignment:   ownAssignment,
 		},
 		{
-			name:           "crashes actor and leaves worker untouched when assignment is cleared",
-			sandboxClass:   "gvisor",
-			assignment:     nil,
-			wantCode:       codes.Aborted,
-			wantActorState: ateapipb.ActorState_ACTOR_STATE_CRASHED,
-			wantAssignment: nil,
+			name:             "crashes actor and leaves worker untouched when assigned to another actor",
+			workerStatus:     activeStatus,
+			sandboxClass:     "gvisor",
+			assignment:       otherAssignment,
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerReassigned,
+			wantAssignment:   otherAssignment,
+		},
+		{
+			name:             "crashes actor and leaves worker untouched when assigned to previous incarnation of same actor",
+			workerStatus:     activeStatus,
+			sandboxClass:     "gvisor",
+			assignment:       staleIncarnationAssignment,
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerReassigned,
+			wantAssignment:   staleIncarnationAssignment,
+		},
+		{
+			name:             "crashes actor and leaves worker untouched when assignment is cleared",
+			workerStatus:     activeStatus,
+			sandboxClass:     "gvisor",
+			assignment:       nil,
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerReassigned,
+			wantAssignment:   nil,
 		},
 		{
 			name:           "passes for own eligible worker",
+			workerStatus:   activeStatus,
 			sandboxClass:   "gvisor",
 			assignment:     ownAssignment,
 			wantCode:       codes.OK,
@@ -816,13 +840,15 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 			wantAssignment: ownAssignment,
 		},
 		{
-			name:            "releases own ineligible worker and crashes actor",
-			sandboxClass:    "microvm",
-			assignment:      ownAssignment,
-			wantCode:        codes.Aborted,
-			wantActorState:  ateapipb.ActorState_ACTOR_STATE_CRASHED,
-			wantAssignment:  nil,
-			wantWorkerWrite: true,
+			name:             "releases own ineligible worker and crashes actor",
+			workerStatus:     activeStatus,
+			sandboxClass:     "microvm",
+			assignment:       ownAssignment,
+			wantCode:         codes.Aborted,
+			wantActorState:   ateapipb.ActorState_ACTOR_STATE_CRASHED,
+			wantCrashMessage: "resume failed: " + crashMessageWorkerIneligible,
+			wantAssignment:   nil,
+			wantWorkerWrite:  true,
 		},
 	}
 
@@ -831,23 +857,26 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 			ctx := context.Background()
 			persistence := newTestPersistence(t)
 
-			if _, err := persistence.CreateWorker(ctx, &ateapipb.Worker{
-				Metadata:        &ateapipb.ResourceMetadata{Name: testWorkerUID("pod-1")},
-				WorkerNamespace: "worker-ns",
-				WorkerPool:      "pool",
-				WorkerPod:       "pod-1",
-				WorkerPodUid:    testWorkerUID("pod-1"),
-				SandboxClass:    tt.sandboxClass,
-				Status:          &ateapipb.WorkerStatus{State: ateapipb.WorkerState_WORKER_STATE_ACTIVE, Capacity: &ateapipb.WorkerResources{Actors: 1}},
-			}); err != nil {
-				t.Fatalf("CreateWorker: %v", err)
-			}
-			seedAssignment(t, persistence, testWorkerUID("pod-1"), tt.assignment)
-			// Fetch the stored version so the no-write assertion below can
-			// detect any optimistic update.
-			seeded, err := persistence.GetWorker(ctx, testWorkerUID("pod-1"))
-			if err != nil {
-				t.Fatalf("GetWorker: %v", err)
+			var seeded *ateapipb.Worker
+			if tt.workerStatus != nil {
+				if _, err := persistence.CreateWorker(ctx, &ateapipb.Worker{
+					Metadata:        &ateapipb.ResourceMetadata{Name: testWorkerUID("pod-1")},
+					WorkerNamespace: "worker-ns",
+					WorkerPool:      "pool",
+					WorkerPod:       "pod-1",
+					WorkerPodUid:    testWorkerUID("pod-1"),
+					SandboxClass:    tt.sandboxClass,
+					Status:          tt.workerStatus,
+				}); err != nil {
+					t.Fatalf("CreateWorker: %v", err)
+				}
+				seedAssignment(t, persistence, testWorkerUID("pod-1"), tt.assignment)
+				// Fetch the stored version so the no-write assertion below can
+				// detect any optimistic update.
+				var err error
+				if seeded, err = persistence.GetWorker(ctx, testWorkerUID("pod-1")); err != nil {
+					t.Fatalf("GetWorker: %v", err)
+				}
 			}
 
 			seedWorkflowActor(t, ctx, persistence, resources.ActorRef{Atespace: "team-a", Name: "shared"}, "ns", "tmpl1", ateapipb.ActorState_ACTOR_STATE_RESUMING)
@@ -867,7 +896,7 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 				},
 			}
 			tmpl := &ateapipb.ActorTemplate{SandboxConfig: &ateapipb.SandboxConfig{SandboxClass: ateapipb.SandboxClass_SANDBOX_CLASS_GVISOR}}
-			_, err = w.validateAssignedWorker(ctx, resources.ActorRef{Atespace: "team-a", Name: "shared"}, resumingActor, tmpl)
+			_, err := w.validateAssignedWorker(ctx, resources.ActorRef{Atespace: "team-a", Name: "shared"}, resumingActor, tmpl)
 			if got := status.Code(err); got != tt.wantCode {
 				t.Fatalf("status.Code(err) = %v, want %v (err: %v)", got, tt.wantCode, err)
 			}
@@ -879,7 +908,13 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 			if actor.GetStatus().GetState() != tt.wantActorState {
 				t.Errorf("stored actor state = %v, want %v", actor.GetStatus().GetState(), tt.wantActorState)
 			}
+			if msg := actor.GetStatus().GetCrash().GetMessage(); msg != tt.wantCrashMessage {
+				t.Errorf("crash message = %q, want %q", msg, tt.wantCrashMessage)
+			}
 
+			if tt.workerStatus == nil {
+				return
+			}
 			stored, err := persistence.GetWorker(ctx, testWorkerUID("pod-1"))
 			if err != nil {
 				t.Fatalf("GetWorker: %v", err)
@@ -905,7 +940,7 @@ func TestLoadActorForResume_OnGoldenDataResume(t *testing.T) {
 	tests := []struct {
 		name     string
 		fromData ateapipb.ResumeSource
-		// paused seeds the actor with LocalSnapshotInfo (a pause checkpoint)
+		// paused seeds the actor with LocalSnapshot (a pause checkpoint)
 		// instead of a durable snapshot; onPause is the template's pause
 		// scope, contentScope the durable snapshot's recorded content.
 		paused       bool
@@ -1002,7 +1037,7 @@ func TestLoadActorForResume_OnGoldenDataResume(t *testing.T) {
 			var seedOpts []func(*ateapipb.Actor)
 			if tt.paused {
 				seedOpts = append(seedOpts, func(a *ateapipb.Actor) {
-					a.Status.LocalSnapshotInfo = &ateapipb.LocalSnapshotInfo{SnapshotName: "pause-1"}
+					a.Status.LocalSnapshot = &ateapipb.LocalSnapshot{SnapshotName: "pause-1"}
 				})
 			} else {
 				seedOpts = append(seedOpts, func(a *ateapipb.Actor) {
@@ -1021,7 +1056,7 @@ func TestLoadActorForResume_OnGoldenDataResume(t *testing.T) {
 			storetest.MustCreateAtespace(t, ctx, persistence, "ns")
 			tmpl := &ateapipb.ActorTemplate{
 				Metadata: &ateapipb.ResourceMetadata{Atespace: "ns", Name: "tmpl1"},
-				SnapshotsConfig: &ateapipb.SnapshotsConfig{
+				SnapshotConfig: &ateapipb.SnapshotConfig{
 					OnPause:  tt.onPause,
 					OnResume: &ateapipb.OnResumeConfig{FromData: tt.fromData},
 				},
@@ -1091,25 +1126,38 @@ func TestLoadActorForResume_DoesNotDefaultGolden(t *testing.T) {
 }
 
 // TestLoadActorForResume_TemplateReplaced covers the detection of a repointed
-// actor: the actor records the template UID its guest state was built on, and
-// a mismatch with its current template marks the source TemplateReplaced,
-// forcing the restore to data-only.
+// actor: when ExternalSnapshot.actor_template_uid differs from the actor's
+// current template UID, TemplateReplaced is set so the external restore
+// downgrades to data-only.
 func TestLoadActorForResume_TemplateReplaced(t *testing.T) {
 	actorRef := resources.ActorRef{Atespace: "team-a", Name: "id1"}
 
+	// "current" stands for the created template's own UID.
+	const current = "current"
+
 	tests := []struct {
-		name string
-		// builtOnTemplateUID seeds the template UID the actor's guest state
-		// was built on; "current" stands for the created template's own UID,
-		// "" leaves the field unset (an actor from before it was recorded).
-		builtOnTemplateUID string
-		noSnapshot         bool
-		want               bool
+		name        string
+		snapshotUID string
+		noSnapshot  bool
+		want        bool
 	}{
-		{name: "snapshot taken under the current template", builtOnTemplateUID: "current", want: false},
-		{name: "snapshot taken under a replaced template", builtOnTemplateUID: "some-other-uid", want: true},
-		{name: "snapshot without a recorded template UID", builtOnTemplateUID: "", want: false},
-		{name: "no durable snapshot", noSnapshot: true, want: false},
+		{
+			name:        "snapshot taken under the current template",
+			snapshotUID: current,
+		},
+		{
+			name:        "snapshot taken under a replaced template",
+			snapshotUID: "some-other-uid",
+			want:        true,
+		},
+		{
+			name:        "snapshot without a recorded template UID",
+			snapshotUID: "",
+		},
+		{
+			name:       "no durable snapshot",
+			noSnapshot: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1125,21 +1173,23 @@ func TestLoadActorForResume_TemplateReplaced(t *testing.T) {
 				t.Fatalf("create template: %v", err)
 			}
 			if tmpl.GetMetadata().GetUid() == "" {
-				t.Fatal("created template has no UID; the matching case would be vacuous")
+				t.Fatal("created template has no UID; the matching cases would be vacuous")
+			}
+			resolve := func(uid string) string {
+				if uid == current {
+					return tmpl.GetMetadata().GetUid()
+				}
+				return uid
 			}
 
 			var seedOpts []func(*ateapipb.Actor)
 			if !tt.noSnapshot {
-				uid := tt.builtOnTemplateUID
-				if uid == "current" {
-					uid = tmpl.GetMetadata().GetUid()
-				}
 				seedOpts = append(seedOpts, func(a *ateapipb.Actor) {
 					a.Status.ExternalSnapshot = &ateapipb.ExternalSnapshot{
-						SnapshotUri:  someActorSnapshotURI(t, testStorageLocation, actorRef.Atespace, "snap-1"),
-						ContentScope: ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_FULL,
+						SnapshotUri:      someActorSnapshotURI(t, testStorageLocation, actorRef.Atespace, "snap-1"),
+						ContentScope:     ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_FULL,
+						ActorTemplateUid: resolve(tt.snapshotUID),
 					}
-					a.Status.CurrentActorTemplateUid = uid
 				})
 			}
 			seedWorkflowActor(t, ctx, persistence, actorRef, "ns", "tmpl1", ateapipb.ActorState_ACTOR_STATE_SUSPENDED, seedOpts...)
@@ -1269,7 +1319,7 @@ func newWireCaptureWorkflow(t *testing.T, persistence store.Interface) (*ActorWo
 		ObjectMeta: metav1.ObjectMeta{Namespace: installdefaults.SystemNamespace, Name: "atelet-1", UID: "atelet-uid"},
 		Spec:       corev1.PodSpec{NodeName: "node-1"},
 	}
-	dialer := NewAteletDialer(newTestAteletIndexer(t, ateletPod), "", "")
+	dialer := NewAteletDialer(newTestAteletIndexer(t, ateletPod), installdefaults.SystemNamespace, "", "")
 	dialer.ateletConns.Add("atelet-uid", conn)
 
 	lister := sandboxConfigListerFor(t, []*atev1alpha1.SandboxConfig{{
@@ -1306,16 +1356,15 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 
 	// actorSeed is the actor status a row persists before resuming.
 	type actorSeed struct {
-		// localSnapshot seeds Status.LocalSnapshotInfo (the pause checkpoint);
+		// localSnapshot seeds Status.LocalSnapshot (the pause checkpoint);
 		// a non-nil value also parks the actor PAUSED instead of SUSPENDED.
-		localSnapshot *ateapipb.LocalSnapshotInfo
+		localSnapshot *ateapipb.LocalSnapshot
 		// externalSnapshot seeds Status.ExternalSnapshot (the durable snapshot).
 		externalSnapshot *ateapipb.ExternalSnapshot
-		// tmplUID seeds Status.CurrentActorTemplateUid, the template UID the
-		// guest state was built on: "current" stands for the created template's
-		// store-assigned UID (unknown until runtime), "" leaves the field unset
-		// (an actor from before it was recorded), anything else mismatches (a
-		// repointed actor).
+		// tmplUID seeds the template UID the snapshot's guest state was built
+		// on, stamped onto externalSnapshot: "current" stands for the created
+		// template's store-assigned UID (unknown until runtime), "" leaves the
+		// field unset, anything else mismatches (a repointed actor).
 		tmplUID string
 	}
 	// templateSeed is the ActorTemplate configuration a row persists.
@@ -1326,6 +1375,9 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		golden *ateapipb.ExternalSnapshot
 		// fromData is the template's onResume boot-source policy.
 		fromData ateapipb.ResumeSource
+		// configName is the SandboxConfig the template names; "" means the
+		// "gvisor" config the workflow's lister serves.
+		configName string
 	}
 	// restoreWant pins the request atelet receives. On a non-OK code neither
 	// Restore nor Run may reach atelet; with run set the Run RPC (cold boot)
@@ -1539,7 +1591,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "19 Full pause snapshot restores locally as Full",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{onPause: fullScope},
 			want: restoreWant{
@@ -1551,7 +1603,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "20 Full pause snapshot ignores Golden fromData",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{
 				onPause:  fullScope,
@@ -1570,7 +1622,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			// resume-source resolution is being reworked.
 			name: "21 local snapshot built on the current template stays Full",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 				tmplUID:       "current",
 			},
 			tmpl: templateSeed{onPause: fullScope},
@@ -1583,7 +1635,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "22 Data pause snapshot restores locally as Data",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{onPause: dataScope},
 			want: restoreWant{
@@ -1595,7 +1647,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "23 Golden data resume requires a golden snapshot",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{onPause: dataScope, fromData: fromGolden},
 			want: restoreWant{code: codes.FailedPrecondition},
@@ -1603,7 +1655,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "24 Data pause snapshot under Golden fromData restores on the golden",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{
 				onPause:  dataScope,
@@ -1620,7 +1672,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "25 Golden data resume rejects a non-Full golden, local path",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{
 				onPause:  dataScope,
@@ -1634,7 +1686,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			// UNSPECIFIED, which counts as Full.
 			name: "26 unspecified golden scope is accepted for a Golden data resume",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{
 				onPause:  dataScope,
@@ -1651,7 +1703,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 		{
 			name: "27 Golden data resume rejects a malformed golden URI",
 			actor: actorSeed{
-				localSnapshot: &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 			},
 			tmpl: templateSeed{
 				onPause:  dataScope,
@@ -1665,7 +1717,7 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			// comes from the pause scope, not the durable snapshot's.
 			name: "28 local snapshot wins over a Full durable snapshot",
 			actor: actorSeed{
-				localSnapshot:    &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot:    &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 				externalSnapshot: &ateapipb.ExternalSnapshot{SnapshotUri: actorURI, ContentScope: fullScope},
 			},
 			tmpl: templateSeed{
@@ -1681,11 +1733,13 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			},
 		},
 		{
-			// TemplateReplaced wins in the local branch too: the pause
-			// checkpoint restores as plain Data, the golden overlay dropped.
-			name: "29 template repoint beats the golden policy on the local path",
+			// An older external snapshot's template mismatch does not affect a
+			// local pause restore: templates can only be updated while
+			// SUSPENDED, so a pause checkpoint is always from the current
+			// template.
+			name: "29 local snapshot ignores an older external snapshot's template mismatch",
 			actor: actorSeed{
-				localSnapshot:    &ateapipb.LocalSnapshotInfo{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
+				localSnapshot:    &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName, NodeVmsWithLocalSnapshots: []string{"node-1"}},
 				externalSnapshot: &ateapipb.ExternalSnapshot{SnapshotUri: actorURI, ContentScope: fullScope},
 				tmplUID:          "mismatch",
 			},
@@ -1697,10 +1751,33 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			want: restoreWant{
 				checkpointType: ateletpb.CheckpointType_CHECKPOINT_TYPE_LOCAL,
 				snapshotName:   localSnapshotName,
-				scope:          ateletpb.SnapshotScope_SNAPSHOT_SCOPE_DATA,
+				scope:          ateletpb.SnapshotScope_SNAPSHOT_SCOPE_DATA_ON_GOLDEN,
+				goldenURI:      goldenURI,
 			},
 		},
+		{
+			// Restores take their sandbox from the template, like cold boots,
+			// so an unresolvable SandboxConfig stops them before atelet.
+			name:  "30 durable snapshot restore with a missing SandboxConfig is rejected",
+			actor: actorSeed{externalSnapshot: &ateapipb.ExternalSnapshot{SnapshotUri: actorURI, ContentScope: fullScope}},
+			tmpl:  templateSeed{configName: "missing"},
+			want:  restoreWant{code: codes.FailedPrecondition},
+		},
+		{
+			name:  "31 local snapshot restore with a missing SandboxConfig is rejected",
+			actor: actorSeed{localSnapshot: &ateapipb.LocalSnapshot{SnapshotName: localSnapshotName}},
+			tmpl:  templateSeed{onPause: fullScope, configName: "missing"},
+			want:  restoreWant{code: codes.FailedPrecondition},
+		},
 	}
+
+	// Every request atelet receives, Run or Restore, carries the sandbox the
+	// template's SandboxConfig resolves to.
+	wantSandboxAssets := sandboxAssetsProto(&atev1alpha1.SandboxConfig{Spec: atev1alpha1.SandboxConfigSpec{
+		SandboxClass: atev1alpha1.SandboxClassGvisor,
+		PauseImage:   "pause@sha256:abc",
+		Assets:       testAssets(),
+	}})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1709,16 +1786,20 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			w, atelet := newWireCaptureWorkflow(t, persistence)
 
 			storetest.MustCreateAtespace(t, ctx, persistence, "ns")
+			configName := tt.tmpl.configName
+			if configName == "" {
+				configName = "gvisor"
+			}
 			tmpl := &ateapipb.ActorTemplate{
 				Metadata: &ateapipb.ResourceMetadata{Atespace: "ns", Name: "tmpl1"},
-				SnapshotsConfig: &ateapipb.SnapshotsConfig{
+				SnapshotConfig: &ateapipb.SnapshotConfig{
 					StorageLocation: testStorageLocation,
 					OnPause:         tt.tmpl.onPause,
 					OnResume:        &ateapipb.OnResumeConfig{FromData: tt.tmpl.fromData},
 				},
 				SandboxConfig: &ateapipb.SandboxConfig{
 					SandboxClass: ateapipb.SandboxClass_SANDBOX_CLASS_GVISOR,
-					ConfigName:   "gvisor",
+					ConfigName:   configName,
 				},
 			}
 			if tt.tmpl.golden != nil {
@@ -1753,13 +1834,18 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 			actorRef := resources.ActorRef{Atespace: "team-a", Name: "id1"}
 			seedWorkflowActor(t, ctx, persistence, actorRef, "ns", "tmpl1", actorState, func(a *ateapipb.Actor) {
 				a.Status.WorkerAssignment = wireTestAssignment()
-				a.Status.LocalSnapshotInfo = tt.actor.localSnapshot
-				a.Status.ExternalSnapshot = tt.actor.externalSnapshot
+				a.Status.LocalSnapshot = tt.actor.localSnapshot
 				uid := tt.actor.tmplUID
 				if uid == "current" {
 					uid = createdTmpl.GetMetadata().GetUid()
 				}
-				a.Status.CurrentActorTemplateUid = uid
+				if tt.actor.externalSnapshot != nil {
+					ext := proto.CloneOf(tt.actor.externalSnapshot)
+					if ext.ActorTemplateUid == "" {
+						ext.ActorTemplateUid = uid
+					}
+					a.Status.ExternalSnapshot = ext
+				}
 			})
 
 			actor, loadedTmpl, src, err := w.loadActorForResume(ctx, actorRef)
@@ -1782,10 +1868,16 @@ func TestResumeActor_AteletWireRequest(t *testing.T) {
 				if run == nil || restore != nil {
 					t.Fatalf("atelet requests = (restore=%v, run=%v), want exactly one Run", restore, run)
 				}
+				if !proto.Equal(run.GetSandboxAssets(), wantSandboxAssets) {
+					t.Errorf("run SandboxAssets = %v, want %v", run.GetSandboxAssets(), wantSandboxAssets)
+				}
 				return
 			}
 			if restore == nil || run != nil {
 				t.Fatalf("atelet requests = (restore=%v, run=%v), want exactly one Restore", restore, run)
+			}
+			if !proto.Equal(restore.GetSandboxAssets(), wantSandboxAssets) {
+				t.Errorf("restore SandboxAssets = %v, want %v", restore.GetSandboxAssets(), wantSandboxAssets)
 			}
 			if got := restore.GetType(); got != tt.want.checkpointType {
 				t.Errorf("restore type = %v, want %v", got, tt.want.checkpointType)

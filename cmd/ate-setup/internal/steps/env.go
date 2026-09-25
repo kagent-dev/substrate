@@ -22,6 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/config"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/images"
 	"github.com/agent-substrate/substrate/cmd/ate-setup/internal/ko"
@@ -38,6 +42,11 @@ const (
 	// CSI drivers. Pass it through Config.WaitTimeout, which lets the flag
 	// raise it without its shorter default lowering it.
 	BootstrapTimeout = 120 * time.Second
+	// TrustBundleTimeout bounds the wait for the podcertificate controller's
+	// first ClusterTrustBundles, shared across both bundles. The controller is
+	// Ready before it has signed anything, so this covers its first pass over
+	// the CA pools rather than a rollout. Config.WaitTimeout applies here too.
+	TrustBundleTimeout = 300 * time.Second
 	// DemoTimeout is longer because a cold cluster pays one-time costs on the
 	// first ActorTemplate: downloading runsc, the first gVisor pod start, and
 	// image pulls.
@@ -46,6 +55,10 @@ const (
 
 // Well-known namespaces.
 const (
+	// NamespaceAteSystem is the canonical control-plane namespace. It is the
+	// default for Config.Namespace and the only value the checked-in manifests
+	// under manifests/ate-install/ carry; steps address the installed control
+	// plane through Env.Namespace rather than this constant.
 	NamespaceAteSystem = "ate-system"
 	NamespacePodCert   = "podcertificate-controller-system"
 )
@@ -73,6 +86,27 @@ type Env struct {
 	// suffix; see SubstrateVersion.
 	substrateVersion       string
 	substrateVersionSuffix string
+}
+
+// Namespace is the namespace the control plane is installed into. It is
+// Config.Namespace, which defaults to NamespaceAteSystem.
+func (e *Env) Namespace() string {
+	if e.Cfg != nil && e.Cfg.Namespace != "" {
+		return e.Cfg.Namespace
+	}
+	return NamespaceAteSystem
+}
+
+// RequireCanonicalNamespace refuses a relocated install for the steps that
+// apply the checked-in manifests. Those manifests name ate-system literally,
+// so proceeding would put the workloads there while this tool created their
+// secrets and ConfigMaps somewhere else — an install that comes up far enough
+// to look healthy and then fails on a missing envFrom source.
+func (e *Env) RequireCanonicalNamespace(step string) error {
+	if ns := e.Namespace(); ns != NamespaceAteSystem {
+		return fmt.Errorf("%s cannot be used with ATE_NAMESPACE=%s: manifests/ate-install/ names %s literally; install into another namespace with a deployment that renders them, and use ate-setup only for the create steps", step, ns, NamespaceAteSystem)
+	}
+	return nil
 }
 
 // NewEnv connects to the cluster described by cfg.
@@ -179,14 +213,28 @@ func (e *Env) KustomizeResolve(ctx context.Context, overlay string) ([]byte, err
 	return e.ResolveManifestBytes(ctx, built)
 }
 
-// EnsureAteSystemNamespace applies the ate-system namespace manifest and waits
-// for it to go Active. Every deploy path starts here so that RBAC, ConfigMaps,
-// and workloads have somewhere to land.
+// EnsureAteSystemNamespace creates the control-plane namespace and waits for it
+// to go Active. Every deploy path starts here so that RBAC, ConfigMaps, and
+// workloads have somewhere to land.
+//
+// The canonical namespace comes from the checked-in manifest, which carries
+// labels of its own and stays the source of truth for it. Any other namespace
+// is created plainly, because that manifest names ate-system literally.
 func (e *Env) EnsureAteSystemNamespace(ctx context.Context) error {
-	if err := e.Kube.ApplyPath(ctx, e.Cfg.Manifest("ate-system-namespace.yaml")); err != nil {
+	ns := e.Namespace()
+	if existing, err := e.Kube.Typed.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{}); err == nil && existing.Status.Phase == corev1.NamespaceTerminating {
+		if err := e.Kube.WaitDeleted(ctx, schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, "", ns, e.Cfg.WaitTimeout(BootstrapTimeout)); err != nil {
+			return err
+		}
+	}
+	if ns == NamespaceAteSystem {
+		if err := e.Kube.ApplyPath(ctx, e.Cfg.Manifest("ate-system-namespace.yaml")); err != nil {
+			return err
+		}
+	} else if err := e.Kube.EnsureNamespace(ctx, ns); err != nil {
 		return err
 	}
-	return e.Kube.WaitNamespaceActive(ctx, NamespaceAteSystem, NamespaceTimeout)
+	return e.Kube.WaitNamespaceActive(ctx, ns, NamespaceTimeout)
 }
 
 // RequireKind fails a step that only makes sense on a local Kind cluster. The

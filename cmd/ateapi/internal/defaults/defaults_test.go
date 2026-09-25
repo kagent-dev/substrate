@@ -37,71 +37,71 @@ func TestApply(t *testing.T) {
 		in:   (*ateapipb.ActorTemplate)(nil),
 		want: (*ateapipb.ActorTemplate)(nil),
 	}, {
-		name: "missing snapshots_config is left for validation",
+		name: "missing snapshot_config is left for validation",
 		in:   &ateapipb.ActorTemplate{},
 		want: &ateapipb.ActorTemplate{},
 	}, {
-		name: "empty snapshots_config gets every default",
-		in:   &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{}},
-		want: &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{
+		name: "empty snapshot_config gets every default",
+		in:   &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{}},
+		want: &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{
 			OnPause:  scopeFull,
 			OnCommit: scopeFull,
 			OnResume: &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_COLD_BOOT},
 		}},
 	}, {
 		name: "set scopes are kept",
-		in: &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{
+		in: &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{
 			OnPause:  scopeFull,
 			OnCommit: scopeData,
 			OnResume: &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_GOLDEN},
 		}},
-		want: &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{
+		want: &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{
 			OnPause:  scopeFull,
 			OnCommit: scopeData,
 			OnResume: &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_GOLDEN},
 		}},
 	}, {
 		name: "present but empty on_resume gets from_data",
-		in: &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{
+		in: &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{
 			OnPause: scopeFull, OnCommit: scopeFull, OnResume: &ateapipb.OnResumeConfig{},
 		}},
-		want: &ateapipb.ActorTemplate{SnapshotsConfig: &ateapipb.SnapshotsConfig{
+		want: &ateapipb.ActorTemplate{SnapshotConfig: &ateapipb.SnapshotConfig{
 			OnPause: scopeFull, OnCommit: scopeFull,
 			OnResume: &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_COLD_BOOT},
 		}},
 	}, {
-		name: "container without readyz stays without one",
+		name: "container without wakeup probe stays without one",
 		in:   &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{{Name: "main"}}},
 		want: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{{Name: "main"}}},
 	}, {
-		name: "readyz gets timeout and path",
+		name: "wakeup probe gets timeout and path",
 		in: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{Port: 8080}}},
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{HttpGet: &ateapipb.HTTPGetAction{Port: 8080}}},
 		}},
 		want: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{
 				HttpGet:        &ateapipb.HTTPGetAction{Port: 8080, Path: "/"},
 				TimeoutSeconds: 30,
 			}},
 		}},
 	}, {
-		name: "readyz without http_get gets only the timeout",
+		name: "wakeup probe without http_get gets only the timeout",
 		in: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{}},
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{}},
 		}},
 		want: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{TimeoutSeconds: 30}},
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{TimeoutSeconds: 30}},
 		}},
 	}, {
-		name: "set readyz fields are kept",
+		name: "set wakeup probe fields are kept",
 		in: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{
 				HttpGet:        &ateapipb.HTTPGetAction{Port: 8080, Path: "/healthz"},
 				TimeoutSeconds: 5,
 			}},
 		}},
 		want: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "main", Readyz: &ateapipb.ContainerReadyz{
+			{Name: "main", WakeupProbe: &ateapipb.ContainerWakeupProbe{
 				HttpGet:        &ateapipb.HTTPGetAction{Port: 8080, Path: "/healthz"},
 				TimeoutSeconds: 5,
 			}},
@@ -109,14 +109,14 @@ func TestApply(t *testing.T) {
 	}, {
 		name: "every container is defaulted",
 		in: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "a", Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{Port: 1}}},
+			{Name: "a", WakeupProbe: &ateapipb.ContainerWakeupProbe{HttpGet: &ateapipb.HTTPGetAction{Port: 1}}},
 			{Name: "b"},
-			{Name: "c", Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{Port: 3}}},
+			{Name: "c", WakeupProbe: &ateapipb.ContainerWakeupProbe{HttpGet: &ateapipb.HTTPGetAction{Port: 3}}},
 		}},
 		want: &ateapipb.ActorTemplate{Containers: []*ateapipb.Container{
-			{Name: "a", Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{Port: 1, Path: "/"}, TimeoutSeconds: 30}},
+			{Name: "a", WakeupProbe: &ateapipb.ContainerWakeupProbe{HttpGet: &ateapipb.HTTPGetAction{Port: 1, Path: "/"}, TimeoutSeconds: 30}},
 			{Name: "b"},
-			{Name: "c", Readyz: &ateapipb.ContainerReadyz{HttpGet: &ateapipb.HTTPGetAction{Port: 3, Path: "/"}, TimeoutSeconds: 30}},
+			{Name: "c", WakeupProbe: &ateapipb.ContainerWakeupProbe{HttpGet: &ateapipb.HTTPGetAction{Port: 3, Path: "/"}, TimeoutSeconds: 30}},
 		}},
 	}, {
 		name: "actor has no defaults",

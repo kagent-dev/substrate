@@ -71,24 +71,31 @@ type Config struct {
 	Upstream             *url.URL
 }
 
-// Server is an activation-aware HTTPS reverse proxy. It is long-lived across
-// actor activations, but only routes requests for the actor currently assigned
-// to its worker.
+// Server is an HTTPS reverse proxy for the worker's active actors.
 type Server struct {
 	credentialBundlePath string
 	tlsConfig            *tls.Config
-	proxy                *httputil.ReverseProxy
 	upstream             *url.URL
+	// Overridable by tests to avoid dialing real sandboxes.
+	newProxy func(DialFunc) *httputil.ReverseProxy
 
-	mu     sync.Mutex
-	active *activation
+	mu sync.Mutex
+	// Keyed by the request's actor identity.
+	active map[resources.ActorRef]*activation
 }
 
 type activation struct {
-	ref    resources.ActorRef
+	ref resources.ActorRef
+	// Distinguishes incarnations of an actor that reuse its name.
+	uid    string
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Connects through the actor's namespace.
+	dial DialFunc
+	// Connection pools must not be shared across activations.
+	proxy *httputil.ReverseProxy
 }
 
 // NewServer creates a Server and validates its TLS material.
@@ -121,33 +128,13 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("atunnel: trust bundle %q contains no certificates", cfg.TrustBundlePath)
 	}
 
-	transport := newProtocolMirrorTransport()
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(cfg.Upstream)
-			// Retain the client's Host rather than the upstream's, matching
-			// NewSingleHostReverseProxy's default behavior.
-			pr.Out.Host = pr.In.Host
-
-			port := pr.In.Header.Get(TargetPortHeader)
-			pr.Out.Header.Del(TargetPortHeader)
-			pr.Out.Header.Del(atenet.TargetActorHeader)
-			if p, ok := ParsePort(port); ok {
-				pr.Out.URL.Host = net.JoinHostPort(cfg.Upstream.Hostname(), strconv.Itoa(p))
-			}
-			pr.SetXForwarded()
-		},
-		Transport: transport,
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			slog.WarnContext(r.Context(), "atunnel upstream request failed", slog.Any("err", err))
-			http.Error(w, "bad gateway", http.StatusBadGateway)
-		},
-	}
-
 	s := &Server{
 		credentialBundlePath: cfg.CredentialBundlePath,
-		proxy:                proxy,
 		upstream:             cfg.Upstream,
+		active:               map[resources.ActorRef]*activation{},
+	}
+	s.newProxy = func(dial DialFunc) *httputil.ReverseProxy {
+		return newActorProxy(cfg.Upstream, dial)
 	}
 	s.tlsConfig = &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -174,6 +161,31 @@ func NewServer(cfg Config) (*Server, error) {
 		},
 	}
 	return s, nil
+}
+
+// newActorProxy builds a reverse proxy using the actor's dialer.
+func newActorProxy(upstream *url.URL, dial DialFunc) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(upstream)
+			// Retain the client's Host rather than the upstream's, matching
+			// NewSingleHostReverseProxy's default behavior.
+			pr.Out.Host = pr.In.Host
+
+			port := pr.In.Header.Get(TargetPortHeader)
+			pr.Out.Header.Del(TargetPortHeader)
+			pr.Out.Header.Del(atenet.TargetActorHeader)
+			if p, ok := ParsePort(port); ok {
+				pr.Out.URL.Host = net.JoinHostPort(upstream.Hostname(), strconv.Itoa(p))
+			}
+			pr.SetXForwarded()
+		},
+		Transport: newProtocolMirrorTransport(dial),
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.WarnContext(r.Context(), "atunnel upstream request failed", slog.Any("err", err))
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		},
+	}
 }
 
 // isGRPC reports whether an incoming HTTP request conforms to the gRPC over
@@ -208,9 +220,13 @@ type protocolMirrorTransport struct {
 	h1, h2c *http.Transport
 }
 
-func newProtocolMirrorTransport() protocolMirrorTransport {
+func newProtocolMirrorTransport(dial DialFunc) protocolMirrorTransport {
 	h1 := http.DefaultTransport.(*http.Transport).Clone()
 	h2c := http.DefaultTransport.(*http.Transport).Clone()
+	if dial != nil {
+		h1.DialContext = dial
+		h2c.DialContext = dial
+	}
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	h2c.Protocols = protocols
@@ -299,7 +315,7 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
 		return
 	}
-	ref, ctx, release, ok := s.authorize(r)
+	active, ctx, release, ok := s.authorize(r)
 	if !ok {
 		s.reject(w)
 		return
@@ -316,10 +332,11 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	upstream, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(s.upstream.Hostname(), port))
+	dialCtx, cancelDial := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelDial()
+	upstream, err := active.dial(dialCtx, "tcp", net.JoinHostPort(s.upstream.Hostname(), port))
 	if err != nil {
-		slog.WarnContext(r.Context(), "atunnel CONNECT upstream failed", slog.Any("actor", ref), slog.Any("err", err))
+		slog.WarnContext(r.Context(), "atunnel CONNECT upstream failed", slog.Any("actor", active.ref), slog.Any("err", err))
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
@@ -405,33 +422,71 @@ func (w flushingWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// Activate allows requests for actorName in atespace. There can be only one
-// active actor per worker.
-func (s *Server) Activate(atespace, actorName string) error {
+// Activate routes requests for the actor through its namespace-specific dialer.
+// Requests are routed by name, so an older incarnation still active under the
+// same name is replaced.
+func (s *Server) Activate(atespace, actorName, actorUID string, dial DialFunc) error {
 	if !resources.IsValidResourceName(atespace) || !resources.IsValidResourceName(actorName) {
 		return fmt.Errorf("atunnel: invalid actor reference %q/%q", atespace, actorName)
 	}
+	if dial == nil {
+		return fmt.Errorf("atunnel: actor dialer is required")
+	}
+	ref := resources.ActorRef{Atespace: atespace, Name: actorName}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active != nil {
-		return fmt.Errorf("atunnel: actor %s is already active", s.active.ref)
+	if old, ok := s.active[ref]; ok {
+		if old.uid == actorUID {
+			return fmt.Errorf("atunnel: actor %s is already active", ref)
+		}
+		old.cancel()
+		closeIdleUpstreamConnections(old)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s.active = &activation{
-		ref:    resources.ActorRef{Atespace: atespace, Name: actorName},
+	dial = activationDialer(ctx, dial)
+	s.active[ref] = &activation{
+		ref:    ref,
+		uid:    actorUID,
 		ctx:    ctx,
 		cancel: cancel,
+		dial:   dial,
+		proxy:  s.newProxy(dial),
 	}
 	return nil
 }
 
-// Deactivate rejects new requests, cancels requests for the active actor, and
-// waits for their handlers to exit before returning.
-func (s *Server) Deactivate(ctx context.Context) error {
+func activationDialer(activeCtx context.Context, dial DialFunc) DialFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if err := activeCtx.Err(); err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stop := context.AfterFunc(activeCtx, cancel)
+		defer stop()
+		conn, err := dial(ctx, network, address)
+		if canceled := errors.Join(activeCtx.Err(), ctx.Err()); canceled != nil {
+			if conn != nil {
+				_ = conn.Close()
+			}
+			return nil, canceled
+		}
+		return conn, err
+	}
+}
+
+// Deactivate rejects new requests for the actor and cancels and drains its
+// handlers. It leaves a newer incarnation under the same name alone.
+func (s *Server) Deactivate(ctx context.Context, atespace, actorName, actorUID string) error {
+	ref := resources.ActorRef{Atespace: atespace, Name: actorName}
 	s.mu.Lock()
-	active := s.active
-	s.active = nil
+	active := s.active[ref]
+	if active != nil && active.uid != actorUID {
+		active = nil
+	}
 	if active != nil {
+		delete(s.active, ref)
 		active.cancel()
 	}
 	s.mu.Unlock()
@@ -446,43 +501,43 @@ func (s *Server) Deactivate(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		s.closeIdleUpstreamConnections()
+		closeIdleUpstreamConnections(active)
 		return nil
 	case <-ctx.Done():
-		s.closeIdleUpstreamConnections()
+		closeIdleUpstreamConnections(active)
 		return fmt.Errorf("atunnel: waiting for active requests to stop: %w", ctx.Err())
 	}
 }
 
-func (s *Server) closeIdleUpstreamConnections() {
-	if transport, ok := s.proxy.Transport.(interface{ CloseIdleConnections() }); ok {
+func closeIdleUpstreamConnections(active *activation) {
+	if transport, ok := active.proxy.Transport.(interface{ CloseIdleConnections() }); ok {
 		transport.CloseIdleConnections()
 	}
 }
 
 // ServeHTTP validates the actor routing header on every request before proxying it.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	_, requestCtx, release, ok := s.authorize(r)
+	active, requestCtx, release, ok := s.authorize(r)
 	if !ok {
 		s.reject(w)
 		return
 	}
 	defer release()
 
-	s.proxy.ServeHTTP(w, r.WithContext(requestCtx))
+	active.proxy.ServeHTTP(w, r.WithContext(requestCtx))
 }
 
-func (s *Server) authorize(r *http.Request) (resources.ActorRef, context.Context, func(), bool) {
+func (s *Server) authorize(r *http.Request) (*activation, context.Context, func(), bool) {
 	ref, err := atenet.ParseTargetActor(r.Header.Get(atenet.TargetActorHeader))
 	if err != nil {
-		return resources.ActorRef{}, nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	s.mu.Lock()
-	active := s.active
-	if active == nil || active.ref != ref {
+	active, ok := s.active[ref]
+	if !ok {
 		s.mu.Unlock()
-		return resources.ActorRef{}, nil, nil, false
+		return nil, nil, nil, false
 	}
 	active.wg.Add(1)
 	s.mu.Unlock()
@@ -493,7 +548,7 @@ func (s *Server) authorize(r *http.Request) (resources.ActorRef, context.Context
 		stop()
 		cancel()
 	}
-	return ref, requestCtx, release, true
+	return active, requestCtx, release, true
 }
 
 func (s *Server) reject(w http.ResponseWriter) {

@@ -181,10 +181,14 @@ func (w *ActorWorkflow) ensureWorkerDiscarded(ctx context.Context, actorRef reso
 		}
 		if hosted {
 			if terr := w.ensureAteletTerminated(ctx, actorRef, actor, actorTemplate); terr != nil {
-				// A terminate that comes back with a crash directive lands the
-				// actor in CRASHED, which the user can revert again — that retry
-				// needs no live worker.
-				return maybeCrashActor(ctx, w.store, actorRef, terr, "while terminating the actor's workload", ateattr.OperationRevert)
+				// A failed terminate lands the actor in CRASHED, which the user
+				// can revert again — that retry needs no live worker.
+				slog.LogAttrs(ctx, slog.LevelError, "Setting Actor to crashed due to error",
+					append(ateattr.ActorRefLogAttrs(actorRef), slog.Any("err", terr))...)
+				if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationRevert, ateletCrashMessage("Terminate", terr)); cerr != nil {
+					return cerr
+				}
+				return fmt.Errorf("actor %s crashed: %w", actorRef, terr)
 			}
 			if err := w.ensureVolumesDetached(ctx, actor, actorTemplate, "DetachVolumesForRevert", ateattr.OperationRevert); err != nil {
 				return err
@@ -251,7 +255,8 @@ func (w *ActorWorkflow) ensureRevertedFinalized(ctx context.Context, actorRef re
 		toUpdate.Status.WorkerAssignment = nil
 		toUpdate.Status.InProgressSnapshotUri = ""
 		toUpdate.Status.InProgressLocalSnapshotName = ""
-		toUpdate.Status.LocalSnapshotInfo = nil
+		toUpdate.Status.LocalSnapshot = nil
+		toUpdate.Status.Crash = nil
 		return nil
 	})
 	if err != nil {

@@ -44,14 +44,6 @@ import (
 // Retryable.
 var ErrNoAteletOnNode = errors.New("no atelet pod found on node")
 
-// The SPIFFE identity that atelet serving certs carry, as minted by the
-// podidentity signer (cmd/podcertcontroller/internal/podidentitysigner).
-// The namespace part is ateletNamespace, declared in informer.go.
-const (
-	trustDomainName = "cluster.local"
-	ateletSA        = "atelet"
-)
-
 // AteletDialer handles gRPC connections to Atelet pods.
 type AteletDialer struct {
 	ateletIndexer cache.Indexer
@@ -78,13 +70,15 @@ func WithInsecureCredentials() DialerOption {
 }
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
-// are used to build the per-atelet mTLS credentials used for every atelet connection.
-func NewAteletDialer(ateletIndexer cache.Indexer, clientBundlePath, serverCAPath string, opts ...DialerOption) *AteletDialer {
+// are used to build the per-atelet mTLS credentials used for every atelet
+// connection, and ateletSPIFFEID is the identity those credentials expect on
+// the atelet serving cert.
+func NewAteletDialer(ateletIndexer cache.Indexer, ateletSPIFFEID, clientBundlePath, serverCAPath string, opts ...DialerOption) *AteletDialer {
 	d := &AteletDialer{
 		ateletIndexer: ateletIndexer,
 		ateletConns:   newAteletConnCache(1024),
 		dialCredentials: func(expectedPodUID string) (credentials.TransportCredentials, error) {
-			tlsConfig, err := buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID)
+			tlsConfig, err := buildTLSConfig(ateletSPIFFEID, clientBundlePath, serverCAPath, expectedPodUID)
 			if err != nil {
 				return nil, err
 			}
@@ -162,18 +156,18 @@ func (d *AteletDialer) DialForAteletOnNode(nodeName string) (*grpc.ClientConn, e
 	return ateletConn, nil
 }
 
-func buildTLSConfig(clientBundlePath, serverCAPath, expectedPodUID string) (*tls.Config, error) {
-	trustDomain, err := spiffeid.TrustDomainFromString(trustDomainName)
+func buildTLSConfig(ateletSPIFFEID, clientBundlePath, serverCAPath, expectedPodUID string) (*tls.Config, error) {
+	trustDomain, err := spiffeid.TrustDomainFromString(installdefaults.AteletTrustDomain)
 	if err != nil {
-		return nil, fmt.Errorf("while parsing trust domain %q: %w", trustDomainName, err)
+		return nil, fmt.Errorf("while parsing trust domain %q: %w", installdefaults.AteletTrustDomain, err)
 	}
 	bundle, err := x509bundle.Load(trustDomain, serverCAPath)
 	if err != nil {
 		return nil, fmt.Errorf("while loading CA bundle from %s: %w", serverCAPath, err)
 	}
-	expectedID, err := spiffeid.FromSegments(trustDomain, "ns", installdefaults.NamespaceFromPodEnv(), "sa", ateletSA)
+	expectedID, err := spiffeid.FromString(ateletSPIFFEID)
 	if err != nil {
-		return nil, fmt.Errorf("while building expected atelet SPIFFE ID: %w", err)
+		return nil, fmt.Errorf("while parsing expected atelet SPIFFE ID %q: %w", ateletSPIFFEID, err)
 	}
 
 	verify, err := verifyAteletServerCert(bundle, expectedID, expectedPodUID)

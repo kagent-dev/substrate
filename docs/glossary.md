@@ -46,8 +46,8 @@ for etcd.
   status and snapshot references.
 
 - **Worker**: a record representing one worker pod in a `WorkerPool`. A Worker
-  hosts at most one Actor at a time; many Actors are multiplexed across a pool
-  over time.
+  hosts several Actors at once, each in its own sandbox, up to its actor limit
+  and its compute capacity; many more are multiplexed across a pool over time.
 
 ## Components
 
@@ -108,7 +108,7 @@ for etcd.
 
 ## Snapshots
 
-- **Snapshot scope**: what an `ActorTemplate`'s `SnapshotsConfig` includes
+- **Snapshot scope**: what an `ActorTemplate`'s `SnapshotConfig` includes
   in a given snapshot. Two scopes exist today:
   - **`Full`**: process memory plus the rootfs delta on top of the OCI
     image, and any attached `DurableDir` volumes. Used to capture

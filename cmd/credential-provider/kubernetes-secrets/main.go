@@ -22,9 +22,11 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os/signal"
 	"strings"
@@ -40,6 +42,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/agent-substrate/substrate/internal/credbundle"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
@@ -48,11 +51,15 @@ import (
 const serviceName = "credprovider"
 
 var (
-	injectorSPIFFEID = pflag.String("injector-spiffe-id", "spiffe://cluster.local/ns/ate-system/sa/atenet-egress", "SPIFFE identity of the egress injector allowed to fetch credentials")
-	listenAddr       = pflag.String("listen-address", ":50051", "gRPC listen address")
-	metricsAddr      = pflag.String("metrics-address", ":9090", "Prometheus/health HTTP listen address")
-	serverBundle     = pflag.String("server-cred-bundle", "", "credential bundle (PEM key+chain) presented for serving TLS (required)")
-	clientCAFile     = pflag.String("client-ca-file", "", "CA bundle that caller (injector) client certificates must chain to (required)")
+	listenAddr   = pflag.String("listen-address", ":50051", "gRPC listen address")
+	metricsAddr  = pflag.String("metrics-address", ":9090", "Prometheus/health HTTP listen address")
+	statusAddr   = pflag.String("status-address", ":4040", "/statusz HTTP listen address; empty disables the page")
+	serverBundle = pflag.String("server-cred-bundle", "", "credential bundle (PEM key+chain) presented for serving TLS (required)")
+	clientCAFile = pflag.String("client-ca-file", "", "CA bundle that caller (injector) client certificates must chain to (required)")
+	// The injector is the only caller allowed to fetch secrets. Its identity
+	// names the namespace and ServiceAccount atenet-egress runs as, so a
+	// deployment that relocates or renames substrate must set it.
+	injectorIdentity = pflag.String("injector-identity", installdefaults.EgressSPIFFEID(installdefaults.SystemNamespace), "SPIFFE identity of the credential injector allowed to fetch secrets")
 	nsPolicyFile     = pflag.String("namespace-policy-file", "", "path to the atespace→namespace authorization YAML (required)")
 	logLevel         = pflag.String("log-level", "info", "one of debug, info, warn, error")
 	drainGrace       = pflag.Duration("drain-grace", 5*time.Second, "how long to wait for in-flight RPCs on shutdown before a hard stop")
@@ -116,7 +123,8 @@ func run(ctx context.Context) error {
 		grpc.Creds(creds),
 	)
 	reflection.Register(srv)
-	credproviderpb.RegisterCredentialProviderServer(srv, NewServer(client, nsAuth))
+	provider := NewServer(client, nsAuth)
+	credproviderpb.RegisterCredentialProviderServer(srv, provider)
 
 	lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", *listenAddr)
 	if err != nil {
@@ -125,6 +133,25 @@ func run(ctx context.Context) error {
 
 	shutdownCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// The /statusz debug page.
+	if *statusAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/statusz", newStatuszHandler(provider))
+		statusSrv := &http.Server{Addr: *statusAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-shutdownCtx.Done()
+			_ = statusSrv.Close()
+		}()
+		go func() {
+			slog.InfoContext(ctx, "statusz listening", slog.String("address", *statusAddr))
+			// Best-effort: a bind failure is logged, not fatal.
+			if err := statusSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.ErrorContext(ctx, "statusz server exited", slog.Any("err", err))
+			}
+		}()
+	}
+
 	go func() {
 		<-shutdownCtx.Done()
 		slog.Info("shutting down")
@@ -177,9 +204,9 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		return nil, fmt.Errorf("--client-ca-file is required")
 	}
 
-	id, err := url.Parse(*injectorSPIFFEID)
-	if err != nil || id.Scheme != "spiffe" || id.Host == "" || id.Path == "" || id.User != nil || id.RawQuery != "" || id.ForceQuery || strings.Contains(*injectorSPIFFEID, "#") {
-		return nil, fmt.Errorf("--injector-spiffe-id must be a SPIFFE URI")
+	id, err := url.Parse(*injectorIdentity)
+	if err != nil || id.Scheme != "spiffe" || id.Host == "" || id.Path == "" || id.User != nil || id.RawQuery != "" || id.ForceQuery || strings.Contains(*injectorIdentity, "#") {
+		return nil, fmt.Errorf("--injector-identity must be a SPIFFE URI")
 	}
 
 	// Load the client CA pool once so a missing or empty projection fails the
@@ -190,7 +217,7 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 	}
 
 	serverCert := credbundle.Loader(*serverBundle)
-	verifySAN := verifyClientSAN(*injectorSPIFFEID)
+	verifySAN := verifyClientSAN(*injectorIdentity)
 
 	// GetConfigForClient builds the config anew per connection: a certificate
 	// signed by a newly published CA verifies without a restart.
@@ -210,7 +237,7 @@ func buildServerCreds(ctx context.Context) (credentials.TransportCredentials, er
 		},
 	}
 	slog.InfoContext(ctx, "verifying caller client certificates",
-		slog.String("ca", *clientCAFile), slog.String("required_san", *injectorSPIFFEID))
+		slog.String("ca", *clientCAFile), slog.String("required_san", *injectorIdentity))
 	return credentials.NewTLS(cfg), nil
 }
 

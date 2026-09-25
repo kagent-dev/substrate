@@ -28,15 +28,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/authz"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/controlapi"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/oidcjwt"
-	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store/atepg"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workerservice"
 	"github.com/agent-substrate/substrate/internal/ateapiauth"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
-	"github.com/agent-substrate/substrate/internal/authz"
 	"github.com/agent-substrate/substrate/internal/credbundle"
 	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/localca"
@@ -83,6 +82,7 @@ var (
 	actorIDCAPoolFile      = pflag.String("actor-id-ca-pool", "", "The file that contains the CA pool for signing actor JWTs")
 	podIdentityCACerts     = pflag.String("pod-identity-ca-certs", "", "The file that contains the pod-identity CA bundle, used both for verifying client certificates presented to the gRPC server and for verifying atelet serving certificates when dialing atelet. If empty, client-cert verification is disabled and atelet dials will fail.")
 	ateletClientCredBundle = pflag.String("atelet-client-cred-bundle", "", "Credential bundle presented as the client certificate when dialing atelet.")
+	ateletServiceAccount   = pflag.String("atelet-service-account", installdefaults.AteletServiceAccount, "ServiceAccount atelet runs as. It is the service-account segment of the SPIFFE ID expected on atelet's certificate, so it has to match what the deployment actually creates; a deployment that prefixes resource names needs it set.")
 	ateletInsecure         = pflag.Bool("atelet-insecure", false, "Dial atelet without transport security. Intended only for local clusters without Pod Certificates.")
 
 	drainDelay   = pflag.Duration("drain-delay", 13*time.Second, "How long to keep accepting new work after SIGTERM, before starting the gRPC drain.")
@@ -159,24 +159,20 @@ func main() {
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to set up persistence backend", err)
 	}
+	pool := persistence.Pool()
+	defer pool.Close()
 	// Backends may run background maintenance rooted in their own context
-	// (atepg's outbox maintenance loop); stop it on shutdown.
-	if closer, ok := persistence.(interface{ Close() }); ok {
-		defer closer.Close()
-	}
+	// (atepg's outbox maintenance loop); stop it on shutdown before closing pool.
+	defer persistence.Close()
 
-	if poolProvider, ok := persistence.(interface {
-		NewPool(context.Context) (*pgxpool.Pool, error)
-	}); ok {
-		authzPool, err := poolProvider.NewPool(shutdownCtx)
-		if err != nil {
-			serverboot.Fatal(ctx, "Failed to open dedicated PostgreSQL pool for OpenFGA", err)
-		}
-		authzSrv, err := authz.NewServer(shutdownCtx, authzPool)
-		if err != nil {
-			serverboot.Fatal(ctx, "Failed to initialize OpenFGA authorization server", err)
-		}
-		defer authzSrv.Close()
+	fgaServer, err := authz.NewOpenFGAServer(pool)
+	if err != nil {
+		serverboot.Fatal(ctx, "Failed to create OpenFGA server", err)
+	}
+	defer fgaServer.Close()
+
+	if _, _, err := authz.EnsureStoreAndModel(shutdownCtx, pool, fgaServer); err != nil {
+		serverboot.Fatal(ctx, "Failed to initialize OpenFGA store and model", err)
 	}
 
 	clientset, ateClient, err := newKubeClients()
@@ -202,7 +198,14 @@ func main() {
 	// atelet shares ateapi's namespace in every supported deployment topology,
 	// so we read it from Kubernetes' downward API rather than expose a flag.
 	ateletNamespace := installdefaults.NamespaceFromPodEnv()
-	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace))
+	// An empty ServiceAccount would not fail here: path.Join drops the empty
+	// segment, yielding an identity that parses but matches nothing, so every
+	// atelet dial would be rejected with no hint at the cause.
+	if *ateletServiceAccount == "" {
+		serverboot.Fatal(ctx, "Invalid flags", fmt.Errorf("--atelet-service-account must not be empty"))
+	}
+	ateletSPIFFEID := installdefaults.SPIFFEID(ateletNamespace, *ateletServiceAccount)
+	slog.InfoContext(ctx, "Resolved atelet namespace", slog.String("atelet-namespace", ateletNamespace), slog.String("atelet-spiffe-id", ateletSPIFFEID))
 
 	ateletPodInformerFactory, ateletPodInformer := controlapi.AteletInformer(clientset, ateletNamespace)
 	scInformerFactory := informers.NewSharedInformerFactory(clientset, 0)
@@ -240,7 +243,7 @@ func main() {
 	if *ateletInsecure {
 		dialerOpts = append(dialerOpts, controlapi.WithInsecureCredentials())
 	}
-	ateletDialer := controlapi.NewAteletDialer(ateletPodInformer.GetIndexer(), *ateletClientCredBundle, *podIdentityCACerts, dialerOpts...)
+	ateletDialer := controlapi.NewAteletDialer(ateletPodInformer.GetIndexer(), ateletSPIFFEID, *ateletClientCredBundle, *podIdentityCACerts, dialerOpts...)
 
 	actorIDCAPool, err := localca.NewRefreshingPool(*actorIDCAPoolFile)
 	if err != nil {
@@ -305,7 +308,7 @@ func main() {
 	)
 	reflection.Register(mux)
 	ateapipb.RegisterControlServer(mux, controlSrv)
-	ateapipb.RegisterWorkerServiceServer(mux, workerservice.New(persistence))
+	ateapipb.RegisterWorkerServiceServer(mux, workerservice.New(persistence, controlSrv, ateletSPIFFEID, actorIDCAPool))
 
 	readiness := &serverboot.Readiness{}
 	go serverboot.StartMetricsServer(ctx, serverboot.MetricsServerOptions{
@@ -414,9 +417,9 @@ func newObjectStore(ctx context.Context) (objectstore.Store, error) {
 	}
 }
 
-// connectStore builds the PostgreSQL-backed store.Interface. Startup fails if
+// connectStore builds the PostgreSQL-backed *atepg.Persistence. Startup fails if
 // its configuration is missing or the database can't be reached.
-func connectStore(ctx context.Context) (store.Interface, error) {
+func connectStore(ctx context.Context) (*atepg.Persistence, error) {
 	if *postgresConnectionString == "" {
 		return nil, fmt.Errorf("--postgres-connection-string is required")
 	}

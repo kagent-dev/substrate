@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
 	"github.com/agent-substrate/substrate/internal/resources"
@@ -40,7 +41,7 @@ const (
 
 	// goldenSnapshotWarmup is the default wall-clock delay between resuming
 	// the golden actor and taking its snapshot, for templates without a
-	// readiness probe on every container.
+	// wakeup probe on every container.
 	goldenSnapshotWarmup = 20 * time.Second
 )
 
@@ -50,6 +51,10 @@ const (
 	reasonGoldenActorCrashed = "GoldenActorCrashed"
 	reasonUnexpectedState    = "GoldenActorUnexpectedState"
 )
+
+// maxGoldenErrorMessageLen is the maxLength of
+// GoldenSnapshotStatus.error_message.
+const maxGoldenErrorMessageLen = 4096
 
 // templateReconcilerStore enumerates the exact storage methods needed by
 // ActorTemplateReconciler and nothing more.
@@ -370,12 +375,24 @@ func (r *ActorTemplateReconciler) checkpoint(ctx context.Context, observed *atea
 }
 
 // fail commits the terminal error message, prefixed with a machine-readable
-// reason.
+// reason and truncated to fit error_message's bound.
 func (r *ActorTemplateReconciler) fail(ctx context.Context, observed *ateapipb.ActorTemplate, reason, msg string) error {
 	_, err := r.checkpoint(ctx, observed, func(snapshotStatus *ateapipb.GoldenSnapshotStatus) {
-		snapshotStatus.ErrorMessage = reason + ": " + msg
+		snapshotStatus.ErrorMessage = truncateUTF8(reason+": "+msg, maxGoldenErrorMessageLen)
 	})
 	return err
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a UTF-8 sequence,
+// since proto string fields must hold valid UTF-8.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // goldenSnapshotDone reports whether the golden snapshot build reached a
@@ -384,7 +401,7 @@ func goldenSnapshotDone(snapshotStatus *ateapipb.GoldenSnapshotStatus) bool {
 	return snapshotStatus.GetGoldenTag() != nil || snapshotStatus.GetErrorMessage() != ""
 }
 
-// goldenSnapshotWarmupFor returns 0 when every container has a readyz probe
+// goldenSnapshotWarmupFor returns 0 when every container has a wakeup probe
 // (ResumeActor already blocked until the workload reported 200), and the
 // default warmup otherwise.
 func goldenSnapshotWarmupFor(containers []*ateapipb.Container) time.Duration {
@@ -392,7 +409,7 @@ func goldenSnapshotWarmupFor(containers []*ateapipb.Container) time.Duration {
 		return goldenSnapshotWarmup
 	}
 	for _, container := range containers {
-		if container.GetReadyz() == nil {
+		if container.GetWakeupProbe() == nil {
 			return goldenSnapshotWarmup
 		}
 	}

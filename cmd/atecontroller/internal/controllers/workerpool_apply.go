@@ -28,6 +28,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateomcapacity"
 	"github.com/agent-substrate/substrate/internal/ateompath"
 	"github.com/agent-substrate/substrate/internal/deviceplugin"
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 )
 
@@ -92,7 +93,7 @@ const (
 // Deployment managed by a WorkerPool. Only fields owned by this controller
 // are declared here. otel, when it carries an endpoint, is propagated to the
 // ateom container so it pushes telemetry to that collector.
-func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettings) *appsv1ac.DeploymentApplyConfiguration {
+func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettings, systemNamespace, ateletServiceAccount, routerServiceAccount string) *appsv1ac.DeploymentApplyConfiguration {
 	labels := map[string]string{}
 	annotations := map[string]string{}
 	if wp.Spec.Template != nil {
@@ -105,18 +106,42 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 	}
 	labels["ate.dev/worker-pool"] = wp.Name
 
+	args := []string{
+		"--pod-uid=$(POD_UID)",
+		"--atunnel-listen-address=:443",
+		"--atunnel-connect-listen-address=:8443",
+		"--atunnel-credential-bundle=" + atunnelIdentityMountPath + "/credential-bundle.pem",
+		"--atunnel-trust-bundle=" + atunnelIdentityMountPath + "/trust-bundle.pem",
+		// The peers atunnel authenticates live in substrate's namespace, not
+		// the worker's, so the controller passes their identities rather than
+		// letting ateom assume the default install. --atunnel-client-identity
+		// has been accepted by every ateom that carries this controller's
+		// contemporaries, so it is always safe to pass.
+		"--atunnel-client-identity=" + installdefaults.SPIFFEID(systemNamespace, routerServiceAccount),
+	}
+
+	// --atunnel-broker-identity is newer than the oldest ateom a rolling
+	// upgrade still has running. docs/upgrade.md keeps the outgoing worker pool
+	// serving alongside the new one, and that pool's Deployment is reconciled
+	// by this controller while still pinned to its old image, which exits on an
+	// unrecognized flag. An ateom without the flag hardcodes the canonical
+	// identity, and an ateom with it defaults to the same, so omitting the flag
+	// when it carries that value is equivalent for both and keeps the upgrade
+	// intact. A relocated or renamed install passes something else and needs an
+	// image new enough to accept it, which it necessarily has.
+	if brokerIdentity := installdefaults.SPIFFEID(systemNamespace, ateletServiceAccount); brokerIdentity != installdefaults.AteletSPIFFEID(installdefaults.SystemNamespace) {
+		args = append(args, "--atunnel-broker-identity="+brokerIdentity)
+	}
+
+	args = append(args,
+		"--atunnel-egress-listen-address=0.0.0.0:15001",
+		"--atunnel-egress-trust-bundle="+atunnelEgressTrustMountPath+"/trust-bundle.pem",
+	)
+
 	containerAC := corev1ac.Container().
 		WithName("ateom").
 		WithImage(wp.Spec.WorkerImage).
-		WithArgs(
-			"--pod-uid=$(POD_UID)",
-			"--atunnel-listen-address=:443",
-			"--atunnel-connect-listen-address=:8443",
-			"--atunnel-credential-bundle="+atunnelIdentityMountPath+"/credential-bundle.pem",
-			"--atunnel-trust-bundle="+atunnelIdentityMountPath+"/trust-bundle.pem",
-			"--atunnel-egress-listen-address=0.0.0.0:15001",
-			"--atunnel-egress-trust-bundle="+atunnelEgressTrustMountPath+"/trust-bundle.pem",
-		).
+		WithArgs(args...).
 		WithPorts(corev1ac.ContainerPort().
 			WithName("https").
 			WithContainerPort(443).
@@ -203,6 +228,7 @@ func buildDeploymentApplyConfig(wp *atev1alpha1.WorkerPool, otel ateomOTelSettin
 		)
 
 	applyWorkerPoolPodTemplate(podSpecAC, containerAC, wp.Spec.Template)
+	applySandboxClassToleration(podSpecAC, wp.Spec.SandboxClass)
 	maybeApplyMicroVMPodShape(podSpecAC, containerAC, wp.Spec.SandboxClass)
 	podSpecAC.WithContainers(containerAC)
 	podSpecAC.WithTerminationGracePeriodSeconds(workerTerminationGracePeriodSeconds)
@@ -434,15 +460,34 @@ func maybeApplyMicroVMPodShape(
 	// with no node advertising the resource, workers stay Pending rather than
 	// landing somewhere they cannot run.
 	//
-	// The toleration stays: extended resources constrain where this pod fits but
-	// repel nothing, so a cluster reserving nested-virt nodes with a taint still
-	// needs it. Additive on top of the WorkerPool's configurable scheduling
-	// fields (spec.template nodeSelector/tolerations/affinity, added in #247) —
-	// merge, don't overwrite.
+	// Extended resources constrain where this pod fits but repel nothing, so a
+	// cluster reserving nested-virt nodes with a taint also needs the toleration
+	// that applySandboxClassToleration adds for every class.
+}
+
+// sandboxClassTaintKey is the taint key a cluster puts on a node pool reserved
+// for one sandbox class, with the class name as the value:
+// ate.dev/sandboxClass=<class>:NoSchedule. The atelet DaemonSet tolerates the
+// key for any value.
+const sandboxClassTaintKey = "ate.dev/sandboxClass"
+
+// applySandboxClassToleration lets worker pods schedule onto a node pool
+// tainted for the pool's own sandbox class. Without it a cluster that reserves
+// nodes per class with the ate.dev/sandboxClass taint leaves every worker
+// Pending. The toleration is additive on top of the WorkerPool's configurable
+// spec.template tolerations. An empty class means the API default, gvisor,
+// which is what the CRD's defaulting produces on the server.
+func applySandboxClassToleration(
+	podSpecAC *corev1ac.PodSpecApplyConfiguration,
+	sandboxClass atev1alpha1.SandboxClass,
+) {
+	if sandboxClass == "" {
+		sandboxClass = atev1alpha1.SandboxClassGvisor
+	}
 	podSpecAC.WithTolerations(corev1ac.Toleration().
-		WithKey("ate.dev/sandboxClass").
+		WithKey(sandboxClassTaintKey).
 		WithOperator(corev1.TolerationOpEqual).
-		WithValue(string(atev1alpha1.SandboxClassMicroVM)).
+		WithValue(string(sandboxClass)).
 		WithEffect(corev1.TaintEffectNoSchedule))
 }
 

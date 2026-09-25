@@ -34,6 +34,17 @@ service AteomSupport {
 
   // Report capacity and supply for this worker back to atelet.
   rpc SetWorkerCapacity(SetWorkerCapacityRequest) returns (SetWorkerCapacityResponse) {}
+
+  // RequestActorSuspend asks that the actor this worker hosts be suspended,
+  // for atelet to forward to the control plane's WorkerService, which this
+  // mirrors.
+  //
+  // Success means the control plane ran the suspend; an error is its refusal,
+  // passed through as it was given, so a worker can tell a decision from a
+  // failure to ask. Callers must not hold a lock the resulting Checkpoint
+  // would need: the control plane answers this by driving a suspend back
+  // through atelet into the calling ateom.
+  rpc RequestActorSuspend(RequestActorSuspendRequest) returns (RequestActorSuspendResponse) {}
 }
 
 message SetWorkerCapacityRequest {
@@ -43,6 +54,21 @@ message SetWorkerCapacityRequest {
 }
 
 message SetWorkerCapacityResponse {
+}
+
+message RequestActorSuspendRequest {
+  // The actor the calling worker is hosting. atelet forwards this to the
+  // control plane, which serves it only if the actor is assigned to the worker
+  // the caller's certificate names.
+  string actor_atespace = 1;
+  string actor_name = 2;
+
+  // The UID of the actor --- used to guard against deletion and recreation of
+  // an actor with the same name, as for MintActorCertificate.
+  string actor_uid = 3;
+}
+
+message RequestActorSuspendResponse {
 }
 
 message MintActorCertificateRequest {
@@ -125,7 +151,7 @@ message RunRequest {
   // so a later Checkpoint can pin the same version into the snapshot manifest.
   SandboxAssets sandbox_assets = 8;
 
-  // When absent, actor traffic uses direct egress instead of atunnel.
+  // When absent the actor has no egress: its TCP is captured and refused.
   optional EgressGateway egress_gateway = 9;
 
   // The actor's declared size, from the ActorTemplate's resource limits. atelet
@@ -176,10 +202,7 @@ message SandboxAssets {
 // WorkloadSpec parallels Pod, but with far fewer configurable fields.
 message WorkloadSpec {
   repeated Container containers = 1;
-  repeated Volume volumes = 3;
-
-  reserved 2;
-  reserved "pause_image"; // moved to SandboxAssets
+  repeated Volume volumes = 2;
 }
 
 message DurableDirVolume {
@@ -263,7 +286,7 @@ message Container {
   repeated string command = 3;
   repeated string args = 7;
   repeated EnvEntry env = 4;
-  Readyz readyz = 5;
+  WakeupProbe wakeup_probe = 5;
   repeated VolumeMount volume_mounts = 6;
   SecurityContext security_context = 8;
 
@@ -295,12 +318,12 @@ message ResourceLimits {
 
 message EnvEntry {
   string name = 1;
-  string value = 2;
+  string value = 2 [ debug_redact = true ];
 }
 
-// Readyz describes how to check that a container is ready to serve.
+// WakeupProbe describes how to check that a container is ready to serve.
 // Only HTTP is supported today.
-message Readyz {
+message WakeupProbe {
   HTTPGetAction http_get = 1;
   // How long to keep polling before giving up and failing the actor start.
   int32 timeout_seconds = 2;
@@ -398,7 +421,7 @@ message UploadPausedCheckpointRequest {
   string actor_template_atespace = 4;
   string actor_template_name = 5;
 
-  // The local checkpoint to upload: LocalSnapshotInfo.snapshot_name recorded
+  // The local checkpoint to upload: LocalSnapshot.snapshot_name recorded
   // at pause time.
   string local_snapshot_name = 6;
 
@@ -426,9 +449,6 @@ message RestoreRequest {
   string actor_template_atespace = 5;
   string actor_template_name = 6;
 
-  // Sandbox binary config is not sent on restore: the snapshot is
-  // self-describing. atelet reads the snapshot manifest to recover the pinned
-  // sandbox version that created it.
   WorkloadSpec spec = 7;
 
   CheckpointType type = 8;
@@ -450,7 +470,7 @@ message RestoreRequest {
   // checkpoint) while the golden snapshot is always external.
   string golden_snapshot_uri = 12;
 
-  // When absent, actor traffic uses direct egress instead of atunnel.
+  // When absent the actor has no egress: its TCP is captured and refused.
   optional EgressGateway egress_gateway = 13;
 
   // The actor's declared size, from the ActorTemplate's resource limits. For
@@ -459,6 +479,10 @@ message RestoreRequest {
   // means "unset": keep the runtime default.
   int64 cpu_milli = 14;    // CPU limit in millicores (1000 = one core).
   int64 memory_bytes = 15; // Memory limit in bytes.
+
+  // The sandbox binaries and pause image to restore with, resolved from the
+  // ActorTemplate's SandboxConfig. Required.
+  SandboxAssets sandbox_assets = 16;
 }
 
 message RestoreResponse {

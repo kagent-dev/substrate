@@ -114,11 +114,15 @@ jobs:
     - name: Deploy egress demo
       run: hack/install-ate-kind.sh --deploy-demo-egress-mitm
     - name: Run E2E tests (gVisor)
-      run: hack/run-e2e-kind.sh -v -args --no-color
+      # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
+      # tests keep a stable trust bundle and gateway signing certificate.
+      run: hack/run-e2e-kind.sh -v -skip '^TestActorIdentity_' -args --no-color
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
+    - name: Run E2E tests (identity and trust rotation)
+      run: hack/run-e2e-kind.sh ./internal/e2e/suites/identity -v -args --no-color
     - name: Dump diagnostics on failure
       if: failure()
       run: |

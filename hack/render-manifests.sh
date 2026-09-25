@@ -70,7 +70,7 @@ helm template substrate "${CHART_DIR}" \
 # Split into per-source files so the directory structure mirrors the chart
 # templates, making diffs friendlier.
 python3 - "${TMP_DIR}/all.yaml" "${TMP_DIR}/out" <<'PY'
-import os, re, sys
+import os, re, sys, yaml
 in_path, out_dir = sys.argv[1], sys.argv[2]
 os.makedirs(out_dir, exist_ok=True)
 

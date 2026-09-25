@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agent-substrate/substrate/internal/installdefaults"
 	"github.com/agent-substrate/substrate/internal/localca"
 	"github.com/agent-substrate/substrate/pkg/proto/credproviderpb"
 	"google.golang.org/grpc"
@@ -54,7 +55,7 @@ func certWithURIs(t *testing.T, uris ...string) *x509.Certificate {
 }
 
 func TestVerifyClientSAN(t *testing.T) {
-	injector := *injectorSPIFFEID
+	injector := installdefaults.EgressSPIFFEID(installdefaults.SystemNamespace)
 
 	tests := []struct {
 		name    string
@@ -124,8 +125,8 @@ func TestBuildServerCredsReloadsClientCA(t *testing.T) {
 		t.Fatalf("buildServerCreds() error = %v", err)
 	}
 
-	fromCA1 := clientCA1.issue(t, certOpts{uris: []string{*injectorSPIFFEID}})
-	fromCA2 := clientCA2.issue(t, certOpts{uris: []string{*injectorSPIFFEID}})
+	fromCA1 := clientCA1.issue(t, certOpts{uris: []string{installdefaults.EgressSPIFFEID(installdefaults.SystemNamespace)}})
+	fromCA2 := clientCA2.issue(t, certOpts{uris: []string{installdefaults.EgressSPIFFEID(installdefaults.SystemNamespace)}})
 	wrongSAN := clientCA1.issue(t, certOpts{uris: []string{"spiffe://cluster.local/ns/ate-system/sa/impostor"}})
 
 	// Before rotation only CA1 is trusted.
@@ -312,10 +313,10 @@ func TestProviderMTLS(t *testing.T) {
 	}
 	servingCert := issueCertificate(t, ca, "")
 	dir := t.TempDir()
-	oldBundle, oldCAFile, oldInjector := *serverBundle, *clientCAFile, *injectorSPIFFEID
-	t.Cleanup(func() { *serverBundle, *clientCAFile, *injectorSPIFFEID = oldBundle, oldCAFile, oldInjector })
+	oldBundle, oldCAFile, oldInjector := *serverBundle, *clientCAFile, *injectorIdentity
+	t.Cleanup(func() { *serverBundle, *clientCAFile, *injectorIdentity = oldBundle, oldCAFile, oldInjector })
 	*serverBundle, *clientCAFile = filepath.Join(dir, "server.pem"), filepath.Join(dir, "ca.pem")
-	*injectorSPIFFEID = "spiffe://cluster.local/ns/custom/sa/release-atenet-egress"
+	*injectorIdentity = "spiffe://cluster.local/ns/custom/sa/release-atenet-egress"
 	key, err := x509.MarshalPKCS8PrivateKey(servingCert.PrivateKey)
 	if err != nil {
 		t.Fatal(err)
@@ -350,10 +351,10 @@ func TestProviderMTLS(t *testing.T) {
 		certs   []tls.Certificate
 		allowed bool
 	}{
-		{"injector", []tls.Certificate{issueCertificate(t, ca, *injectorSPIFFEID)}, true},
+		{"injector", []tls.Certificate{issueCertificate(t, ca, *injectorIdentity)}, true},
 		{"other workload", []tls.Certificate{issueCertificate(t, ca, "spiffe://cluster.local/ns/custom/sa/other")}, false},
 		{"missing certificate", nil, false},
-		{"untrusted injector", []tls.Certificate{issueCertificate(t, untrustedCA, *injectorSPIFFEID)}, false},
+		{"untrusted injector", []tls.Certificate{issueCertificate(t, untrustedCA, *injectorIdentity)}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{

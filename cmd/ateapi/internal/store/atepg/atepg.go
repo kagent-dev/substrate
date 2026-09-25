@@ -255,10 +255,9 @@ func (p *Persistence) Close() {
 	}
 }
 
-// NewPool opens a dedicated PostgreSQL connection pool configured identically
-// to this persistence instance (including TLS rotation and search_path).
-func (p *Persistence) NewPool(ctx context.Context) (*pgxpool.Pool, error) {
-	return pgxpool.NewWithConfig(ctx, p.pool.Config())
+// Pool returns the underlying PostgreSQL connection pool.
+func (p *Persistence) Pool() *pgxpool.Pool {
+	return p.pool
 }
 
 // querier is satisfied by both *pgxpool.Pool and pgx.Tx, letting read helpers
@@ -326,6 +325,20 @@ func setUpdateMetadata(newMeta, oldMeta *ateapipb.ResourceMetadata) {
 	newMeta.Version = oldMeta.Version + 1
 	newMeta.CreateTime = oldMeta.CreateTime
 	newMeta.UpdateTime = timestamppb.Now()
+}
+
+func mapDeleteError(err error, uid string, version int64, precondition store.DeletePreconditions) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("reading after a guarded delete matched nothing: %w", err)
+	}
+	if err := precondition.Check(&ateapipb.ResourceMetadata{Uid: uid, Version: version}); err != nil {
+		return err
+	}
+	// The row matches the guards now, so it changed between the two statements.
+	return store.ErrVersionConflict
 }
 
 func isUniqueViolation(err error) bool { return pgErrCode(err) == "23505" }

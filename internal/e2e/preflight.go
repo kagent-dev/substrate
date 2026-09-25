@@ -38,10 +38,10 @@ func PreflightChecks() error {
 
 	// Check deployments.
 	deployments := []string{
-		"ate-controller",
-		"ate-api-server",
+		ResourceName("ate-controller"),
+		ResourceName("ate-api-server"),
 	}
-	namespace := "ate-system"
+	namespace := SystemNamespace()
 	for _, depName := range deployments {
 		dep, err := clients.K8s.AppsV1().Deployments(namespace).Get(ctx, depName, metav1.GetOptions{})
 		if err != nil {
@@ -59,6 +59,18 @@ func PreflightChecks() error {
 	_, err = clients.SubstrateAPI.ListActors(listCtx, &ateapipb.ListActorsRequest{})
 	if err != nil {
 		return fmt.Errorf("ListActors RPC failed: %v", err)
+	}
+
+	// The micro-VM class needs its SandboxConfig registered; without it every
+	// fixture in the run is misconfigured.
+	// Note: Whether a node can actually host a micro-VM is left to the scheduler
+	// and any issues are to be reported at runtime. Which device a sandbox class
+	// requires should not be checked here to prevent drift between platforms.
+	if IsMicroVM() {
+		if _, err := clients.SubstrateK8s.ApiV1alpha1().SandboxConfigs().Get(ctx, SandboxClassMicroVM, metav1.GetOptions{}); err != nil {
+			return fmt.Errorf("E2E_SANDBOX_CLASS=%s but SandboxConfig/%s is missing (see docs/dev/microvm-local.md for cluster setup): %w",
+				SandboxClassMicroVM, SandboxClassMicroVM, err)
+		}
 	}
 
 	return nil
