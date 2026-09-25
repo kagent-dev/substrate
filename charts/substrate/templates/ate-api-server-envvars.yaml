@@ -14,8 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if and (not .Values.postgres.enabled) (empty .Values.postgres.connectionString) }}
-{{- fail "postgres.connectionString is required when postgres.enabled=false" }}
+{{- if not (kindIs "bool" .Values.postgres.bootstrap) }}
+{{- fail "postgres.bootstrap must be true or false" }}
+{{- end }}
+{{- if and .Values.postgres.enabled .Values.postgres.bootstrap (or .Values.postgres.readWriteConnectionStringSecretRef.name .Values.postgres.ownerConnectionStringSecretRef.name) }}
+{{- fail "postgres.bootstrap requires the chart-managed application Secrets; disable bootstrap for operator-managed Secrets" }}
+{{- end }}
+{{- if and (or (not .Values.postgres.enabled) (not .Values.postgres.bootstrap)) (not .Values.postgres.readWriteConnectionStringSecretRef.name) }}
+{{- fail "postgres.readWriteConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external" }}
+{{- end }}
+{{- if and (or (not .Values.postgres.enabled) (not .Values.postgres.bootstrap)) (not .Values.postgres.ownerConnectionStringSecretRef.name) }}
+{{- fail "postgres.ownerConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external" }}
+{{- end }}
+{{- if and .Values.postgres.bootstrap (not .Values.postgres.enabled) (not .Values.postgres.adminSecretRef.name) }}
+{{- fail "postgres.adminSecretRef.name is required when bootstrap is enabled without bundled PostgreSQL" }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap
@@ -23,5 +35,4 @@ metadata:
   name: {{ .Values.ateApiServerEnvVarsConfigMap }}
   namespace: {{ .Release.Namespace }}
 data:
-  ATE_API_POSTGRES_CONNECTION_STRING: {{ .Values.postgres.connectionString | default (printf "postgresql://postgres@%s.%s.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem" (include "substrate.fullname" (list "postgres" .)) .Release.Namespace) | quote }}
   ATE_API_POSTGRES_SCHEMA: {{ .Values.postgres.schema | quote }}

@@ -1,0 +1,280 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: PostgreSQL configuration
+templates:
+- ate-api-server-envvars.yaml
+- ate-api-server.yaml
+- postgres-secrets.yaml
+- postgres.yaml
+tests:
+- it: uses the managed schema by default
+  template: ate-api-server-envvars.yaml
+  asserts:
+  - notExists:
+      path: data.ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING
+  - equal:
+      path: data.ATE_API_POSTGRES_SCHEMA
+      value: substrate
+
+- it: uses separate managed identities by default
+  template: ate-api-server.yaml
+  documentIndex: 3
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-connection-string=@file:/etc/ateapi/postgres/read-write/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-connection-string=@file:/etc/ateapi/postgres/owner/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=substrate_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=substrate_owner
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-bootstrap=true
+  - notExists:
+      path: spec.template.spec.initContainers
+  - notContains:
+      path: spec.template.spec.containers[0].args
+      content:
+        --postgres-bootstrap
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: postgres-admin
+        mountPath: /etc/ateapi/postgres/admin
+        readOnly: true
+
+- it: rejects custom roles while bootstrap creates fixed identities
+  template: ate-api-server.yaml
+  set:
+    postgres.ownerRole: tenant_owner
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres bootstrap requires readWriteRole=substrate_readwrite and ownerRole=substrate_owner
+
+- it: creates the managed administrator Secret
+  template: postgres-secrets.yaml
+  documentIndex: 0
+  asserts:
+  - equal:
+      path: metadata.name
+      value: postgres-admin
+  - equal:
+      path: stringData.POSTGRES_USER
+      value: postgres
+  - equal:
+      path: stringData.POSTGRES_PASSWORD
+      value: postgres
+
+- it: creates the managed read-write Secret
+  template: postgres-secrets.yaml
+  documentIndex: 1
+  asserts:
+  - equal:
+      path: metadata.name
+      value: RELEASE-NAME-postgres-readwrite
+  - matchRegex:
+      path: stringData.readWriteConnectionString
+      pattern: ^postgresql://substrate_readwrite_user:substrate-readwrite@
+  - matchRegex:
+      path: stringData.readWriteConnectionString
+      pattern: channel_binding=disable$
+
+- it: creates the managed owner Secret
+  template: postgres-secrets.yaml
+  documentIndex: 2
+  asserts:
+  - equal:
+      path: metadata.name
+      value: RELEASE-NAME-postgres-owner
+  - matchRegex:
+      path: stringData.ownerConnectionString
+      pattern: ^postgresql://substrate_admin_user:substrate-admin@
+  - matchRegex:
+      path: stringData.ownerConnectionString
+      pattern: channel_binding=disable$
+
+- it: configures the bundled database from the administrator Secret
+  template: postgres.yaml
+  documentIndex: 2
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].env[0].value
+      value: atepg
+  - equal:
+      path: spec.template.spec.containers[0].env[1].valueFrom.secretKeyRef.name
+      value: postgres-admin
+  - equal:
+      path: spec.template.spec.containers[0].env[2].valueFrom.secretKeyRef.key
+      value: POSTGRES_PASSWORD
+
+- it: rejects operator-managed Secrets during bundled bootstrap
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres.readWriteConnectionStringSecretRef.name: custom-readwrite
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.bootstrap requires the chart-managed application Secrets; disable bootstrap for operator-managed Secrets
+
+- it: supports an external BYO database without bootstrap
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+        key: connectionString
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
+        key: connectionString
+      readWriteRole: tenant_readwrite
+      ownerRole: tenant_owner
+  asserts:
+  - notExists:
+      path: spec.template.spec.initContainers
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=tenant_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=tenant_owner
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: substrate-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: substrate-owner
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.items[1]
+
+- it: supports operator-managed users with bundled PostgreSQL
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: true
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: rotated-readwrite
+      ownerConnectionStringSecretRef:
+        name: rotated-owner
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-bootstrap=false
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: rotated-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: rotated-owner
+
+- it: supports break-glass bootstrap for an external database
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      enabled: false
+      bootstrap: true
+      adminSecretRef:
+        name: external-postgres-admin
+        usernameKey: DB_USER
+        passwordKey: DB_PASSWORD
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-bootstrap=true
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.name
+      value: external-postgres-admin
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.items[0].key
+      value: DB_USER
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")].projected.sources[0].secret.items[1].key
+      value: DB_PASSWORD
+
+- it: requires an owner Secret for an external database
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.ownerConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
+
+- it: requires a read-write Secret when bundled bootstrap is disabled
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      bootstrap: false
+      ownerConnectionStringSecretRef:
+        name: rotated-owner
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.readWriteConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
+
+- it: requires an owner Secret when bundled bootstrap is disabled
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      bootstrap: false
+      readWriteConnectionStringSecretRef:
+        name: rotated-readwrite
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.ownerConnectionStringSecretRef.name is required when bootstrap is disabled or PostgreSQL is external
+
+- it: configures the maximum connection lifetime
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      pool:
+        maxConnLifetime: 10m
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-max-conn-lifetime=10m
+
+- it: requires an administrator Secret for external bootstrap
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres:
+      enabled: false
+      readWriteConnectionStringSecretRef:
+        name: substrate-readwrite
+      ownerConnectionStringSecretRef:
+        name: substrate-owner
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.adminSecretRef.name is required when bootstrap is enabled without bundled PostgreSQL
