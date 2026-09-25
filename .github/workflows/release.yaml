@@ -88,6 +88,9 @@ jobs:
         run: |
           set -o errexit -o nounset -o pipefail
 
+          # ghcr requires lowercase
+          export IMAGE_REPOSITORY="${IMAGE_REPOSITORY,,}"
+
           for component in ateapi atecontroller atelet ateom-gvisor ateom-microvm podcertcontroller atenet credential-provider/kubernetes-secrets; do
             KO_DOCKER_REPO="${IMAGE_REPOSITORY}/${component##*/}" \
             ./hack/run-tool.sh ko build \
@@ -101,9 +104,12 @@ jobs:
         if: inputs.create_release
         env:
           HELM_EXPERIMENTAL_OCI: "1"
-          CHART_REPOSITORY: oci://ghcr.io/kagent-dev/substrate/helm
+          CHART_REPOSITORY: oci://ghcr.io/${{ github.repository }}/helm
         run: |
           set -o errexit -o nounset -o pipefail
+
+          # ghcr requires lowercase
+          export CHART_REPOSITORY="${CHART_REPOSITORY,,}"
 
           tag="${{ steps.tag.outputs.value }}"
           chart_version="${tag#v}"
