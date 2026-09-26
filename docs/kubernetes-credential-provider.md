@@ -22,8 +22,8 @@ which namespaces each actor may use. Empty policies deny all requests.
 ## Configure the provider
 
 Keep the pinned `images.agentgateway` image. It includes the
-[protocol update](https://github.com/agentgateway/agentgateway/pull/3524) from
-[this build](https://github.com/agentgateway/agentgateway/actions/runs/35238449333)
+[actor identity update](https://github.com/agentgateway/agentgateway/pull/3677) from
+[this build](https://github.com/agentgateway/agentgateway/actions/runs/36271360584)
 and implements the current [FetchSecret contract](../pkg/proto/credproviderpb/credprovider.proto).
 
 Create the MITM CA Secret using the existing installation tooling:
