@@ -368,7 +368,7 @@ func TestProviderMTLS(t *testing.T) {
 			defer cancel()
 			before := len(client.Actions())
 			resp, err := credproviderpb.NewCredentialProviderClient(conn).FetchSecret(ctx, &credproviderpb.FetchSecretRequest{
-				Uri: "ate-secret://k8s.io/default/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/atespace/team-a/actor/a",
+				Uri: "ate-secret://k8s.io/default/ns1/api/token", ActorSpiffeId: "spiffe://substrate-actor.local/actor/team-a/a",
 			})
 			if tc.allowed {
 				if err != nil || string(resp.GetOpaqueBytes()) != "credential" {
