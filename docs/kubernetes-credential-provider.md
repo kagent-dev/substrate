@@ -21,10 +21,9 @@ which namespaces each actor may use. Empty policies deny all requests.
 
 ## Configure the provider
 
-Keep the pinned `images.agentgateway` image. It includes the
-[actor identity update](https://github.com/agentgateway/agentgateway/pull/3677) from
-[this build](https://github.com/agentgateway/agentgateway/actions/runs/36271360584)
-and implements the current [FetchSecret contract](../pkg/proto/credproviderpb/credprovider.proto).
+AGW must support protocol-specific egress rules and `replace_headers`, along with
+the [actor identity update](https://github.com/agentgateway/agentgateway/pull/3677)
+and the current [FetchSecret contract](../pkg/proto/credproviderpb/credprovider.proto).
 
 Create the MITM CA Secret using the existing installation tooling:
 
@@ -75,17 +74,20 @@ bundles and serving certificates reload automatically for new TLS connections.
 
 ## Configure injection
 
-Create the Secret and set an actor's egress policy header injection to use credential URI
+Create the Secret and set `effects.replace_headers` on an actor's HTTP or HTTPS
+egress rule to use credential URI
 `ate-secret://k8s.io/default/team-a-secrets/example-api/token`, header
 `authorization`, and prefix `Bearer `. Namespace grants alone do not create an
-egress policy. No ext_proc injector is needed.
+egress policy. The actor must send an `Authorization` header with a placeholder
+value; AGW replaces it with the credential. Requests without that header are
+forwarded unchanged. No ext_proc injector is needed.
 
 ## Tests
 
 The Helm PR workflow installs the provider and MITM gateway from the start and
 runs `internal/e2e/suites/credentials` alongside the standard suites with real actors,
 Secrets, chart-managed RBAC, AGW, and the deployed provider. It checks
-the exact injected token, an unauthenticated-origin control, namespace-policy
+the exact injected token, unauthenticated and missing-placeholder controls, namespace-policy
 denial and cache isolation between atespaces. The local origin serves HTTP;
 the suite uses the installed gateway configuration without modifying ConfigMaps.
 

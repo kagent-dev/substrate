@@ -75,12 +75,13 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 	// Keep the successful actor alive through the cache-isolation check.
 	suite := t
 	for _, tc := range []struct {
-		name, secretNamespace, secret, want string
+		name, secretNamespace, secret, authorization, want string
 	}{
-		{"without-injection", "", "", "401"},
-		{"allowed", namespace, "allowed", "204"},
-		{"atespace-denied", namespace, "allowed", "403"},
-		{"namespace-denied", otherNamespace, "allowed", "403"},
+		{"without-injection", "", "", "placeholder", "401"},
+		{"without-placeholder", namespace, "allowed", "", "401"},
+		{"allowed", namespace, "allowed", "placeholder", "204"},
+		{"atespace-denied", namespace, "allowed", "placeholder", "403"},
+		{"namespace-denied", otherNamespace, "allowed", "placeholder", "403"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			atespace, actorTemplate := namespace, template
@@ -112,9 +113,9 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 					cleanupTest.Errorf("delete actor %s/%s: %v", atespace, actorName, err)
 				}
 			})
-			rule := e2e.EgressAllowHostnames(host)
+			rule := e2e.EgressAllowHTTP(host)
 			if tc.secret != "" {
-				rule.Hostnames.Effects = &ateapipb.EgressRuleEffects{InjectStaticHeaders: []*ateapipb.CredentialHeaderInjection{{
+				rule.Http.Effects = &ateapipb.HttpRuleEffects{ReplaceHeaders: []*ateapipb.CredentialHeader{{
 					Header: "authorization", Prefix: "Bearer ",
 					CredentialUri: fmt.Sprintf("ate-secret://k8s.io/default/%s/%s/token", tc.secretNamespace, tc.secret),
 				}}}
@@ -123,6 +124,9 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 			_, err = clients.SubstrateAPI.ResumeActor(ctx, &ateapipb.ResumeActorRequest{Actor: actor})
 			require.NoError(t, err)
 			path := "/fetch?roots=system&url=" + url.QueryEscape("http://"+host+"/credential")
+			if tc.authorization != "" {
+				path += "&header=" + url.QueryEscape("Authorization:"+tc.authorization)
+			}
 			// Route discovery is asynchronous. Retries require the precise status;
 			// transport errors never pass.
 			deadline := time.Now().Add(90 * time.Second)
