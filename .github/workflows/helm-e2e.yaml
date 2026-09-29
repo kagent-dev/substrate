@@ -27,6 +27,7 @@ jobs:
       E2E_ATENET_DATAPLANE: agentgateway
       E2E_CREDENTIAL_PROVIDER: "1"
       E2E_EGRESS_MITM: "1"
+      ARTIFACTS: ${{ github.workspace }}/_artifacts
     steps:
     - name: Checkout
       uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -112,13 +113,30 @@ jobs:
     - name: Run E2E tests (gVisor)
       # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
       # tests keep a stable trust bundle and gateway signing certificate.
+      env:
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-gvisor.xml
       run: hack/run-e2e-kind.sh -v -skip '^TestActorIdentity_' -args --no-color
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-microvm.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
     - name: Run E2E tests (identity and trust rotation)
+      env:
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-identity.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/identity -v -args --no-color
+    - name: Require every lane to have run tests
+      if: always()
+      run: |
+        make build-junittool
+        bin/junittool verify -manifest "${ARTIFACTS}/expected-junit.txt"
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: test-results-helm-e2e
+        path: ${{ env.ARTIFACTS }}
+        if-no-files-found: error
     - name: Dump diagnostics on failure
       if: failure()
       run: |
