@@ -21,9 +21,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
+
+// Network namespaces share /proc/sys's mount, so writes and temporary
+// remounts must be serialized even when they target different namespaces.
+var sysctlMu sync.Mutex
 
 // AllowUnprivilegedPorts lets this namespace bind ports below 1024 without
 // CAP_NET_BIND_SERVICE, which is how atunnel answers a sandbox's DNS on 53.
@@ -36,6 +41,9 @@ func AllowUnprivilegedPorts() error {
 // namespace, remounting /proc/sys read-write when the runtime bind-mounted it
 // read-only. A no-op when it already reads that way.
 func setSysctl(key, value string) error {
+	sysctlMu.Lock()
+	defer sysctlMu.Unlock()
+
 	path := "/proc/sys/" + key
 	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) == value {
 		return nil

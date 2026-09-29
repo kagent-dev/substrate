@@ -18,8 +18,14 @@ package netns
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"runtime"
+	"sync"
+	"syscall"
 	"testing"
 
+	"github.com/agent-substrate/substrate/internal/roottest"
 	"golang.org/x/sys/unix"
 )
 
@@ -37,5 +43,70 @@ func TestSetSysctlReportsAnUnrelatedError(t *testing.T) {
 	}
 	if st.Flags&unix.ST_RDONLY != 0 {
 		t.Error("/proc/sys was left read-only")
+	}
+}
+
+func TestSetSysctlConcurrent(t *testing.T) {
+	roottest.Require(t, "creates mount and network namespaces")
+	const helperEnv = "SUBSTRATE_TEST_SYSCTL_HELPER"
+	if os.Getenv(helperEnv) != "1" {
+		binary, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Keep the host's mounts and network sysctls untouched.
+		cmd := exec.Command(binary, "-test.run=^TestSetSysctlConcurrent$", "-test.v")
+		cmd.Env = append(os.Environ(), helperEnv+"=1")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNS | unix.CLONE_NEWNET}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated sysctl test: %v\n%s", err, out)
+		}
+		return
+	}
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mount("/proc/sys", "/proc/sys", "", unix.MS_BIND, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mount("none", "/proc/sys", "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Actor setups share a mount namespace but write sysctls in separate
+	// network namespaces. Every writer must finish before /proc/sys goes RO.
+	start := make(chan struct{})
+	var ready, done sync.WaitGroup
+	for range 16 {
+		ready.Add(1)
+		done.Go(func() {
+			runtime.LockOSThread()
+			// Leave the thread locked so it is destroyed with its private netns.
+			err := unix.Unshare(unix.CLONE_NEWNET)
+			ready.Done()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			<-start
+			for range 64 {
+				for _, value := range []string{"0", "1024"} {
+					if err := setSysctl("net/ipv4/ip_unprivileged_port_start", value); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+			}
+		})
+	}
+	ready.Wait()
+	close(start)
+	done.Wait()
+	var st unix.Statfs_t
+	if err := unix.Statfs("/proc/sys", &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Flags&unix.ST_RDONLY == 0 {
+		t.Error("/proc/sys was left writable")
 	}
 }
