@@ -182,7 +182,7 @@ spec:
           protocol: TCP
         volumeMounts:
         - name: run-ateom
-          mountPath: /var/lib/ateom-gvisor
+          mountPath: /var/lib/ate
         - name: podidentity
           mountPath: /run/podidentity.podcert.ate.dev
           readOnly: true
@@ -199,7 +199,7 @@ spec:
       volumes:
       - name: run-ateom
         hostPath:
-          path: /var/lib/ateom-gvisor
+          path: /var/lib/ate
           type: DirectoryOrCreate
       - name: kubelet-plugins
         hostPath:
