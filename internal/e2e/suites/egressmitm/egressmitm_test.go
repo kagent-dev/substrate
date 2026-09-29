@@ -156,17 +156,22 @@ func TestActorEgressMITMTrust(t *testing.T) {
 		t.Errorf("fetch of %s got status %s with error %q, want no HTTP exchange at all", wrongPortOrigin, wrongPort.Status, wrongPort.Error)
 	}
 
-	// A host outside the policy is closed at the ClientHello: expect a
-	// transport error, not a certificate error or an HTTP status. The error
-	// text varies, so only its presence is checked.
+	// Agentgateway intercepts TLS and returns HTTP 403 for a host outside
+	// the policy; Envoy closes the connection at the ClientHello.
 	denied := probeFetch(t, ctx, rc, id, "https://example.org/", "bundle")
-	switch {
-	case denied.Error == "":
-		t.Errorf("fetch of a host outside the policy succeeded with status %s, want the connection closed at the ClientHello", denied.Status)
-	case strings.Contains(denied.Error, "certificate") || strings.Contains(denied.Error, "x509"):
-		t.Errorf("fetch of a host outside the policy was intercepted (certificate error %q), want the connection closed at the ClientHello", denied.Error)
-	case denied.Status != "":
-		t.Errorf("fetch of a host outside the policy got status %s with error %q, want no HTTP exchange at all", denied.Status, denied.Error)
+	if os.Getenv(e2e.AtenetDataplaneEnv) == "agentgateway" {
+		if denied.Error != "" || denied.Status != "403" {
+			t.Errorf("fetch of a host outside the policy: error %q, status %s, want HTTP 403", denied.Error, denied.Status)
+		}
+	} else {
+		switch {
+		case denied.Error == "":
+			t.Errorf("fetch of a host outside the policy succeeded with status %s, want the connection closed at the ClientHello", denied.Status)
+		case strings.Contains(denied.Error, "certificate") || strings.Contains(denied.Error, "x509"):
+			t.Errorf("fetch of a host outside the policy was intercepted (certificate error %q), want the connection closed at the ClientHello", denied.Error)
+		case denied.Status != "":
+			t.Errorf("fetch of a host outside the policy got status %s with error %q, want no HTTP exchange at all", denied.Status, denied.Error)
+		}
 	}
 }
 
