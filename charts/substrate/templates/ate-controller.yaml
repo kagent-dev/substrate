@@ -35,6 +35,28 @@ roleRef:
   name: {{ include "substrate.fullname" (list "ate-controller" .) }}
   apiGroup: rbac.authorization.k8s.io
 ---
+{{/*
+Binds the Role that the namespaced RBAC marker in
+cmd/atecontroller/internal/controllers/gen.go generates into role.yaml, for
+internal/k8sresolver's watch on ateapi's EndpointSlices.
+manifests/ate-install/ate-controller.yaml has always carried this binding; the
+chart did not, so the generated Role sat unbound and the resolver never held
+the permission the marker declares.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "substrate.fullname" (list "ate-controller" .) }}
+  namespace: {{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "substrate.fullname" (list "ate-controller" .) }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "substrate.fullname" (list "ate-controller" .) }}
+  apiGroup: rbac.authorization.k8s.io
+---
 kind: Service
 apiVersion: v1
 metadata:

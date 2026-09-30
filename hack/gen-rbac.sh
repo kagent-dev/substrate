@@ -35,3 +35,11 @@ bash "${ROOT}/hack/run-tool.sh" controller-gen \
 # Templatize the ClusterRole name. controller-gen emits `  name: ate-controller`
 # at column 0; the substitution is exact-match to stay robust.
 sed -i 's|^  name: ate-controller$|  name: {{ include "substrate.fullname" (list "ate-controller" .) }}|' "${OUT}"
+
+# Same for the namespace of the Role that the namespaced RBAC marker produces.
+# controller-gen bakes in the marker's literal namespace, which is right for
+# manifests/ate-install/ -- that install is ate-system by construction -- but
+# pins the chart to one namespace, and a namespaced resource whose namespace
+# does not exist fails the whole release. The rendered manifests are unaffected:
+# they render with .Release.Namespace = ate-system.
+sed -i 's|^  namespace: ate-system$|  namespace: {{ .Release.Namespace }}|' "${OUT}"

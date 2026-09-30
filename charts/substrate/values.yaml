@@ -23,6 +23,15 @@
 # manifests/ate-install/ install path (kubectl apply).
 createNamespace: false
 
+# The bundled podcertificate-controller, which signs the servicedns and
+# podidentity certificates every component mounts. It is a cluster singleton in
+# its own fixed namespace, named without the release prefix, so exactly one
+# release may render it. Leave it on for a standalone install; turn it off when
+# the cluster already runs one -- notably when this chart is a subchart
+# installed alongside an existing substrate release.
+podCertificateController:
+  enabled: true
+
 postgres:
   enabled: true
   storageSize: 1Gi
