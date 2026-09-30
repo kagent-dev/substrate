@@ -128,7 +128,13 @@ spec:
 {{ toYaml . | indent 8 }}
 {{- end }}
         securityContext:
-          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - DAC_OVERRIDE
         resources:
           requests:
             cpu: 50m
