@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- $readWriteConnectionStringSecretRef := .Values.postgres.readWriteConnectionStringSecretRef -}}
+{{- $ownerConnectionStringSecretRef := .Values.postgres.ownerConnectionStringSecretRef -}}
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -85,8 +88,14 @@ spec:
         - "--grpc-listen-addr=0.0.0.0:443"
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
-        - "--postgres-connection-string=@env"
+        - "--postgres-read-write-connection-string=@file:/etc/ateapi/postgres/read-write/connection-string"
+        - "--postgres-owner-connection-string=@file:/etc/ateapi/postgres/owner/connection-string"
+        - {{ printf "--postgres-read-write-role=%s" .Values.postgres.readWriteRole | quote }}
+        - {{ printf "--postgres-owner-role=%s" .Values.postgres.ownerRole | quote }}
         - "--postgres-schema=@env"
+{{- with .Values.postgres.pool.maxConnLifetime }}
+        - {{ printf "--postgres-max-conn-lifetime=%s" . | quote }}
+{{- end }}
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--default-egress-gateway-address={{ include "substrate.fullname" (list "atenet-egress" .) }}.{{ .Release.Namespace }}.svc:443"
@@ -140,6 +149,12 @@ spec:
         - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
         - { name: podidentity,         mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
         - { name: authentication-config, mountPath: /etc/ateapi/authentication, readOnly: true }
+        - name: postgres-read-write-connection
+          mountPath: /etc/ateapi/postgres/read-write
+          readOnly: true
+        - name: postgres-owner-connection
+          mountPath: /etc/ateapi/postgres/owner
+          readOnly: true
         ports:
         - containerPort: 443
         - name: prometheus
@@ -201,6 +216,22 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+      - name: postgres-read-write-connection
+        projected:
+          sources:
+          - secret:
+              name: {{ include "substrate.postgres.readWriteSecretName" . | quote }}
+              items:
+              - key: {{ get $readWriteConnectionStringSecretRef "key" | default "readWriteConnectionString" | quote }}
+                path: connection-string
+      - name: postgres-owner-connection
+        projected:
+          sources:
+          - secret:
+              name: {{ include "substrate.postgres.ownerSecretName" . | quote }}
+              items:
+              - key: {{ get $ownerConnectionStringSecretRef "key" | default "ownerConnectionString" | quote }}
+                path: connection-string
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

@@ -1,0 +1,107 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: PostgreSQL configuration
+templates:
+- ate-api-server-envvars.yaml
+- ate-api-server.yaml
+tests:
+- it: uses the managed schema by default
+  template: ate-api-server-envvars.yaml
+  asserts:
+  - equal:
+      path: data.ATE_API_POSTGRES_SCHEMA
+      value: substrate
+
+- it: mounts separate owner and read-write connections
+  template: ate-api-server.yaml
+  documentIndex: 3
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-connection-string=@file:/etc/ateapi/postgres/read-write/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-connection-string=@file:/etc/ateapi/postgres/owner/connection-string
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=substrate_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=substrate_owner
+  - notContains:
+      path: spec.template.spec.containers[0].args
+      content:
+        --postgres-bootstrap
+  - notExists:
+      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: substrate-postgres-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: substrate-postgres-owner
+
+- it: supports prepared database identities
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      readWriteConnectionStringSecretRef:
+        name: tenant-readwrite
+        key: connectionString
+      ownerConnectionStringSecretRef:
+        name: tenant-owner
+        key: connectionString
+      readWriteRole: tenant_readwrite
+      ownerRole: tenant_owner
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=tenant_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=tenant_owner
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")].projected.sources[0].secret.name
+      value: tenant-readwrite
+  - equal:
+      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")].projected.sources[0].secret.name
+      value: tenant-owner
+
+- it: requires a read-write Secret
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres.readWriteConnectionStringSecretRef.name: ""
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.readWriteConnectionStringSecretRef.name is required
+
+- it: requires an owner Secret
+  template: ate-api-server-envvars.yaml
+  set:
+    postgres.ownerConnectionStringSecretRef.name: ""
+  asserts:
+  - failedTemplate:
+      errorMessage: postgres.ownerConnectionStringSecretRef.name is required
+
+- it: configures the maximum connection lifetime
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres.pool.maxConnLifetime: 10m
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-max-conn-lifetime=10m

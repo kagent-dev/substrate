@@ -24,17 +24,22 @@
 createNamespace: false
 
 postgres:
-  enabled: true
-  storageSize: 1Gi
-  connectionString: ""
-  schema: public
-  resources:
-    requests:
-      cpu: "1"
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 2Gi
+  # Read the read/write connection string from a pre-created Secret.
+  readWriteConnectionStringSecretRef:
+    name: substrate-postgres-readwrite
+    key: readWriteConnectionString
+  # Read the owner connection string from a pre-created Secret.
+  ownerConnectionStringSecretRef:
+    name: substrate-postgres-owner
+    key: ownerConnectionString
+  # Roles assumed on each connection. Use distinct roles for installs sharing a database.
+  readWriteRole: substrate_readwrite
+  ownerRole: substrate_owner
+  pool:
+    # Bounds how long established connections can keep an old credential.
+    # Leave empty to use the upstream pgx default.
+    maxConnLifetime: ""
+  schema: substrate
 
 rustfs:
   enabled: true
@@ -122,7 +127,6 @@ image:
   tag: ""
 
 images:
-  postgres: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
   rustfs: rustfs/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
   awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
   agentgateway: ghcr.io/kagent-dev/substrate/agentgateway:50999825cb55@sha256:f1907a50b2e74a071da53fcd2008d585b6a63d31b4e1ba3ee46cf22b342cf04b

@@ -2,7 +2,7 @@
 
 Helm chart for installing Agent Substrate.
 
-The chart uses mTLS and PostgreSQL by default. It requires the
+The chart uses mTLS and requires a prepared PostgreSQL database. It requires the
 `ClusterTrustBundle`, `ClusterTrustBundleProjection`, and
 `PodCertificateRequest` feature gates plus the `certificates.k8s.io/v1beta1`
 API.
@@ -11,8 +11,10 @@ API.
 # CRDs
 helm upgrade --install substrate-crds ./charts/substrate-crds
 
-# Install Substrate
-helm upgrade --install substrate ./charts/substrate
+# Install Substrate after creating the database identities and Secrets
+helm upgrade --install substrate ./charts/substrate \
+  --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
+  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner
 ```
 
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
@@ -40,10 +42,12 @@ See `values.yaml` for the full set; the important keys:
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `postgres.enabled` | `true` | Deploy the bundled PostgreSQL instance |
-| `postgres.connectionString` | `""` (in-cluster) | Override to use external PostgreSQL |
-| `postgres.schema` | `public` | Store the Substrate tables in this PostgreSQL schema |
-| `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
+| `postgres.readWriteConnectionStringSecretRef` | `substrate-postgres-readwrite` | Read the read/write connection from a pre-created Secret |
+| `postgres.ownerConnectionStringSecretRef` | `substrate-postgres-owner` | Read the owner connection from a pre-created Secret |
+| `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by read/write connections |
+| `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections |
+| `postgres.pool.maxConnLifetime` | `""` (pgx default) | Maximum physical connection lifetime; bounds Secret credential turnover |
+| `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.gcpAuthForImagePulls` | `false` | Enable only when using GCP registry auth |
@@ -57,3 +61,32 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Set to `false` to export no logs. Gates both OTLP log sources: ateapi's actor lifecycle events and the router access log |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+
+## PostgreSQL credential rotation
+
+The chart does not deploy or initialize PostgreSQL. Prepare the database,
+schema, login users, and the configured `readWriteRole` and `ownerRole` before
+installing the chart. For development, `ate-setup` and `kagent install` can
+create and prepare an in-cluster PostgreSQL instance before they install the
+applications.
+
+Substrate mounts connection Secrets as projected files. Kubernetes updates
+these files when the Secret changes. Substrate reads the current value for
+each new physical connection.
+
+`postgres.pool.maxConnLifetime` bounds how long established connections may
+continue using an old credential; rotation is not immediate. Keep old and new
+credentials valid long enough for Kubernetes projection and connection
+turnover.
+
+When rotation changes a login username, grant the applicable configured group
+role before updating its connection Secret.
+
+Substrate runs `SET ROLE` for each new connection. It rejects a login without
+the required membership.
+
+Create both group roles and all grants before installation, then set
+`postgres.readWriteRole` and `postgres.ownerRole` to those names. Use distinct
+roles and table schemas for separate installs sharing one database. Give each
+install separate logins and grant each login membership only in its install's
+roles.
