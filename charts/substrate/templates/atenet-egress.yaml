@@ -83,6 +83,11 @@ data:
                       cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+      - protocol: TLS
+        hostname: "*"
+        tcpRoutes:
+        - backends:
+          - dynamic: {}
       - protocol: HTTP
         routes:
         - backends:
