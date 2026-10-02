@@ -220,6 +220,20 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+The podLabels entries for a pod template, as YAML map entries. Renders nothing
+when podLabels is empty. The chart's own `app` label is the selector of every
+workload, so a podLabels entry cannot replace it.
+*/}}
+{{- define "substrate.podLabels" -}}
+{{- with .Values.podLabels -}}
+{{- if hasKey . "app" -}}
+{{- fail "podLabels must not set app: it is the selector label of every workload in the chart" -}}
+{{- end -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 imagePullPolicy: global.imagePullPolicy when set, IfNotPresent otherwise. One
 definition so the fallback cannot drift between pods.
 */}}

@@ -71,6 +71,7 @@ spec:
     metadata:
       labels:
         app: ate-api-server
+        {{- with include "substrate.podLabels" $ }}{{- . | nindent 8 }}{{- end }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"

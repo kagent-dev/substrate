@@ -207,6 +207,7 @@ spec:
     metadata:
       labels:
         app: atenet-router
+        {{- with include "substrate.podLabels" $ }}{{- . | nindent 8 }}{{- end }}
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "15020"
