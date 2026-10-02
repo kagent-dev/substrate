@@ -144,17 +144,24 @@ func TestActorEgressMITMTrust(t *testing.T) {
 		t.Errorf("passthrough fetch %s dialed at %s: status %s, want 200", passthroughOrigin, unreachableAddress, bySNI.Status)
 	}
 
-	// The rule for this name covers 8443 only, so the ClientHello on 443 is
-	// closed.
+	// The rule for this name covers 8443 only. Agentgateway intercepts the
+	// request on 443 and denies it; Envoy closes it at the ClientHello.
 	const wrongPortOrigin = "https://" + egressOriginPassthroughWrongPortHost + "/"
-	wrongPort := probeFetch(t, ctx, rc, id, wrongPortOrigin, "system")
-	switch {
-	case wrongPort.Error == "":
-		t.Errorf("fetch of %s succeeded with status %s, want the connection closed at the ClientHello: its passthrough rule names port 8443, not 443", wrongPortOrigin, wrongPort.Status)
-	case strings.Contains(wrongPort.Error, "certificate") || strings.Contains(wrongPort.Error, "x509"):
-		t.Errorf("fetch of %s was intercepted (certificate error %q), want the connection closed at the ClientHello", wrongPortOrigin, wrongPort.Error)
-	case wrongPort.Status != "":
-		t.Errorf("fetch of %s got status %s with error %q, want no HTTP exchange at all", wrongPortOrigin, wrongPort.Status, wrongPort.Error)
+	if os.Getenv(e2e.AtenetDataplaneEnv) == "agentgateway" {
+		wrongPort := probeFetch(t, ctx, rc, id, wrongPortOrigin, "bundle")
+		if wrongPort.Error != "" || wrongPort.Status != "403" {
+			t.Errorf("fetch of %s on a disallowed port: error %q, status %s, want HTTP 403", wrongPortOrigin, wrongPort.Error, wrongPort.Status)
+		}
+	} else {
+		wrongPort := probeFetch(t, ctx, rc, id, wrongPortOrigin, "system")
+		switch {
+		case wrongPort.Error == "":
+			t.Errorf("fetch of %s succeeded with status %s, want the connection closed at the ClientHello: its passthrough rule names port 8443, not 443", wrongPortOrigin, wrongPort.Status)
+		case strings.Contains(wrongPort.Error, "certificate") || strings.Contains(wrongPort.Error, "x509"):
+			t.Errorf("fetch of %s was intercepted (certificate error %q), want the connection closed at the ClientHello", wrongPortOrigin, wrongPort.Error)
+		case wrongPort.Status != "":
+			t.Errorf("fetch of %s got status %s with error %q, want no HTTP exchange at all", wrongPortOrigin, wrongPort.Status, wrongPort.Error)
+		}
 	}
 
 	// Agentgateway intercepts TLS and returns HTTP 403 for a host outside
