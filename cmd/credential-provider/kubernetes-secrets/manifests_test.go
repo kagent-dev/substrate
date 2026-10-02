@@ -221,7 +221,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 		{name: "custom release", tool: "helm", host: "test-k8s-credential-provider.custom.svc:50051", roots: "/run/servicedns.podcert.ate.dev/trust-bundle.pem",
 			args: []string{"template", "test", "../../../charts/substrate", "-n", "custom"}},
 		{name: "kustomize", tool: "kubectl", host: "k8s-credential-provider.ate-system.svc:50051", roots: "/run/servicedns-ca/trust-bundle.pem",
-			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../../manifests/ate-install/agentgateway-egress-mitm"}},
+			args: []string{"kustomize", "--load-restrictor=LoadRestrictionsNone", "../../../manifests/ate-install/agentgateway-egress"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath(tc.tool); err != nil {
@@ -328,7 +328,7 @@ func TestAgentgatewayCredentialConfiguration(t *testing.T) {
 			if providers["HTTP"] != 1 || providers["HTTPS"] != 1 {
 				t.Fatalf("providers=%v, want one per HTTP/HTTPS route", providers)
 			}
-			if mitmMounts != 1 || mitmVolumes != 1 || passthroughListeners != 0 {
+			if mitmMounts != 1 || mitmVolumes != 1 || passthroughListeners != 1 {
 				t.Fatalf("MITM mounts=%d volumes=%d passthrough listeners=%d", mitmMounts, mitmVolumes, passthroughListeners)
 			}
 		})

@@ -49,7 +49,11 @@ rustfs:
 # extraArgs / extraEnv are appended verbatim for installer-specific knobs
 # (e.g. registry replacement for kind).
 atelet:
-  gcpAuthForImagePulls: false
+  # Host paths for the node's kubelet credential provider. Set both to enable
+  # private registry authentication (GKE: /etc/srv/kubernetes/cri_auth_config.yaml
+  # and /home/kubernetes/bin). Leave empty on nodes without a provider, like Kind.
+  imageCredentialProviderConfig: ""
+  imageCredentialProviderBinDir: ""
   storageBackend: s3
   extraArgs: []
   extraEnv: []

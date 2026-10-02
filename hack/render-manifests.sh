@@ -35,7 +35,6 @@ PRESERVED_FILES=(
   ate-system-namespace.yaml
   atelet.yaml
   atenet-egress.yaml
-  atenet-egress-with-sdsmint.yaml
   atenet-router.yaml
   atenet-router-monitoring.yaml
   # The provider's upstream manifest lives in manifests/egress-credential-injection.
@@ -144,7 +143,6 @@ find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' \
   ! -name 'ate-system-namespace.yaml' \
   ! -name 'atelet.yaml' \
   ! -name 'atenet-egress.yaml' \
-  ! -name 'atenet-egress-with-sdsmint.yaml' \
   ! -name 'atenet-router.yaml' \
   ! -name 'atenet-router-monitoring.yaml' \
   ! -name 'pod-certificate-controller.yaml' \

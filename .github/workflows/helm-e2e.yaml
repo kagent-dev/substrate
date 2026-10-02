@@ -26,7 +26,6 @@ jobs:
       VERSION: helm-e2e
       E2E_ATENET_DATAPLANE: agentgateway
       E2E_CREDENTIAL_PROVIDER: "1"
-      E2E_EGRESS_MITM: "1"
       ARTIFACTS: ${{ github.workspace }}/_artifacts
     steps:
     - name: Checkout
@@ -109,7 +108,7 @@ jobs:
     - name: Deploy gVisor counter demo
       run: hack/install-ate-kind.sh --deploy-demo-counter
     - name: Deploy egress demo
-      run: hack/install-ate-kind.sh --deploy-demo-egress-mitm
+      run: hack/install-ate-kind.sh --deploy-demo-egress
     - name: Run E2E tests (gVisor)
       # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
       # tests keep a stable trust bundle and gateway signing certificate.

@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- if ne (empty .Values.atelet.imageCredentialProviderConfig) (empty .Values.atelet.imageCredentialProviderBinDir) }}
+{{- fail "atelet.imageCredentialProviderConfig and atelet.imageCredentialProviderBinDir must be set together" }}
+{{- end }}
+
 # atelet
 apiVersion: v1
 kind: ServiceAccount
@@ -120,7 +124,10 @@ spec:
       - name: atelet
         image: {{ include "substrate.componentImage" (list "atelet" .) }}
         args:
-        - --gcp-auth-for-image-pulls={{ .Values.atelet.gcpAuthForImagePulls }}
+{{- if .Values.atelet.imageCredentialProviderConfig }}
+        - --image-credential-provider-config=/run/image-credential-provider/config.yaml
+        - --image-credential-provider-bin-dir=/run/image-credential-provider/bin
+{{- end }}
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - --ateapi-ca-file=/run/servicedns.podcert.ate.dev/trust-bundle.pem
@@ -202,6 +209,14 @@ spec:
         - name: host-dev
           mountPath: /host/dev
           readOnly: true
+{{- if .Values.atelet.imageCredentialProviderConfig }}
+        - name: image-credential-provider-bin
+          mountPath: /run/image-credential-provider/bin
+          readOnly: true
+        - name: image-credential-provider-config
+          mountPath: /run/image-credential-provider/config.yaml
+          readOnly: true
+{{- end }}
       volumes:
       - name: run-ateom
         hostPath:
@@ -219,6 +234,16 @@ spec:
         hostPath:
           path: /dev
           type: Directory
+{{- if .Values.atelet.imageCredentialProviderConfig }}
+      - name: image-credential-provider-bin
+        hostPath:
+          path: {{ .Values.atelet.imageCredentialProviderBinDir | quote }}
+          type: Directory
+      - name: image-credential-provider-config
+        hostPath:
+          path: {{ .Values.atelet.imageCredentialProviderConfig | quote }}
+          type: File
+{{- end }}
       - name: podidentity
         projected:
           sources:

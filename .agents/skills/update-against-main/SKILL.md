@@ -20,7 +20,7 @@ This skill applies only to synchronizing the fork's `main` branch. Do not invoke
    - Deploy the gVisor counter demo and both standard egress demos.
    - The full gVisor suite: `hack/run-e2e-kind.sh -v -args --no-color`
    - The full micro-VM suite with the CI environment: `E2E_SANDBOX_CLASS=microvm hack/run-e2e-kind.sh -v -args --no-color`
-   - Switch egress to agentgateway sdsmint, then run the MITM trust and targeted networking lanes for both runtimes exactly as the workflow specifies.
+   - Egress interception is part of the standard deployment. Run the full suites with identity tests excluded, then run the identity lanes last for both runtimes exactly as the workflow specifies.
    - Verify the live router and egress workloads use agentgateway. Never use Envoy for fork validation.
 8. Treat `go test ./internal/e2e/...` without `-args --e2e` as compilation/package testing, not E2E coverage.
 9. Do not push when unit, verification, or E2E checks fail or cannot run. Report the exact blocker instead.

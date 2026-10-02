@@ -96,7 +96,7 @@ installation to grant the test atespace access. After deploying the standard
 MITM egress fixtures, run the suites together:
 
 ```sh
-E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 E2E_EGRESS_MITM=1 \
+E2E_ATENET_DATAPLANE=agentgateway E2E_CREDENTIAL_PROVIDER=1 \
   hack/run-e2e-kind.sh -v -args --no-color
 ```
 
