@@ -16,7 +16,7 @@
 # notes (.github/release.yml). A maintainer edits and publishes it; see
 # docs/dev/release-notes.md. Run manually to draft a release for a tag that
 # has none; an existing release is never modified.
-name: release
+name: release-notes
 on:
   push:
     tags: ['v*']

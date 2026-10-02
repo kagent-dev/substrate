@@ -41,7 +41,7 @@ For a breaking change, describe the upgrade step in the pull request's "Breaking
 
 ## Cut a release
 
-1. Tag the release commit `vX.Y.Z`, or `vX.Y.Z-rc.N` for a release candidate, and push the tag. The [`release`](../../.github/workflows/release.yaml) workflow runs [`hack/release/draft-release.sh`](../../hack/release/draft-release.sh), which creates a draft release. The notes cover every change since the previous `vX.Y.Z` release and end with a list of committers. A release candidate is marked as a prerelease.
+1. Tag the release commit `vX.Y.Z`, or `vX.Y.Z-rc.N` for a release candidate, and push the tag. The [`release-notes`](../../.github/workflows/release-notes.yaml) workflow runs [`hack/release/draft-release.sh`](../../hack/release/draft-release.sh), which creates a draft release. The notes cover every change since the previous `vX.Y.Z` release and end with a list of committers. A release candidate is marked as a prerelease.
 2. Edit the draft:
    - Write a summary at the top.
    - Rewrite each breaking change with its upgrade step.
