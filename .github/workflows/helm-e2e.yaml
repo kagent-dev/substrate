@@ -110,16 +110,22 @@ jobs:
     - name: Deploy egress demo
       run: hack/install-ate-kind.sh --deploy-demo-egress
     - name: Run E2E tests (gVisor)
+      # The egress credential suite replaces the shared provider policy.
+      # Run it separately after the Helm suite has checked the chart's grants.
       # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
       # tests keep a stable trust bundle and gateway signing certificate.
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-gvisor.xml
-      run: hack/run-e2e-kind.sh -v -skip '^TestActorIdentity_' -args --no-color
+      run: hack/run-e2e-kind.sh -v -skip '^(TestActorIdentity_|TestActorEgressCredentialInjection$)' -args --no-color
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-microvm.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
+    - name: Run E2E tests (egress credential injection)
+      env:
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials.xml
+      run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color
     - name: Run E2E tests (identity and trust rotation)
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-identity.xml
