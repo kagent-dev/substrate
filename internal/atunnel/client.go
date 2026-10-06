@@ -33,6 +33,7 @@ import (
 // TODO(liorlieberman): support/use CONNECT on Ingress as well.
 // ClientConfig configures an egress CONNECT client.
 type ClientConfig struct {
+	CredentialKey        func() string
 	GatewayAddress       string
 	ServerName           string
 	GetClientCertificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
@@ -80,6 +81,7 @@ func WithDialer(dial DialFunc) ClientOption {
 
 // Client opens actor egress streams through an mTLS-authenticated gateway.
 type Client struct {
+	credentialKey  func() string
 	gatewayAddress string
 	tlsConfig      *tls.Config
 	dialContext    DialFunc
@@ -112,6 +114,7 @@ func NewClient(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	}
 
 	client := &Client{
+		credentialKey:  cfg.CredentialKey,
 		gatewayAddress: cfg.GatewayAddress,
 		dialContext:    (&net.Dialer{}).DialContext,
 		tlsConfig: &tls.Config{
@@ -133,6 +136,12 @@ func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn,
 	if err := validateDestination(destination); err != nil {
 		return nil, err
 	}
+	header := http.Header{}
+	if c.credentialKey != nil {
+		if key := c.credentialKey(); key != "" {
+			header.Set(CredentialKeyHeader, key)
+		}
+	}
 	rawConn, err := c.dialContext(ctx, "tcp", c.gatewayAddress)
 	if err != nil {
 		return nil, fmt.Errorf("atunnel: connecting to egress gateway: %w", err)
@@ -144,6 +153,7 @@ func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn,
 	}
 
 	req := &http.Request{
+		Header: header,
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: destination},
 		Host:   destination,

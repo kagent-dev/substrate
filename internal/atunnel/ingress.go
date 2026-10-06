@@ -65,6 +65,7 @@ func ParsePort(s string) (port int, ok bool) {
 
 // Config configures an ingress Server.
 type Config struct {
+	SetCredentialKey     func(actorUID, key string) error
 	CredentialBundlePath string
 	TrustBundlePath      string
 	AllowedClientID      string
@@ -73,6 +74,7 @@ type Config struct {
 
 // Server is an HTTPS reverse proxy for the worker's active actors.
 type Server struct {
+	setCredentialKey     func(actorUID, key string) error
 	credentialBundlePath string
 	tlsConfig            *tls.Config
 	upstream             *url.URL
@@ -125,6 +127,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
+		setCredentialKey:     cfg.SetCredentialKey,
 		credentialBundlePath: cfg.CredentialBundlePath,
 		upstream:             cfg.Upstream,
 		active:               map[resources.ActorRef]*activation{},
@@ -334,6 +337,22 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := ParsePort(port); !ok {
 		http.Error(w, "invalid CONNECT port", http.StatusBadRequest)
 		return
+	}
+
+	uid, key, err := parseCredentialKey(r.Header)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if key != "" {
+		if uid != active.uid {
+			http.Error(w, "credential key names another actor incarnation", http.StatusForbidden)
+			return
+		}
+		if s.setCredentialKey == nil || s.setCredentialKey(uid, key) != nil {
+			http.Error(w, "credential binding is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	dialCtx, cancelDial := context.WithTimeout(ctx, 5*time.Second)

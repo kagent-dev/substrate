@@ -258,6 +258,15 @@ func dialFixedAddress(address string) DialFunc {
 
 func newTestClient(t *testing.T, ca *testCA, opts ...ClientOption) *Client {
 	t.Helper()
+	client, err := NewClient(testClientConfig(t, ca), opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func testClientConfig(t *testing.T, ca *testCA) ClientConfig {
+	t.Helper()
 	dir := t.TempDir()
 	trustPath := filepath.Join(dir, "trust.pem")
 	certificate := ca.issue(t,
@@ -267,16 +276,12 @@ func newTestClient(t *testing.T, ca *testCA, opts ...ClientOption) *Client {
 	if err := os.WriteFile(trustPath, ca.certPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientConfig{
+	return ClientConfig{
 		GatewayAddress:       "127.0.0.1:1",
 		ServerName:           "egress.test",
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return &certificate, nil },
 		TrustBundlePath:      trustPath,
-	}, opts...)
-	if err != nil {
-		t.Fatal(err)
 	}
-	return client
 }
 
 func serveTestConnectGateway(t *testing.T, ca *testCA, handle func(net.Conn, *http.Request)) string {

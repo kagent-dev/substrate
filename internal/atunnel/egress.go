@@ -54,6 +54,7 @@ type Egress struct {
 }
 
 type egressActivation struct {
+	credentialKey     string
 	dialer            egressDialer
 	certificateSource actorCertificateSource
 	expiresAt         time.Time
@@ -74,6 +75,28 @@ func NewEgress(originalDestination OriginalDestination) (*Egress, error) {
 		originalDestination: originalDestination,
 		active:              map[string]*egressActivation{},
 	}, nil
+}
+
+// SetCredentialKey binds the key to the actor's active egress.
+func (e *Egress) SetCredentialKey(actorUID, key string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	active := e.active[actorUID]
+	if active == nil || active.dialer == nil {
+		return fmt.Errorf("atunnel: actor egress is not active")
+	}
+	active.credentialKey = key
+	return nil
+}
+
+// CredentialKey returns the key for new egress tunnels, or an empty key before binding.
+func (e *Egress) CredentialKey(actorUID string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if active := e.active[actorUID]; active != nil {
+		return active.credentialKey
+	}
+	return ""
 }
 
 // Bind captures the actor's activation before its listeners start serving.
