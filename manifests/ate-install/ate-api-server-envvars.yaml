@@ -21,8 +21,8 @@ metadata:
   name: ate-api-server-envvars
   namespace: ate-system
 data:
-  ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING: "postgresql://postgres@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
-  ATE_API_POSTGRES_OWNER_CONNECTION_STRING: "postgresql://postgres@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
-  ATE_API_POSTGRES_READ_WRITE_ROLE: "postgres"
-  ATE_API_POSTGRES_OWNER_ROLE: "postgres"
-  ATE_API_POSTGRES_SCHEMA: "public"
+  ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING: "postgresql://substrate_readwrite_user:substrate-readwrite@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem&channel_binding=disable"
+  ATE_API_POSTGRES_OWNER_CONNECTION_STRING: "postgresql://substrate_owner_user:substrate-owner@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem&channel_binding=disable"
+  ATE_API_POSTGRES_READ_WRITE_ROLE: "substrate_readwrite"
+  ATE_API_POSTGRES_OWNER_ROLE: "substrate_owner"
+  ATE_API_POSTGRES_SCHEMA: "substrate"

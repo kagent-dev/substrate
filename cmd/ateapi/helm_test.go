@@ -23,6 +23,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/agent-substrate/substrate/pkg/postgressetup"
 )
 
 func TestHelmPostgresConfiguration(t *testing.T) {
@@ -32,7 +34,7 @@ func TestHelmPostgresConfiguration(t *testing.T) {
 		wantReadWrite, wantOwner, wantReadWriteRole, wantOwnerRole string
 		wantError                                                  bool
 	}{
-		{name: "bundled", wantReadWriteRole: "postgres", wantOwnerRole: "postgres"},
+		{name: "bundled", values: []string{"imagePullSecrets[0].name=registry-credentials"}, wantReadWriteRole: postgressetup.ReadWriteRole, wantOwnerRole: postgressetup.OwnerRole},
 		{name: "external", values: []string{"postgres.enabled=false", "postgres.readWriteConnectionString=postgresql://runtime@db/atepg", "postgres.ownerConnectionString=postgresql://owner@db/atepg", "postgres.readWriteRole=runtime", "postgres.ownerRole=owner"}, wantReadWrite: "postgresql://runtime@db/atepg", wantOwner: "postgresql://owner@db/atepg", wantReadWriteRole: "runtime", wantOwnerRole: "owner"},
 		{name: "shared login", values: []string{"postgres.enabled=false", "postgres.readWriteConnectionString=postgresql://login@db/atepg", "postgres.readWriteRole=runtime", "postgres.ownerRole=owner"}, wantReadWrite: "postgresql://login@db/atepg", wantOwner: "postgresql://login@db/atepg", wantReadWriteRole: "runtime", wantOwnerRole: "owner"},
 		{name: "missing external connection", values: []string{"postgres.enabled=false"}, wantError: true},
@@ -54,6 +56,9 @@ func TestHelmPostgresConfiguration(t *testing.T) {
 			}
 			var env map[string]string
 			var container *corev1.Container
+			var postgres *corev1.Container
+			var postgresConfig map[string]string
+			var adminSecret *corev1.Secret
 			for _, doc := range strings.Split(string(out), "\n---\n") {
 				var cm corev1.ConfigMap
 				if err := yaml.Unmarshal([]byte(doc), &cm); err != nil {
@@ -61,6 +66,27 @@ func TestHelmPostgresConfiguration(t *testing.T) {
 				}
 				if cm.Kind == "ConfigMap" && cm.Name == "ate-api-server-envvars" {
 					env = cm.Data
+				}
+				if cm.Kind == "ConfigMap" && cm.Name == "test-postgres-config" {
+					postgresConfig = cm.Data
+				}
+				if cm.Kind == "Secret" && cm.Name == "test-postgres-admin" {
+					var secret corev1.Secret
+					if err := yaml.Unmarshal([]byte(doc), &secret); err != nil {
+						t.Fatal(err)
+					}
+					adminSecret = &secret
+				}
+				if cm.Kind == "StatefulSet" && cm.Name == "test-postgres" {
+					var sts appsv1.StatefulSet
+					if err := yaml.Unmarshal([]byte(doc), &sts); err != nil {
+						t.Fatal(err)
+					}
+					for _, c := range sts.Spec.Template.Spec.Containers {
+						if c.Name == "postgres" {
+							postgres = &c
+						}
+					}
 				}
 				if cm.Kind != "Deployment" {
 					continue
@@ -75,6 +101,35 @@ func TestHelmPostgresConfiguration(t *testing.T) {
 					}
 				}
 			}
+			if tc.name == "bundled" {
+				if postgres == nil || postgresConfig == nil || adminSecret == nil {
+					t.Fatal("missing bundled PostgreSQL setup")
+				}
+				if postgresConfig["setup.sql"] != postgressetup.Script() {
+					t.Error("chart setup SQL differs from shared upstream transaction")
+				}
+				hba := postgresConfig["pg_hba.conf"]
+				if !strings.Contains(hba, "hostssl all postgres all reject") || !strings.Contains(hba, "scram-sha-256 clientcert=verify-ca") {
+					t.Error("PostgreSQL must restrict administrator access and require application passwords and certificates")
+				}
+				if len(adminSecret.Data["password"]) != 32 {
+					t.Error("missing generated administrator password")
+				}
+				if postgres.Lifecycle == nil || postgres.Lifecycle.PostStart == nil || postgres.Lifecycle.PostStart.Exec == nil {
+					t.Fatal("missing PostgreSQL bootstrap hook")
+				}
+				hook := strings.Join(postgres.Lifecycle.PostStart.Exec.Command, "\n")
+				if !strings.Contains(hook, "--file=/etc/postgresql/setup.sql") || !strings.Contains(hook, "--set=ON_ERROR_STOP=1") || !strings.Contains(hook, "nc -z 127.0.0.1 5432") {
+					t.Error("bootstrap must wait for the final server and execute shared SQL with errors fatal")
+				}
+				for _, e := range postgres.Env {
+					if e.Name == "POSTGRES_HOST_AUTH_METHOD" {
+						t.Error("administrator password must not be bypassed")
+					}
+				}
+			} else if postgres != nil || postgresConfig != nil || adminSecret != nil {
+				t.Error("external PostgreSQL must not be managed by the chart")
+			}
 			if env == nil || container == nil {
 				t.Fatal("missing API server configuration")
 			}
@@ -85,8 +140,8 @@ func TestHelmPostgresConfiguration(t *testing.T) {
 				}
 			}
 			if tc.wantReadWrite == "" {
-				tc.wantReadWrite = "postgresql://postgres@test-postgres.custom.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem"
-				tc.wantOwner = tc.wantReadWrite
+				tc.wantReadWrite = "postgresql://substrate_readwrite_user:substrate-readwrite@test-postgres.custom.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem&channel_binding=disable"
+				tc.wantOwner = strings.Replace(tc.wantReadWrite, "substrate_readwrite_user:substrate-readwrite@", "substrate_owner_user:substrate-owner@", 1)
 			}
 			for key, want := range map[string]string{
 				"ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING": tc.wantReadWrite,

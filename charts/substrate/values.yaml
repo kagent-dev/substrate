@@ -27,11 +27,12 @@ postgres:
   enabled: true
   storageSize: 1Gi
   readWriteConnectionString: ""
-  # Defaults to the read/write connection; each pool assumes its own role.
+  # Bundled installs use separate development logins. External installs default
+  # to the read/write connection; each pool assumes its own role.
   ownerConnectionString: ""
-  readWriteRole: postgres
-  ownerRole: postgres
-  schema: public
+  readWriteRole: substrate_readwrite
+  ownerRole: substrate_owner
+  schema: substrate
   resources:
     requests:
       cpu: "1"

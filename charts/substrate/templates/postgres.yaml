@@ -34,9 +34,14 @@ data:
     # health checks, the workload's idempotent database bootstrap, and the
     # tls-reloader sidecar's configuration reloads.
     local all all trust
-    # PostgreSQL verifies client certificates against the pod-identity CA. It
-    # does not need its own serving CA because it never verifies its server certificate.
-    hostssl all all all trust clientcert=verify-ca
+    # Administrator access stays inside the PostgreSQL pod.
+    hostssl all postgres all reject
+    # Applications require both a password and a pod-identity certificate.
+    hostssl atepg all all scram-sha-256 clientcert=verify-ca
+  setup.sql: |
+    BEGIN;
+{{ .Files.Get "files/postgres-setup.sql" | indent 4 }}
+    COMMIT;
   reload-tls.sh: |
     # PostgreSQL opens ssl_cert_file, ssl_key_file and ssl_ca_file at startup
     # and on SIGHUP, and nowhere else. The kubelet replaces the projected pod
@@ -61,7 +66,7 @@ data:
 
     reloaded=""
     while true; do
-      current="$(sha256sum "${CERT}" "${CA}")"
+      current="$(sha256sum "${CERT}" "${CA}" /etc/postgresql/pg_hba.conf)"
       # Reloading fails until the server is accepting connections, which is
       # where every pod starts out, so only record a hash once it has worked.
       # Starting empty also means a restart of this container costs one
@@ -156,18 +161,33 @@ spec:
               - /bin/sh
               - -ec
               - |
-                until psql -U postgres -d postgres -Atc 'SELECT 1' >/dev/null 2>&1; do
+                until nc -z 127.0.0.1 5432 && psql -U postgres -d postgres -Atc 'SELECT 1' >/dev/null 2>&1; do
                   sleep 1
                 done
                 if ! psql -U postgres -d postgres -Atc \
                   "SELECT 1 FROM pg_database WHERE datname = 'atepg'" | grep -qx 1; then
                   createdb -U postgres atepg
                 fi
+                psql --no-psqlrc --set=ON_ERROR_STOP=1 -U postgres -d atepg \
+                  --set=substrate_schema="${SUBSTRATE_SCHEMA}" \
+                  --set=substrate_owner_role="${SUBSTRATE_OWNER_ROLE}" \
+                  --set=substrate_owner_user=substrate_owner_user \
+                  --set=substrate_owner_password=substrate-owner \
+                  --set=substrate_readwrite_role="${SUBSTRATE_READWRITE_ROLE}" \
+                  --set=substrate_readwrite_user=substrate_readwrite_user \
+                  --set=substrate_readwrite_password=substrate-readwrite \
+                  --file=/etc/postgresql/setup.sql
         env:
         - name: POSTGRES_DB
           value: atepg
-        - name: POSTGRES_HOST_AUTH_METHOD
-          value: trust
+        - name: POSTGRES_PASSWORD_FILE
+          value: /run/postgres-admin/password
+        - name: SUBSTRATE_SCHEMA
+          value: {{ .Values.postgres.schema | quote }}
+        - name: SUBSTRATE_OWNER_ROLE
+          value: {{ .Values.postgres.ownerRole | quote }}
+        - name: SUBSTRATE_READWRITE_ROLE
+          value: {{ .Values.postgres.readWriteRole | quote }}
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         ports:
@@ -175,7 +195,14 @@ spec:
           containerPort: 5432
         readinessProbe:
           exec:
-            command: ["/bin/sh", "-ec", "psql -U postgres -d atepg -Atc 'SELECT 1' >/dev/null"]
+            command:
+            - /bin/sh
+            - -ec
+            - >-
+              nc -z 127.0.0.1 5432 &&
+              psql -U postgres -d atepg -Atc
+              "SELECT 1 FROM pg_roles WHERE rolname = 'substrate_readwrite_user'"
+              | grep -qx 1
           initialDelaySeconds: 2
           periodSeconds: 2
         livenessProbe:
@@ -197,9 +224,15 @@ spec:
           mountPath: /var/run/postgresql
         - name: data
           mountPath: /var/lib/postgresql/data
+        - name: postgres-admin
+          mountPath: /run/postgres-admin
+          readOnly: true
         resources:
 {{ toYaml .Values.postgres.resources | indent 10 }}
       volumes:
+      - name: postgres-admin
+        secret:
+          secretName: {{ $name }}-admin
       - name: config
         configMap:
           name: {{ $name }}-config
@@ -234,4 +267,18 @@ spec:
       resources:
         requests:
           storage: {{ .Values.postgres.storageSize }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-admin
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data:
+  {{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-admin" $name) }}
+  {{- if $existing }}
+  password: {{ index $existing.data "password" | quote }}
+  {{- else }}
+  password: {{ randAlphaNum 32 | b64enc | quote }}
+  {{- end }}
 {{- end }}
