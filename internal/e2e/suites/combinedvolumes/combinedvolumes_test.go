@@ -41,6 +41,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -318,6 +319,35 @@ func requireSharedWrite(ctx context.Context, t *testing.T, router *e2e.RouterCli
 	requireContentAtBoth(ctx, t, router, actorRef, writePath, aliasPath, probeWrittenContent)
 }
 
+// waitForRouterResume keeps wakeup driven by ingress while allowing restore to
+// outlast a single request's parking budget on a busy CI worker.
+func waitForRouterResume(ctx context.Context, t *testing.T, router *e2e.RouterClient, actorRef resources.ActorRef) {
+	t.Helper()
+	dataplane := e2e.CurrentAtenetDataplane()
+	err := wait.PollUntilContextCancel(ctx, 100*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+		resp, err := router.Get(ctx, actorRef, "/healthz")
+		if err != nil {
+			return false, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false, err
+		}
+		if resp.StatusCode == http.StatusOK {
+			return true, nil
+		}
+		if dataplane.IsRetryableParkingBudgetExhaustion(resp.StatusCode, string(body)) {
+			t.Logf("router resume exhausted its request budget (HTTP %d): %s; retrying", resp.StatusCode, body)
+			return false, nil
+		}
+		return false, fmt.Errorf("router resume: HTTP %d: %s", resp.StatusCode, body)
+	})
+	if err != nil {
+		t.Fatalf("waiting for router-driven resume: %v", err)
+	}
+}
+
 func TestCombinedVolumes(t *testing.T) {
 	repo := os.Getenv("KO_DOCKER_REPO")
 	if repo == "" {
@@ -400,6 +430,7 @@ func TestCombinedVolumes(t *testing.T) {
 		// must re-establish all mounts and preserve shared writes across them.
 		resumeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
+		waitForRouterResume(resumeCtx, t, router, actorRef)
 		requireContentAtBoth(resumeCtx, t, router, actorRef, payloadPath, mountPathAlias+"/"+payloadName, payloadContent)
 		requireContentAtBoth(resumeCtx, t, router, actorRef, scratchPathA+"/multi.txt", scratchPathB+"/multi.txt", probeWrittenContent)
 
@@ -432,6 +463,7 @@ func TestCombinedVolumes(t *testing.T) {
 
 		resumeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
+		waitForRouterResume(resumeCtx, t, router, actorRef)
 
 		// The image volume is immutable and remounted from its digest, so it
 		// is unaffected either way.
