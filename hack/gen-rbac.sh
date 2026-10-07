@@ -32,6 +32,7 @@ bash "${ROOT}/hack/run-tool.sh" controller-gen \
   paths="${ROOT}/cmd/atecontroller/internal/controllers/..." \
   "output:rbac:artifacts:config=${ROOT}/charts/substrate/templates/"
 
-# Templatize the ClusterRole name. controller-gen emits `  name: ate-controller`
-# at column 0; the substitution is exact-match to stay robust.
-sed -i 's|^  name: ate-controller$|  name: {{ include "substrate.fullname" (list "ate-controller" .) }}|' "${OUT}"
+# Templatize the controller's names and namespace for each Helm release.
+sed -i \
+  -e 's|^  name: ate-controller$|  name: {{ include "substrate.fullname" (list "ate-controller" .) }}|' \
+  -e 's|^  namespace: ate-system$|  namespace: {{ .Release.Namespace }}|' "${OUT}"
