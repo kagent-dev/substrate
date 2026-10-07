@@ -66,12 +66,21 @@ if 'kustomize' in args or '--dry-run=client' in args:
                 self.assertIn("-i", calls[bootstrap]["args"])
                 self.assertIn("--single-transaction", calls[bootstrap]["args"])
                 self.assertEqual(calls[bootstrap]["stdin"], (ROOT / "pkg/postgressetup/setup.sql").read_text())
+                for role in ("owner", "readwrite"):
+                    self.assertIn(f"--set=substrate_{role}_password=", calls[bootstrap]["args"])
                 secrets = [(i, call) for i, call in enumerate(calls) if "secret" in call["args"]]
                 self.assertEqual(len(secrets), 2)
                 for i, call in secrets:
                     self.assertLess(bootstrap, i)
                     self.assertIn("--dry-run=client", call["args"])
                     self.assertIn("ate-system", call["args"])
+                for (_, call), role, key in zip(secrets, ("readwrite", "owner"), ("readWriteConnectionString", "ownerConnectionString")):
+                    dsn = next(arg for arg in call["args"] if arg.startswith(f"--from-literal={key}="))
+                    self.assertIn(f"postgresql://substrate_{role}_user@", dsn)
+                    bundle = f"/run/postgres.podcert.ate.dev/substrate_{role}_user.pem"
+                    self.assertIn(f"sslcert={bundle}", dsn)
+                    self.assertIn(f"sslkey={bundle}", dsn)
+                    self.assertIn("sslmode=verify-full", dsn)
                 self.assertIn("substrate-postgres-readwrite", secrets[0][1]["args"])
                 self.assertIn("substrate-postgres-owner", secrets[1][1]["args"])
 

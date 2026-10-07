@@ -51,15 +51,15 @@ fi
   --set=substrate_schema=substrate \
   --set=substrate_owner_role=substrate_owner \
   --set=substrate_owner_user=substrate_owner_user \
-  --set=substrate_owner_password=substrate-owner \
+  --set=substrate_owner_password="" \
   --set=substrate_readwrite_role=substrate_readwrite \
   --set=substrate_readwrite_user=substrate_readwrite_user \
-  --set=substrate_readwrite_password=substrate-readwrite < "${ROOT}/pkg/postgressetup/setup.sql"
+  --set=substrate_readwrite_password="" < "${ROOT}/pkg/postgressetup/setup.sql"
 
-tls='sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/podidentity.podcert.ate.dev/credential-bundle.pem&sslkey=/run/podidentity.podcert.ate.dev/credential-bundle.pem&channel_binding=disable'
+tls='sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem'
 "${KUBECTL[@]}" -n ate-system create secret generic substrate-postgres-readwrite \
-  --from-literal="readWriteConnectionString=postgresql://substrate_readwrite_user:substrate-readwrite@postgres.ate-system.svc:5432/atepg?${tls}" \
+  --from-literal="readWriteConnectionString=postgresql://substrate_readwrite_user@postgres.ate-system.svc:5432/atepg?${tls}&sslcert=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
 "${KUBECTL[@]}" -n ate-system create secret generic substrate-postgres-owner \
-  --from-literal="ownerConnectionString=postgresql://substrate_owner_user:substrate-owner@postgres.ate-system.svc:5432/atepg?${tls}" \
+  --from-literal="ownerConnectionString=postgresql://substrate_owner_user@postgres.ate-system.svc:5432/atepg?${tls}&sslcert=/run/postgres.podcert.ate.dev/substrate_owner_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_owner_user.pem" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -

@@ -25,7 +25,9 @@ application chart. The controller's namespace is the Helm release namespace;
 if selecting another namespace, provision all CA-pool Secrets there.
 
 Set `postgresClientNamespace` to the namespace containing the Substrate API
-server. It defaults to `ate-system`.
+server. It defaults to `ate-system`. Set `postgresClientServiceAccount` to the API
+server ServiceAccount name; it defaults to `ate-api-server`. Other application
+release names prefix this name (for example, `team-ate-api-server`).
 
 Use `postgresClients` to authorize additional service accounts to request fixed
 PostgreSQL login identities. Entries use

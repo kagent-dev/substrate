@@ -28,7 +28,7 @@ import (
 )
 
 func TestHelmControllerInstallation(t *testing.T) {
-	out, err := exec.CommandContext(t.Context(), "helm", "template", "certificates", "../../charts/substrate-podcert", "-n", "certificate-system", "--set", "global.imageRegistry=mirror.example", "--set", "image.tag=test", "--set", "postgresClientNamespace=application-system").CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "helm", "template", "certificates", "../../charts/substrate-podcert", "-n", "certificate-system", "--set", "global.imageRegistry=mirror.example", "--set", "image.tag=test", "--set", "postgresClientNamespace=application-system", "--set", "postgresClientServiceAccount=application-api").CombinedOutput()
 	if err != nil {
 		t.Fatalf("render: %v\n%s", err, out)
 	}
@@ -62,6 +62,9 @@ func TestHelmControllerInstallation(t *testing.T) {
 		if !slices.Contains(pod.Containers[0].Args, "--postgres-client-namespace=application-system") {
 			t.Fatal("controller is missing the configured PostgreSQL client namespace")
 		}
+		if !slices.Contains(pod.Containers[0].Args, "--postgres-client-service-account=application-api") {
+			t.Fatal("controller is missing the configured PostgreSQL client service account")
+		}
 		for _, arg := range pod.Containers[0].Args {
 			name, _, _ := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
 			if pflag.Lookup(name) == nil {
@@ -72,7 +75,7 @@ func TestHelmControllerInstallation(t *testing.T) {
 			t.Fatalf("controller must bootstrap from CA-pool Secrets: %+v", pod.Volumes)
 		}
 		sources := pod.Volumes[0].Projected.Sources
-		if len(sources) != 2 {
+		if len(sources) != 3 {
 			t.Fatalf("got %d CA-pool sources", len(sources))
 		}
 		for _, source := range sources {

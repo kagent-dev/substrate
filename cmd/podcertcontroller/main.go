@@ -95,6 +95,8 @@ var (
 		"postgres-client-service-account",
 		"ate-api-server",
 		"Service account in postgres-client-namespace that may request PostgreSQL login certificates",
+	)
+
 	postgresClients = pflag.StringArray(
 		"postgres-client",
 		nil,
@@ -131,6 +133,16 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	slog.InfoContext(ctx, "podcertcontroller starting", slog.String("version", version.Version))
+
+	additionalPostgresClients := make([]postgressigner.Client, 0, len(*postgresClients))
+	for _, value := range *postgresClients {
+		client, err := postgressigner.ParseClient(value)
+		if err != nil {
+			slog.ErrorContext(ctx, "Invalid PostgreSQL client policy", slog.String("value", value), slog.Any("err", err))
+			os.Exit(1)
+		}
+		additionalPostgresClients = append(additionalPostgresClients, client)
+	}
 
 	var kconfig *rest.Config
 	var err error
