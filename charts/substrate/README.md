@@ -2,7 +2,7 @@
 
 Helm chart for installing Agent Substrate.
 
-The chart uses mTLS and PostgreSQL by default. It requires the
+The chart uses mTLS and requires a prepared PostgreSQL database. It requires the
 `ClusterTrustBundle`, `ClusterTrustBundleProjection`, and
 `PodCertificateRequest` feature gates plus the `certificates.k8s.io/v1beta1`
 API.
@@ -11,8 +11,10 @@ API.
 # CRDs
 helm upgrade --install substrate-crds ./charts/substrate-crds
 
-# Install Substrate
-helm upgrade --install substrate ./charts/substrate
+# Install Substrate after creating the database identities and Secrets
+helm upgrade --install substrate ./charts/substrate \
+  --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
+  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner
 ```
 
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
@@ -40,13 +42,11 @@ See `values.yaml` for the full set; the important keys:
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `postgres.enabled` | `true` | Deploy the bundled PostgreSQL instance |
-| `postgres.readWriteConnectionString` | `""` (in-cluster) | Runtime connection; required for external PostgreSQL |
-| `postgres.ownerConnectionString` | `""` (bundled owner login or external read/write connection) | Connection for migrations and partition maintenance |
-| `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by runtime connections |
-| `postgres.ownerRole` | `substrate_owner` | Role assumed by migration and partition maintenance connections |
+| `postgres.readWriteConnectionStringSecretRef` | `substrate-postgres-readwrite` | Read the read/write connection from a pre-created Secret |
+| `postgres.ownerConnectionStringSecretRef` | `substrate-postgres-owner` | Read the owner connection from a pre-created Secret |
+| `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by read/write connections |
+| `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections |
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
-| `postgres.storageSize` | `1Gi` | In-cluster PostgreSQL PVC size |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.imageCredentialProviderConfig` | `""` | Host path to the kubelet credential provider config; set together with the bin directory |
@@ -63,17 +63,21 @@ See `values.yaml` for the full set; the important keys:
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateoms, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
 
-Bundled PostgreSQL uses the fixed development owner and runtime logins from
-`pkg/postgressetup`. Its startup hook applies the shared setup SQL through the
-local socket before accepting application work. Each application login uses its
-own projected certificate from `postgres.podcert.ate.dev/identity`, without a
-database password. Administrator access stays local to the PostgreSQL pod.
-External PostgreSQL identities remain operator-managed.
+## PostgreSQL setup
 
-Before upgrading an existing install, run
-`hack/install-ate-kind.sh --create-podcertificate-controller-cas` (or the
-corresponding `hack/install-ate.sh` command outside Kind) to create the new
-`postgres-ca-pool` Secret in `podcertificate-controller-system`. The chart wires
-the signer to the release namespace and API server service account. Upgrade the
-controller, API server, and database together; the database startup hook clears
-the old application passwords.
+The chart does not deploy or initialize PostgreSQL. Prepare the database,
+schema, login users, and the configured `readWriteRole` and `ownerRole` before
+installing the chart. For development, `ate-setup` can deploy and bootstrap an
+in-cluster PostgreSQL instance. For an operator-managed database, the operator
+must provision the identities, schema, and grants. In either case, create the
+owner and read/write connection Secrets in the release namespace before
+installing the chart.
+
+Substrate runs `SET ROLE` for each new connection. It rejects a login without
+the required membership.
+
+Create both group roles and all grants before installation, then set
+`postgres.readWriteRole` and `postgres.ownerRole` to those names. Use distinct
+roles and table schemas for separate installs sharing one database. Give each
+install separate logins and grant each login membership only in its install's
+roles.

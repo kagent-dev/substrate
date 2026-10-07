@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- $readWriteConnectionStringSecretRef := .Values.postgres.readWriteConnectionStringSecretRef -}}
+{{- $ownerConnectionStringSecretRef := .Values.postgres.ownerConnectionStringSecretRef -}}
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -87,8 +90,8 @@ spec:
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
         - "--postgres-read-write-connection-string=@env"
         - "--postgres-owner-connection-string=@env"
-        - "--postgres-read-write-role=@env"
-        - "--postgres-owner-role=@env"
+        - {{ printf "--postgres-read-write-role=%s" .Values.postgres.readWriteRole | quote }}
+        - {{ printf "--postgres-owner-role=%s" .Values.postgres.ownerRole | quote }}
         - "--postgres-schema=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
@@ -116,6 +119,16 @@ spec:
               fieldPath: metadata.uid
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: k8s.namespace.name=$(POD_NAMESPACE),k8s.pod.name=$(POD_NAME),k8s.pod.uid=$(POD_UID),service.instance.id=$(POD_UID)
+        - name: ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "substrate.postgres.readWriteSecretName" . | quote }}
+              key: {{ get $readWriteConnectionStringSecretRef "key" | default "readWriteConnectionString" | quote }}
+        - name: ATE_API_POSTGRES_OWNER_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "substrate.postgres.ownerSecretName" . | quote }}
+              key: {{ get $ownerConnectionStringSecretRef "key" | default "ownerConnectionString" | quote }}
 {{- with include "substrate.otel.env" . }}
 {{- . | trim | nindent 8 }}
 {{- end }}

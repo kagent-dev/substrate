@@ -78,6 +78,14 @@ Plaintext HTTP URL that clients use to reach atenet-router.
 {{- printf "http://%s.%s.svc:80" (include "substrate.fullname" (list "atenet-router" .)) .Release.Namespace -}}
 {{- end -}}
 
+{{- define "substrate.postgres.readWriteSecretName" -}}
+{{- .Values.postgres.readWriteConnectionStringSecretRef.name -}}
+{{- end -}}
+
+{{- define "substrate.postgres.ownerSecretName" -}}
+{{- .Values.postgres.ownerConnectionStringSecretRef.name -}}
+{{- end -}}
+
 {{/*
 OTLP endpoint a signal exports to, or empty when the signal is disabled or no
 endpoint resolves. The per-signal endpoint wins over the generic one, matching

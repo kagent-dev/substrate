@@ -14,17 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if and (not .Values.postgres.enabled) (empty .Values.postgres.readWriteConnectionString) }}
-{{- fail "postgres.readWriteConnectionString is required when postgres.enabled=false" }}
+{{- if not .Values.postgres.readWriteConnectionStringSecretRef.name }}
+{{- fail "postgres.readWriteConnectionStringSecretRef.name is required" }}
 {{- end }}
-{{- $readWriteDSN := .Values.postgres.readWriteConnectionString }}
-{{- $ownerDSN := .Values.postgres.ownerConnectionString }}
-{{- if .Values.postgres.enabled }}
-{{- $endpoint := printf "%s.%s.svc:5432/atepg" (include "substrate.fullname" (list "postgres" .)) .Release.Namespace }}
-{{- $readWriteDSN = $readWriteDSN | default (printf "postgresql://substrate_readwrite_user@%s?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem" $endpoint) }}
-{{- $ownerDSN = $ownerDSN | default (printf "postgresql://substrate_owner_user@%s?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/postgres.podcert.ate.dev/substrate_owner_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_owner_user.pem" $endpoint) }}
-{{- else }}
-{{- $ownerDSN = $ownerDSN | default $readWriteDSN }}
+{{- if not .Values.postgres.ownerConnectionStringSecretRef.name }}
+{{- fail "postgres.ownerConnectionStringSecretRef.name is required" }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap
@@ -32,8 +26,4 @@ metadata:
   name: {{ .Values.ateApiServerEnvVarsConfigMap }}
   namespace: {{ .Release.Namespace }}
 data:
-  ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING: {{ $readWriteDSN | quote }}
-  ATE_API_POSTGRES_OWNER_CONNECTION_STRING: {{ $ownerDSN | quote }}
-  ATE_API_POSTGRES_READ_WRITE_ROLE: {{ .Values.postgres.readWriteRole | quote }}
-  ATE_API_POSTGRES_OWNER_ROLE: {{ .Values.postgres.ownerRole | quote }}
   ATE_API_POSTGRES_SCHEMA: {{ .Values.postgres.schema | quote }}

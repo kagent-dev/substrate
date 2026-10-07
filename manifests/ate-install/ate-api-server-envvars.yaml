@@ -21,8 +21,4 @@ metadata:
   name: ate-api-server-envvars
   namespace: ate-system
 data:
-  ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING: "postgresql://substrate_readwrite_user@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_readwrite_user.pem"
-  ATE_API_POSTGRES_OWNER_CONNECTION_STRING: "postgresql://substrate_owner_user@postgres.ate-system.svc:5432/atepg?sslmode=verify-full&sslrootcert=/run/servicedns.podcert.ate.dev/trust-bundle.pem&sslcert=/run/postgres.podcert.ate.dev/substrate_owner_user.pem&sslkey=/run/postgres.podcert.ate.dev/substrate_owner_user.pem"
-  ATE_API_POSTGRES_READ_WRITE_ROLE: "substrate_readwrite"
-  ATE_API_POSTGRES_OWNER_ROLE: "substrate_owner"
   ATE_API_POSTGRES_SCHEMA: "substrate"

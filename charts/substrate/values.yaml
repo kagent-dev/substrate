@@ -24,22 +24,18 @@
 createNamespace: false
 
 postgres:
-  enabled: true
-  storageSize: 1Gi
-  readWriteConnectionString: ""
-  # Bundled installs use separate development logins. External installs default
-  # to the read/write connection; each pool assumes its own role.
-  ownerConnectionString: ""
+  # Read the read/write connection string from a pre-created Secret.
+  readWriteConnectionStringSecretRef:
+    name: substrate-postgres-readwrite
+    key: readWriteConnectionString
+  # Read the owner connection string from a pre-created Secret.
+  ownerConnectionStringSecretRef:
+    name: substrate-postgres-owner
+    key: ownerConnectionString
+  # Roles assumed on each connection. Use distinct roles for installs sharing a database.
   readWriteRole: substrate_readwrite
   ownerRole: substrate_owner
   schema: substrate
-  resources:
-    requests:
-      cpu: "1"
-      memory: 1Gi
-    limits:
-      cpu: "2"
-      memory: 2Gi
 
 rustfs:
   enabled: true
@@ -136,7 +132,6 @@ image:
   tag: ""
 
 images:
-  postgres: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
   rustfs: rustfs/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
   awsCli: amazon/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
   agentgateway: cr.agentgateway.dev/agentgateway:v0.0.0-alpha.168b05d6@sha256:5e8384d1fcfdc443a3ad5155ea6a64dc7953bde162df7f5f8e131a5c19ae08a3
