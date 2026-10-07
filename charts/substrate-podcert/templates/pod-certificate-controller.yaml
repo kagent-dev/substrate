@@ -14,23 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
+{{- if .Values.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: podcertificate-controller-system
+  name: {{ .Release.Namespace }}
 ---
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "substrate.fullname" (list "podcertificate-controller" .) }}
-  namespace: podcertificate-controller-system
+  name: {{ include "podcert.fullname" (list "podcertificate-controller" .) }}
+  namespace: {{ .Release.Namespace }}
   labels:
     app: podcertificate-controller
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "substrate.fullname" (list "podcert-ate-dev-signer" .) }}
+  name: {{ include "podcert.fullname" (list "podcert-ate-dev-signer" .) }}
 rules:
 # The service signer needs to be able to read services and pods.
 - apiGroups:
@@ -75,7 +77,6 @@ rules:
   resourceNames:
   - servicedns.podcert.ate.dev/*
   - podidentity.podcert.ate.dev/*
-  - postgres.podcert.ate.dev/*
   verbs:
   - sign
   - attest
@@ -89,20 +90,20 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "substrate.fullname" (list "podcert-ate-dev-signer" .) }}
+  name: {{ include "podcert.fullname" (list "podcert-ate-dev-signer" .) }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "substrate.fullname" (list "podcert-ate-dev-signer" .) }}
+  name: {{ include "podcert.fullname" (list "podcert-ate-dev-signer" .) }}
 subjects:
 - kind: ServiceAccount
-  namespace: podcertificate-controller-system
-  name: {{ include "substrate.fullname" (list "podcertificate-controller" .) }}
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "podcert.fullname" (list "podcertificate-controller" .) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: podcertificate-controller-system
+  namespace: {{ .Release.Namespace }}
   name: coordinator
 rules:
 - apiGroups:
@@ -121,21 +122,21 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: podcertificate-controller-is-a-coordinator
-  namespace: podcertificate-controller-system
+  namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: coordinator
 subjects:
 - kind: ServiceAccount
-  namespace: podcertificate-controller-system
-  name: {{ include "substrate.fullname" (list "podcertificate-controller" .) }}
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "podcert.fullname" (list "podcertificate-controller" .) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: podcertificate-controller
-  namespace: podcertificate-controller-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app: podcertificate-controller
 spec:
@@ -148,10 +149,10 @@ spec:
       labels:
         app: podcertificate-controller
     spec:
-      {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
+      {{- with include "podcert.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
       - name: controller
-        image: {{ include "substrate.componentImage" (list "podcertcontroller" .) }}
+        image: {{ include "podcert.componentImage" (list "podcertcontroller" .) }}
         args:
         - --in-cluster=true
         - --sharding-pod-namespace=$(POD_NAMESPACE)
@@ -161,8 +162,7 @@ spec:
         - --service-dns-ca-pool=/run/ca-state/service-dns-pool.json
         - --pod-identity-ca-pool=/run/ca-state/pod-identity-pool.json
         - --postgres-ca-pool=/run/ca-state/postgres-pool.json
-        - --postgres-client-namespace={{ .Release.Namespace }}
-        - --postgres-client-service-account={{ include "substrate.ateApiServer.serviceAccountName" . }}
+        - --workers-per-signer=$(WORKERS_PER_SIGNER)
         env:
         - name: POD_NAMESPACE
           valueFrom:
@@ -176,6 +176,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.uid
+        - name: WORKERS_PER_SIGNER
+          value: {{ .Values.workersPerSigner | quote }}
         volumeMounts:
         - name: "ca-state"
           mountPath: "/run/ca-state"
@@ -212,5 +214,5 @@ spec:
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
-      serviceAccountName: {{ include "substrate.fullname" (list "podcertificate-controller" .) }}
+      serviceAccountName: {{ include "podcert.fullname" (list "podcertificate-controller" .) }}
       terminationGracePeriodSeconds: 30

@@ -14,9 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Render the substrate Helm chart into manifests/ate-install/ (mTLS-mode
+# Render the Substrate Helm charts into manifests/ate-install/ (mTLS-mode
 # install) — the canonical kubectl-apply install path. The chart at
-# charts/substrate/ is the single source of truth; this script only renders.
+# charts/substrate/ and charts/substrate-podcert/ define the rendered resources.
 #
 # Usage:
 #   hack/render-manifests.sh            # write into manifests/ate-install/
@@ -39,7 +39,6 @@ PRESERVED_FILES=(
   atenet-router-monitoring.yaml
   # The provider's upstream manifest lives in manifests/egress-credential-injection.
   k8s-credential-provider.yaml
-  pod-certificate-controller.yaml
   postgres.yaml
   sandboxconfig-gvisor.yaml
   sandboxconfig-validation.yaml
@@ -65,6 +64,13 @@ helm template substrate "${CHART_DIR}" \
   --set image.repository=agent-substrate/substrate/cmd \
   --set image.tag="<none>" \
   > "${TMP_DIR}/all.yaml"
+helm template substrate-podcert "${ROOT}/charts/substrate-podcert" \
+  --namespace podcertificate-controller-system \
+  --set createNamespace=true \
+  --set image.registry=ko://github.com \
+  --set image.repository=agent-substrate/substrate/cmd \
+  --set image.tag="<none>" \
+  >> "${TMP_DIR}/all.yaml"
 
 # Split into per-source files so the directory structure mirrors the chart
 # templates, making diffs friendlier.
@@ -90,6 +96,7 @@ for doc in raw.split('\n---\n'):
 for src, docs in docs_by_source.items():
     if src == "namespace.yaml":
         src = "ate-system-namespace.yaml"
+    chart = "substrate-podcert" if src == "pod-certificate-controller.yaml" else "substrate"
     header = (
         "#  Copyright 2026 Google LLC\n"
         "#\n"
@@ -105,7 +112,7 @@ for src, docs in docs_by_source.items():
         "#  See the License for the specific language governing permissions and\n"
         "#  limitations under the License.\n"
         "\n"
-        "# DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.\n"
+        f"# DO NOT EDIT — generated from charts/{chart} by hack/render-manifests.sh.\n"
         "# Run `make helm-template` to regenerate.\n"
         "\n"
     )
@@ -145,7 +152,6 @@ find "${OUT_DIR}" -maxdepth 1 -type f -name '*.yaml' \
   ! -name 'atenet-egress.yaml' \
   ! -name 'atenet-router.yaml' \
   ! -name 'atenet-router-monitoring.yaml' \
-  ! -name 'pod-certificate-controller.yaml' \
   ! -name 'postgres.yaml' \
   ! -name 'sandboxconfig-gvisor.yaml' \
   ! -name 'sandboxconfig-validation.yaml' \

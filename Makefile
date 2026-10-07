@@ -183,8 +183,7 @@ verify: test
 clean:
 	rm -rf $(BINDIR)
 
-# Render the substrate Helm chart into manifests/ate-install/ (mTLS mode,
-# the historical default install). Run this whenever charts/substrate/ changes.
+# Render the application and certificate-controller charts into manifests/ate-install/.
 .PHONY: helm-template
 helm-template:
 	@./hack/render-manifests.sh

@@ -30,6 +30,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
       - name: Lint the chart
-        run: helm lint charts/substrate charts/substrate-crds
+        run: helm lint charts/substrate charts/substrate-crds charts/substrate-podcert
       - name: Verify committed manifests match the chart output
         run: make verify-helm-template

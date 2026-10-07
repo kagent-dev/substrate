@@ -7,12 +7,22 @@ The chart uses mTLS and requires a prepared PostgreSQL database. It requires the
 `PodCertificateRequest` feature gates plus the `certificates.k8s.io/v1beta1`
 API.
 
+Install the [certificate controller](../substrate-podcert/README.md) as a separate
+release before preparing PostgreSQL or installing this chart. One controller
+serves the cluster; the application chart does not deploy it.
+
 ```bash
 # CRDs
 helm upgrade --install substrate-crds ./charts/substrate-crds
 
+# Create CA pools, then install their certificate controller
+go run ./cmd/ate-setup create podcertificate-controller-cas
+helm upgrade --install substrate-podcert ./charts/substrate-podcert \
+  --namespace podcertificate-controller-system --create-namespace --wait
+
 # Install Substrate after creating the database identities and Secrets
 helm upgrade --install substrate ./charts/substrate \
+  --namespace ate-system --create-namespace \
   --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
   --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner
 ```
@@ -68,11 +78,11 @@ See `values.yaml` for the full set; the important keys:
 The chart does not deploy or initialize PostgreSQL. Prepare the database,
 schema, login users, and the configured `readWriteRole` and `ownerRole` before
 installing the chart. For development Helm installations in `ate-system`,
-run `hack/install-postgres.sh` after installing the pod-certificate controller
-and its CA pools. It deploys PostgreSQL, runs the shared bootstrap SQL, and
-creates both connection Secrets. Use `--kind` for the smaller Kind deployment;
-set `KUBECTL_CONTEXT` to select a cluster. Standalone manifest installations
-can continue to use `ate-setup`.
+run `hack/install-postgres.sh` after installing the separate certificate
+controller and its CA pools. It deploys certificate-protected PostgreSQL,
+runs the shared bootstrap SQL, and creates both connection Secrets. Use `--kind`
+for the smaller Kind deployment; set `KUBECTL_CONTEXT` to select a cluster.
+Standalone manifest installations can continue to use `ate-setup`.
 
 For an operator-managed database, the operator must provision the identities,
 schema, and grants, and create both connection Secrets in the release namespace.

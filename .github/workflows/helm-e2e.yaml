@@ -70,17 +70,8 @@ jobs:
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
         done
-    - name: Install Agent Substrate with Helm
-      run: |
-        helm upgrade --install substrate-crds charts/substrate-crds
-        helm upgrade --install substrate charts/substrate \
-          --namespace ate-system \
-          --create-namespace \
-          -f internal/e2e/suites/credentials/values.yaml \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
-          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317
+    - name: Install Substrate CRDs
+      run: helm upgrade --install substrate-crds charts/substrate-crds
     - name: Bootstrap mTLS authorities
       run: |
         hack/install-ate-kind.sh --create-podcertificate-controller-cas
@@ -89,13 +80,26 @@ jobs:
         hack/install-ate-kind.sh --create-actor-id-ca-certs-secret
         hack/install-ate-kind.sh --create-api-authentication-config
         hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
+    - name: Install certificate controller
+      run: |
+        helm upgrade --install substrate-podcert charts/substrate-podcert \
+          --namespace podcertificate-controller-system \
+          --create-namespace \
+          --set image.registry=localhost:5001 \
+          --set image.tag=helm-e2e \
+          --wait --timeout=5m
     - name: Provision PostgreSQL and connection Secrets
       run: hack/install-postgres.sh --kind
-    - name: Wait for Helm install
+    - name: Install Agent Substrate with Helm
       run: |
-        helm upgrade substrate charts/substrate \
+        helm upgrade --install substrate charts/substrate \
           --namespace ate-system \
-          --reuse-values \
+          --create-namespace \
+          -f internal/e2e/suites/credentials/values.yaml \
+          --set image.registry=localhost:5001 \
+          --set image.tag=helm-e2e \
+          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
+          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
           --wait --timeout=10m
     - name: Enable NFS
       run: |
