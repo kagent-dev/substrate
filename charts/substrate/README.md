@@ -67,11 +67,15 @@ See `values.yaml` for the full set; the important keys:
 
 The chart does not deploy or initialize PostgreSQL. Prepare the database,
 schema, login users, and the configured `readWriteRole` and `ownerRole` before
-installing the chart. For development, `ate-setup` can deploy and bootstrap an
-in-cluster PostgreSQL instance. For an operator-managed database, the operator
-must provision the identities, schema, and grants. In either case, create the
-owner and read/write connection Secrets in the release namespace before
-installing the chart.
+installing the chart. For development Helm installations in `ate-system`,
+run `hack/install-postgres.sh` after installing the pod-certificate controller
+and its CA pools. It deploys PostgreSQL, runs the shared bootstrap SQL, and
+creates both connection Secrets. Use `--kind` for the smaller Kind deployment;
+set `KUBECTL_CONTEXT` to select a cluster. Standalone manifest installations
+can continue to use `ate-setup`.
+
+For an operator-managed database, the operator must provision the identities,
+schema, and grants, and create both connection Secrets in the release namespace.
 
 Substrate runs `SET ROLE` for each new connection. It rejects a login without
 the required membership.
