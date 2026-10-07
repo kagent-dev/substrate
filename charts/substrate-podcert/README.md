@@ -7,9 +7,10 @@ a certificate issued by itself.
 
 The cluster must enable `ClusterTrustBundle`, `ClusterTrustBundleProjection`,
 and `PodCertificateRequest`, including the `certificates.k8s.io/v1beta1` API.
-Create `service-dns-ca-pool` and `pod-identity-ca-pool` Secrets in the controller's
-namespace before installation. Each Secret must contain a signing pool in its
-`pool` key. The existing setup command creates these in the default namespace:
+Create `service-dns-ca-pool`, `pod-identity-ca-pool`, and `postgres-ca-pool`
+Secrets in the controller's namespace before installation. Each Secret must
+contain a signing pool in its `pool` key. The existing setup command creates
+these in the default namespace:
 
 ```sh
 go run ./cmd/ate-setup create podcertificate-controller-cas
@@ -21,7 +22,14 @@ hack/install-postgres.sh --kind
 
 Then prepare the application authentication resources and install the Substrate
 application chart. The controller's namespace is the Helm release namespace;
-if selecting another namespace, provision both CA-pool Secrets there.
+if selecting another namespace, provision all CA-pool Secrets there.
+
+Set `postgresClientNamespace` to the namespace containing the Substrate API
+server. It defaults to `ate-system`.
+
+Use `postgresClients` to authorize additional service accounts to request fixed
+PostgreSQL login identities. Entries use
+`namespace/service-account=username[,username]` form.
 
 Configure the controller image through `image.registry`, `image.repository`,
 and `image.tag`. `global.imageRegistry` overrides the registry, and

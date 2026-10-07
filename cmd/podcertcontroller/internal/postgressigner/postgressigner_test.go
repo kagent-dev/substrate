@@ -39,13 +39,14 @@ import (
 
 func TestMakeCert(t *testing.T) {
 	for _, tc := range []struct {
-		name                              string
 		serviceAccount                    string
+		name                              string
 		namespace                         string
 		mutate                            func(*certsv1beta1.PodCertificateRequest)
 		wantDenied, wantError, failUpdate bool
 		lifetime                          time.Duration
 		wantUsername                      string
+		additionalClients                 []Client
 	}{
 		{name: "runtime login", lifetime: 24 * time.Hour},
 		{name: "owner login", lifetime: 24 * time.Hour, wantUsername: postgressetup.OwnerUser, mutate: func(p *certsv1beta1.PodCertificateRequest) {
@@ -57,6 +58,11 @@ func TestMakeCert(t *testing.T) {
 		{name: "relocated owner login", namespace: "team-a-substrate", lifetime: 24 * time.Hour, wantUsername: postgressetup.OwnerUser, mutate: func(p *certsv1beta1.PodCertificateRequest) {
 			p.Namespace = "team-a-substrate"
 			p.Spec.UnverifiedUserAnnotations[UsernameAnnotation] = postgressetup.OwnerUser
+		}},
+		{name: "additional client", lifetime: 24 * time.Hour, wantUsername: "application_user", additionalClients: []Client{{Namespace: "application", ServiceAccount: "controller", Usernames: []string{"application_user"}}}, mutate: func(p *certsv1beta1.PodCertificateRequest) {
+			p.Namespace = "application"
+			p.Spec.ServiceAccountName = "controller"
+			p.Spec.UnverifiedUserAnnotations[UsernameAnnotation] = "application_user"
 		}},
 		{name: "default namespace denied after relocation", namespace: "team-a-substrate", wantDenied: true},
 		{name: "wrong service account after relocation", namespace: "team-a-substrate", wantDenied: true, mutate: func(p *certsv1beta1.PodCertificateRequest) {
@@ -149,7 +155,7 @@ func TestMakeCert(t *testing.T) {
 			if serviceAccount == "" {
 				serviceAccount = "ate-api-server"
 			}
-			impl := NewImpl(namespace, serviceAccount, &localca.ConcretePool{CAs: []*localca.CA{ca}}, client)
+			impl := NewImpl(namespace, serviceAccount, &localca.ConcretePool{CAs: []*localca.CA{ca}}, client, tc.additionalClients...)
 			err = impl.MakeCert(t.Context(), pcr)
 
 			if (err != nil) != tc.wantError {
@@ -208,6 +214,21 @@ func TestMakeCert(t *testing.T) {
 				t.Fatalf("incorrect refresh times: %+v", got.Status)
 			}
 		})
+	}
+}
+
+func TestParseClient(t *testing.T) {
+	client, err := ParseClient("application/controller=owner_user,runtime_user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Namespace != "application" || client.ServiceAccount != "controller" || !slices.Equal(client.Usernames, []string{"owner_user", "runtime_user"}) {
+		t.Fatalf("unexpected client: %+v", client)
+	}
+	for _, value := range []string{"", "application", "application/controller", "/controller=user", "application/=user", "application/controller="} {
+		if _, err := ParseClient(value); err == nil {
+			t.Errorf("ParseClient(%q) succeeded", value)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ package main
 
 import (
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ import (
 )
 
 func TestHelmControllerInstallation(t *testing.T) {
-	out, err := exec.CommandContext(t.Context(), "helm", "template", "certificates", "../../charts/substrate-podcert", "-n", "certificate-system", "--set", "global.imageRegistry=mirror.example", "--set", "image.tag=test").CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "helm", "template", "certificates", "../../charts/substrate-podcert", "-n", "certificate-system", "--set", "global.imageRegistry=mirror.example", "--set", "image.tag=test", "--set", "postgresClientNamespace=application-system").CombinedOutput()
 	if err != nil {
 		t.Fatalf("render: %v\n%s", err, out)
 	}
@@ -57,6 +58,9 @@ func TestHelmControllerInstallation(t *testing.T) {
 		pod := resource.Spec.Template.Spec
 		if len(pod.Containers) != 1 || pod.Containers[0].Image != "mirror.example/kagent-dev/substrate/podcertcontroller:test" {
 			t.Fatalf("unexpected controller containers: %+v", pod.Containers)
+		}
+		if !slices.Contains(pod.Containers[0].Args, "--postgres-client-namespace=application-system") {
+			t.Fatal("controller is missing the configured PostgreSQL client namespace")
 		}
 		for _, arg := range pod.Containers[0].Args {
 			name, _, _ := strings.Cut(strings.TrimPrefix(arg, "--"), "=")

@@ -162,6 +162,11 @@ spec:
         - --service-dns-ca-pool=/run/ca-state/service-dns-pool.json
         - --pod-identity-ca-pool=/run/ca-state/pod-identity-pool.json
         - --postgres-ca-pool=/run/ca-state/postgres-pool.json
+        - {{ printf "--postgres-client-namespace=%s" .Values.postgresClientNamespace | quote }}
+        - {{ printf "--postgres-client-service-account=%s" .Values.postgresClientServiceAccount | quote }}
+        {{- range .Values.postgresClients }}
+        - {{ printf "--postgres-client=%s" . | quote }}
+        {{- end }}
         - --workers-per-signer=$(WORKERS_PER_SIGNER)
         env:
         - name: POD_NAMESPACE

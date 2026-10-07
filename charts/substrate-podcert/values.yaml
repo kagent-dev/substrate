@@ -16,6 +16,15 @@
 createNamespace: false
 workersPerSigner: 1
 
+# Namespace containing the Substrate API server.
+postgresClientNamespace: ate-system
+# Service account used by the Substrate API server.
+postgresClientServiceAccount: ate-api-server
+
+# Additional service accounts allowed to request PostgreSQL login certificates.
+# Each entry uses namespace/service-account=username[,username] form.
+postgresClients: []
+
 global:
   imageRegistry: ""
   imagePullSecrets: []
