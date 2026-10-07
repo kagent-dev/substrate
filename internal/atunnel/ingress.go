@@ -63,9 +63,16 @@ func ParsePort(s string) (port int, ok bool) {
 	return p, true
 }
 
+// CredentialBinder installs credential bindings for actor egress.
+type CredentialBinder interface {
+	// SetCredentialKey must reject canceled activations and stale or conflicting
+	// tuples without changes, and close retired connections before returning.
+	SetCredentialKey(ctx context.Context, actorUID, key string, sequence uint64) error
+}
+
 // Config configures an ingress Server.
 type Config struct {
-	SetCredentialKey     func(actorUID, key string) error
+	CredentialBinder     CredentialBinder
 	CredentialBundlePath string
 	TrustBundlePath      string
 	AllowedClientID      string
@@ -74,7 +81,7 @@ type Config struct {
 
 // Server is an HTTPS reverse proxy for the worker's active actors.
 type Server struct {
-	setCredentialKey     func(actorUID, key string) error
+	credentialBinder     CredentialBinder
 	credentialBundlePath string
 	tlsConfig            *tls.Config
 	upstream             *url.URL
@@ -127,7 +134,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		setCredentialKey:     cfg.SetCredentialKey,
+		credentialBinder:     cfg.CredentialBinder,
 		credentialBundlePath: cfg.CredentialBundlePath,
 		upstream:             cfg.Upstream,
 		active:               map[resources.ActorRef]*activation{},
@@ -339,7 +346,7 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid, key, err := parseCredentialKey(r.Header)
+	uid, key, sequence, err := parseCredentialBinding(r.Header)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -349,8 +356,16 @@ func (s *Server) ServeConnectHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "credential key names another actor incarnation", http.StatusForbidden)
 			return
 		}
-		if s.setCredentialKey == nil || s.setCredentialKey(uid, key) != nil {
+		if s.credentialBinder == nil {
 			http.Error(w, "credential binding is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := s.credentialBinder.SetCredentialKey(active.ctx, uid, key, sequence); err != nil {
+			if errors.Is(err, errBindingConflict) {
+				http.Error(w, "stale or conflicting credential binding", http.StatusConflict)
+			} else {
+				http.Error(w, "credential binding is unavailable", http.StatusServiceUnavailable)
+			}
 			return
 		}
 	}

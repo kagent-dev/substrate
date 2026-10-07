@@ -33,7 +33,6 @@ import (
 // TODO(liorlieberman): support/use CONNECT on Ingress as well.
 // ClientConfig configures an egress CONNECT client.
 type ClientConfig struct {
-	CredentialKey        func() string
 	GatewayAddress       string
 	ServerName           string
 	GetClientCertificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
@@ -81,7 +80,6 @@ func WithDialer(dial DialFunc) ClientOption {
 
 // Client opens actor egress streams through an mTLS-authenticated gateway.
 type Client struct {
-	credentialKey  func() string
 	gatewayAddress string
 	tlsConfig      *tls.Config
 	dialContext    DialFunc
@@ -114,7 +112,6 @@ func NewClient(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	}
 
 	client := &Client{
-		credentialKey:  cfg.CredentialKey,
 		gatewayAddress: cfg.GatewayAddress,
 		dialContext:    (&net.Dialer{}).DialContext,
 		tlsConfig: &tls.Config{
@@ -131,20 +128,27 @@ func NewClient(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 }
 
 // DialContext opens a CONNECT tunnel to destination. destination becomes the
-// request authority, so it must include an explicit port.
-func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn, error) {
+// request authority, so it must include an explicit port. credentialKey is the
+// immutable key captured when the actor connection was admitted.
+func (c *Client) DialContext(ctx context.Context, destination, credentialKey string) (net.Conn, error) {
 	if err := validateDestination(destination); err != nil {
 		return nil, err
 	}
 	header := http.Header{}
-	if c.credentialKey != nil {
-		if key := c.credentialKey(); key != "" {
-			header.Set(CredentialKeyHeader, key)
-		}
+	if credentialKey != "" {
+		header.Set(CredentialKeyHeader, credentialKey)
 	}
 	rawConn, err := c.dialContext(ctx, "tcp", c.gatewayAddress)
 	if err != nil {
 		return nil, fmt.Errorf("atunnel: connecting to egress gateway: %w", err)
+	}
+	// Cancel stalled TLS and CONNECT exchanges, including a dial that completes
+	// after its binding is retired. Egress checks the binding again on return.
+	stop := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		_ = rawConn.Close()
+		return nil, err
 	}
 	tlsConn := tls.Client(rawConn, c.tlsConfig.Clone())
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -159,20 +163,20 @@ func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn,
 		Host:   destination,
 	}
 	if err := req.Write(tlsConn); err != nil {
-		_ = tlsConn.Close()
+		_ = rawConn.Close()
 		return nil, connectExchangeError("writing CONNECT request", err)
 	}
 
 	reader := bufio.NewReader(tlsConn)
 	resp, err := http.ReadResponse(reader, req)
 	if err != nil {
-		_ = tlsConn.Close()
+		_ = rawConn.Close()
 		return nil, connectExchangeError("reading CONNECT response", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		_ = resp.Body.Close()
-		_ = tlsConn.Close()
+		_ = rawConn.Close()
 		message := strings.TrimSpace(string(body))
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
@@ -180,7 +184,11 @@ func (c *Client) DialContext(ctx context.Context, destination string) (net.Conn,
 		return nil, &ConnectRejectedError{StatusCode: resp.StatusCode, Status: resp.Status, Message: message}
 	}
 
-	return &bufferedConn{Conn: tlsConn, reader: reader}, nil
+	if err := ctx.Err(); err != nil {
+		_ = rawConn.Close()
+		return nil, err
+	}
+	return &bufferedConn{Conn: tlsConn, reader: reader, transport: rawConn}, nil
 }
 
 // connectExchangeError wraps a failure that happened after the TLS handshake
@@ -234,7 +242,8 @@ func validateDestination(destination string) error {
 
 type bufferedConn struct {
 	net.Conn
-	reader *bufio.Reader
+	reader    *bufio.Reader
+	transport net.Conn
 }
 
 func (c *bufferedConn) Read(p []byte) (int, error) {
@@ -246,4 +255,10 @@ func (c *bufferedConn) CloseWrite() error {
 		return conn.CloseWrite()
 	}
 	return nil
+}
+
+func (c *bufferedConn) Close() error {
+	// Retirement must not wait for the peer to read a TLS close notification.
+	// Normal half-close still uses tls.Conn.CloseWrite to finish the stream.
+	return c.transport.Close()
 }

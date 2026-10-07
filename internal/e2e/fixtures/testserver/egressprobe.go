@@ -155,7 +155,7 @@ func fetchChain(ctx context.Context, sni, credentialBundle string, cfg probeConf
 		return nil, stageClient, fmt.Errorf("building egress client: %w", err)
 	}
 
-	conn, err := client.DialContext(ctx, tunnelDestination)
+	conn, err := client.DialContext(ctx, tunnelDestination, "")
 	if err != nil {
 		return nil, dialStage(err), fmt.Errorf("opening tunnel: %w", err)
 	}

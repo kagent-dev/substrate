@@ -62,7 +62,7 @@ func TestEgressBindingDoesNotOutliveItsActivation(t *testing.T) {
 			dialed := make(chan string, 2)
 			activate := func(generation string) {
 				t.Helper()
-				if err := egress.Activate(testActorUID, egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+				if err := egress.Activate(testActorUID, egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 					dialed <- generation
 					return nil, errors.New("test dial")
 				}), fakeActorCertificateSource{}, time.Now().Add(time.Hour)); err != nil {
@@ -176,7 +176,7 @@ func TestEgressActivationFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialer := egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+	dialer := egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		t.Fatal("dialed after failed activation")
 		return nil, nil
 	})
@@ -199,7 +199,7 @@ func TestEgressExpiryRejectsNewButPreservesEstablished(t *testing.T) {
 	defer upstreamGateway.Close()
 	var dials atomic.Int32
 	var mints atomic.Int32
-	dialer := egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+	dialer := egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		dials.Add(1)
 		return upstreamProxy, nil
 	})
@@ -256,7 +256,7 @@ func TestEgressRenewsBeforeExpiry(t *testing.T) {
 	}
 	upstream, gateway := net.Pipe()
 	defer gateway.Close()
-	dialer := egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+	dialer := egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		return upstream, nil
 	})
 	egress, err := NewEgress(func(net.Conn) (string, error) { return "192.0.2.10:443", nil })
@@ -306,7 +306,7 @@ func TestEgressStopsAfterTerminalRenewalFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := egress.Activate(testActorUID, egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+			if err := egress.Activate(testActorUID, egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 				t.Fatal("dialed after renewal was denied")
 				return nil, nil
 			}), fakeActorCertificateSource{
@@ -346,7 +346,7 @@ func TestEgressDeactivationDropsConcurrentRenewal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialer := egressDialerFunc(func(context.Context, string) (net.Conn, error) { return nil, nil })
+	dialer := egressDialerFunc(func(context.Context, string, string) (net.Conn, error) { return nil, nil })
 	if err := egress.Activate(testActorUID, dialer, fakeActorCertificateSource{
 		expiresAt: time.Now().Add(time.Hour),
 		called:    started,
@@ -479,10 +479,10 @@ func TestEgressRejectsInactiveConnection(t *testing.T) {
 	}
 }
 
-type egressDialerFunc func(context.Context, string) (net.Conn, error)
+type egressDialerFunc func(context.Context, string, string) (net.Conn, error)
 
-func (f egressDialerFunc) DialContext(ctx context.Context, destination string) (net.Conn, error) {
-	return f(ctx, destination)
+func (f egressDialerFunc) DialContext(ctx context.Context, destination, key string) (net.Conn, error) {
+	return f(ctx, destination, key)
 }
 
 type fakeActorCertificateSource struct {
@@ -517,7 +517,7 @@ func TestEgressIsArmedPerActor(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := fakeActorCertificateSource{expiresAt: time.Now().Add(time.Hour)}
-	dialer := egressDialerFunc(func(context.Context, string) (net.Conn, error) {
+	dialer := egressDialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		return nil, errors.New("not dialed in this test")
 	})
 	for _, uid := range []string{"actor-uid-1", "actor-uid-2"} {

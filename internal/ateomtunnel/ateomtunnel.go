@@ -121,7 +121,7 @@ func Start(ctx context.Context, cfg Config, upstream string) (*Tunnel, error) {
 
 	// Ingress
 	ingress, err := atunnel.NewServer(atunnel.Config{
-		SetCredentialKey:     egress.SetCredentialKey,
+		CredentialBinder:     egress,
 		CredentialBundlePath: cfg.CredentialBundle,
 		TrustBundlePath:      cfg.TrustBundle,
 		AllowedClientID:      cfg.ClientIdentity,
@@ -209,7 +209,6 @@ func (t *Tunnel) PrepareEgress(ctx context.Context, actor resources.ActorAttribu
 		return nil, fmt.Errorf("while obtaining actor certificate: %w", err)
 	}
 	gatewayClient, err := atunnel.NewClient(atunnel.ClientConfig{
-		CredentialKey:        func() string { return t.Egress.CredentialKey(actor.UID) },
 		GatewayAddress:       gateway.GetAddress(),
 		ServerName:           serverName,
 		GetClientCertificate: certificateSource.GetClientCertificate,

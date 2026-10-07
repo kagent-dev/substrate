@@ -31,7 +31,7 @@ import (
 
 // egressDialer opens an authenticated tunnel to an original destination.
 type egressDialer interface {
-	DialContext(context.Context, string) (net.Conn, error)
+	DialContext(ctx context.Context, destination, credentialKey string) (net.Conn, error)
 }
 
 type actorCertificateSource interface {
@@ -54,7 +54,11 @@ type Egress struct {
 }
 
 type egressActivation struct {
-	credentialKey     string
+	// Serialize replacement and connection registration within this activation.
+	// Hold through closure so a retry cannot forward before old connections close.
+	bindingMu sync.Mutex
+	binding   *credentialBinding
+
 	dialer            egressDialer
 	certificateSource actorCertificateSource
 	expiresAt         time.Time
@@ -77,26 +81,35 @@ func NewEgress(originalDestination OriginalDestination) (*Egress, error) {
 	}, nil
 }
 
-// SetCredentialKey binds the key to the actor's active egress.
-func (e *Egress) SetCredentialKey(actorUID, key string) error {
+// SetCredentialKey installs a newer binding and closes the previous binding's
+// connections before returning. ctx is the ingress activation's lifetime.
+func (e *Egress) SetCredentialKey(ctx context.Context, actorUID, key string, sequence uint64) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	active := e.active[actorUID]
-	if active == nil || active.dialer == nil {
+	if active == nil || active.dialer == nil || ctx.Err() != nil {
+		e.mu.Unlock()
 		return fmt.Errorf("atunnel: actor egress is not active")
 	}
-	active.credentialKey = key
-	return nil
-}
+	e.mu.Unlock()
 
-// CredentialKey returns the key for new egress tunnels, or an empty key before binding.
-func (e *Egress) CredentialKey(actorUID string) string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if active := e.active[actorUID]; active != nil {
-		return active.credentialKey
+	active.bindingMu.Lock()
+	defer active.bindingMu.Unlock()
+	if err := errors.Join(ctx.Err(), active.ctx.Err()); err != nil {
+		return err
 	}
-	return ""
+	old := active.binding
+	if key == "" || sequence == 0 {
+		return errBindingConflict
+	}
+	if old.key == key && old.sequence == sequence {
+		return nil
+	}
+	if old.key != "" && (sequence <= old.sequence || key == old.key) {
+		return errBindingConflict
+	}
+	old.close()
+	active.binding = newCredentialBinding(active.ctx, key, sequence)
+	return nil
 }
 
 // Bind captures the actor's activation before its listeners start serving.
@@ -125,6 +138,7 @@ func (e *Egress) activationLocked(actorUID string) *egressActivation {
 	if active == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		active = &egressActivation{ctx: ctx, cancel: cancel}
+		active.binding = newCredentialBinding(ctx, "", 0)
 		e.active[actorUID] = active
 	}
 	return active
@@ -276,6 +290,9 @@ func (e *Egress) Deactivate(ctx context.Context, actorUID string) error {
 	if active == nil {
 		return nil
 	}
+	active.bindingMu.Lock()
+	active.binding.close()
+	active.bindingMu.Unlock()
 
 	done := make(chan struct{})
 	go func() {
@@ -307,27 +324,45 @@ func (e *Egress) handle(downstream net.Conn, active *egressActivation) {
 	active.wg.Add(1)
 	e.mu.Unlock()
 
+	active.bindingMu.Lock()
+	if active.ctx.Err() != nil {
+		active.bindingMu.Unlock()
+		active.wg.Done()
+		_ = downstream.Close()
+		return
+	}
+	binding := active.binding
+	conn := &egressConnection{downstream: downstream}
+	binding.conns[conn] = struct{}{}
+	active.bindingMu.Unlock()
+
 	go func() {
 		defer active.wg.Done()
-		defer downstream.Close()
+		defer func() {
+			active.bindingMu.Lock()
+			defer active.bindingMu.Unlock()
+			delete(binding.conns, conn)
+			conn.close()
+		}()
 
 		destination, err := e.originalDestination(downstream)
 		if err != nil {
 			slog.WarnContext(active.ctx, "atunnel failed to resolve original egress destination", slog.Any("err", err))
 			return
 		}
-		upstream, err := active.dialer.DialContext(active.ctx, destination)
+		upstream, err := active.dialer.DialContext(binding.ctx, destination, binding.key)
 		if err != nil {
 			slog.WarnContext(active.ctx, "atunnel failed to open egress tunnel", slog.String("destination", destination), slog.Any("err", err))
 			return
 		}
-		defer upstream.Close()
-
-		stop := context.AfterFunc(active.ctx, func() {
-			_ = downstream.Close()
+		active.bindingMu.Lock()
+		if binding.ctx.Err() != nil {
+			active.bindingMu.Unlock()
 			_ = upstream.Close()
-		})
-		defer stop()
+			return
+		}
+		conn.upstream = upstream
+		active.bindingMu.Unlock()
 
 		copyBothWays(downstream, upstream)
 	}()

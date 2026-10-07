@@ -57,7 +57,7 @@ func TestClientDialContext(t *testing.T) {
 	})
 	client := newTestClient(t, ca, WithDialer(dialFixedAddress(gatewayAddress)))
 
-	conn, err := client.DialContext(context.Background(), "192.0.2.10:443")
+	conn, err := client.DialContext(context.Background(), "192.0.2.10:443", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestClientDialContextRejected(t *testing.T) {
 	})
 	client := newTestClient(t, ca, WithDialer(dialFixedAddress(gatewayAddress)))
 
-	_, err := client.DialContext(context.Background(), "192.0.2.10:443")
+	_, err := client.DialContext(context.Background(), "192.0.2.10:443", "")
 	if err == nil || !strings.Contains(err.Error(), "denied by policy") {
 		t.Fatalf("DialContext error = %v, want policy rejection", err)
 	}
@@ -132,7 +132,7 @@ func TestClientDialContextGatewayRefusesClientCertificate(t *testing.T) {
 			gatewayAddress := serveTestRefusingGateway(t, ca, newTestCA(t), tt.maxTLSVersion)
 			client := newTestClient(t, ca, WithDialer(dialFixedAddress(gatewayAddress)))
 
-			_, err := client.DialContext(context.Background(), "192.0.2.10:443")
+			_, err := client.DialContext(context.Background(), "192.0.2.10:443", "")
 			if err == nil {
 				t.Fatal("DialContext succeeded against a gateway that refuses the client certificate")
 			}
@@ -161,7 +161,7 @@ func TestClientDialContextGatewayHangsUpBeforeResponding(t *testing.T) {
 	})
 	client := newTestClient(t, ca, WithDialer(dialFixedAddress(gatewayAddress)))
 
-	_, err := client.DialContext(context.Background(), "192.0.2.10:443")
+	_, err := client.DialContext(context.Background(), "192.0.2.10:443", "")
 	if err == nil {
 		t.Fatal("DialContext succeeded against a gateway that hung up")
 	}
@@ -241,7 +241,7 @@ func TestClientDialContextValidatesInput(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := client.DialContext(context.Background(), tt.destination); err == nil {
+			if _, err := client.DialContext(context.Background(), tt.destination, ""); err == nil {
 				t.Fatal("DialContext unexpectedly succeeded")
 			}
 		})
@@ -391,4 +391,38 @@ func issueDNSCertificate(t *testing.T, ca *testCA, dnsName string) tls.Certifica
 		t.Fatal(err)
 	}
 	return cert
+}
+
+func TestClientCloseDoesNotWaitForGateway(t *testing.T) {
+	ca := newTestCA(t)
+	raw, peer := net.Pipe()
+	defer peer.Close()
+	server := tls.Server(peer, &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{issueDNSCertificate(t, ca, "egress.test")},
+	})
+	release := make(chan struct{})
+	defer close(release)
+	go func() {
+		if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+			return
+		}
+		_, _ = io.WriteString(server, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		<-release // Never read the client's TLS close notification.
+	}()
+	client := newTestClient(t, ca, WithDialer(func(context.Context, string, string) (net.Conn, error) { return raw, nil }))
+	conn, err := client.DialContext(t.Context(), "192.0.2.10:443", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- conn.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tunnel close waited for the gateway")
+	}
 }
