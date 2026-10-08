@@ -42,3 +42,17 @@ of the application release before the new release can own them. Installing this
 chart over resources still owned by the application release fails Helm ownership
 validation. Perform the release split during a planned installation update;
 do not delete the existing CA-pool Secrets.
+
+Set `resources.requests` and `resources.limits` on this release to size the
+controller container. Defaults are `10m` CPU and `64Mi` memory requests, with
+`500m` CPU and `256Mi` memory limits. For example:
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+```

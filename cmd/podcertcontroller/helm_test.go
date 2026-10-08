@@ -107,3 +107,41 @@ func TestApplicationChartDoesNotInstallCertificateController(t *testing.T) {
 		}
 	}
 }
+
+func TestHelmControllerResources(t *testing.T) {
+	for _, tc := range []struct {
+		name, requestCPU, requestMemory, limitCPU, limitMemory string
+		override                                               bool
+	}{
+		{"defaults", "10m", "64Mi", "500m", "256Mi", false},
+		{"overrides", "100m", "128Mi", "1", "512Mi", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"template", "substrate-podcert", "../../charts/substrate-podcert"}
+			if tc.override {
+				args = append(args, "--set", "resources.requests.cpu="+tc.requestCPU, "--set", "resources.requests.memory="+tc.requestMemory,
+					"--set", "resources.limits.cpu="+tc.limitCPU, "--set", "resources.limits.memory="+tc.limitMemory)
+			}
+			out, err := exec.CommandContext(t.Context(), "helm", args...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("render: %v\n%s", err, out)
+			}
+			for _, doc := range strings.Split(string(out), "\n---\n") {
+				var deployment appsv1.Deployment
+				if err := yaml.Unmarshal([]byte(doc), &deployment); err != nil {
+					t.Fatal(err)
+				}
+				if deployment.Kind != "Deployment" {
+					continue
+				}
+				resources := deployment.Spec.Template.Spec.Containers[0].Resources
+				if resources.Requests.Cpu().String() != tc.requestCPU || resources.Requests.Memory().String() != tc.requestMemory ||
+					resources.Limits.Cpu().String() != tc.limitCPU || resources.Limits.Memory().String() != tc.limitMemory {
+					t.Errorf("unexpected controller resources: %+v", resources)
+				}
+				return
+			}
+			t.Fatal("missing controller deployment")
+		})
+	}
+}

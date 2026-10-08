@@ -152,6 +152,13 @@ spec:
       containers:
       - name: controller
         image: ko://github.com/agent-substrate/substrate/cmd/podcertcontroller
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
         args:
         - --in-cluster=true
         - --sharding-pod-namespace=$(POD_NAMESPACE)

@@ -16,6 +16,15 @@
 createNamespace: false
 workersPerSigner: 1
 
+# Requests and limits for the certificate controller container.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
 # Namespace containing the Substrate API server.
 postgresClientNamespace: ate-system
 # Service account used by the Substrate API server.
