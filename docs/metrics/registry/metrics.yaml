@@ -573,7 +573,7 @@ groups:
             - id: final
               stability: development
               value: final
-              brief: The last sample of an activation, taken in the checkpoint before the workload is torn down.
+              brief: The last sample of an activation, written when a checkpoint or a terminate tears it down. It is read just before the teardown; when that read fails or times out, it repeats the newest sample.
       - id: ate.stats.memory.usage
         stability: development
         type: int
@@ -808,11 +808,13 @@ groups:
     stability: development
     brief: The time of one attempt of the scheduler to assign a worker during a resume.
     note: >
-      If a version conflict causes a second attempt, ateapi records only the
-      last attempt. The buckets are smaller than the buckets of the lifecycle
-      histogram. This step is a read of the cache and some writes to the store.
-      It is not a restore of some seconds. But the buckets go to 5 s. Thus you
-      can see a large delay in the store.
+      One resume gives one record. ateapi retries an attempt that loses a race
+      for a worker, and records only the last attempt. If the retries run out,
+      the outcome is error, and error.type is the code that the caller gets.
+      The buckets are smaller than the buckets of the lifecycle histogram.
+      This step is a read of the cache and some writes to the store. It is not
+      a restore of some seconds. But the buckets go to 5 s. Thus you can see a
+      large delay in the store.
     annotations:
       substrate:
         emitted_by: [ateapi]

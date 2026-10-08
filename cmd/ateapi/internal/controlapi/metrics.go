@@ -233,7 +233,8 @@ func lifecycleOpAttrs(actor *ateapipb.Actor, template *ateapipb.ActorTemplate, s
 // set on every outcome it is known for, so no_capacity names the capacity
 // that ran out and stays comparable with assigned.
 // The pool keys are set together or not at all; see ateattr.WorkerPoolAttributes.
-func (i *Instruments) recordSchedulerAssignment(ctx context.Context, start time.Time, outcome, poolNamespace, pool, class string, err error) {
+// elapsed is the time that the attempt took.
+func (i *Instruments) recordSchedulerAssignment(ctx context.Context, elapsed time.Duration, outcome, poolNamespace, pool, class string, err error) {
 	if i == nil || i.schedulerAssignmentDuration == nil {
 		return
 	}
@@ -246,5 +247,5 @@ func (i *Instruments) recordSchedulerAssignment(ctx context.Context, start time.
 	if outcome == ateattr.SchedulerOutcomeError && err != nil {
 		attrs = append(attrs, ateattr.ErrorTypeKey.String(apierror.Code(err).String()))
 	}
-	i.schedulerAssignmentDuration.Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attrs...))
+	i.schedulerAssignmentDuration.Record(ctx, elapsed.Seconds(), metric.WithAttributes(attrs...))
 }

@@ -124,6 +124,10 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 		return nil, apierror.InvalidArgument("unsupported snapshot scope: %v", scope)
 	}
 
+	// Captured now: the checkpoint unhosts the actor, and the final record
+	// waits for the teardown.
+	hosted := s.lookupActor(actorUID)
+
 	// The actor's CH was booted by RunWorkload or relaunched by RestoreWorkload;
 	// either way ateom owns it and tracks its api-socket.
 	ra := s.runningVM(actorUID)
@@ -134,6 +138,10 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 	client := ch.NewClient(chSocket)
 	if _, err := client.WaitReady(ctx, 10*time.Second); err != nil {
 		return nil, fmt.Errorf("while waiting for CH api-socket: %w", err)
+	}
+	// Read before the pause: a paused guest cannot answer.
+	if hosted != nil {
+		s.readFinal(ctx, hosted)
 	}
 
 	tPause := time.Now()
@@ -230,6 +238,7 @@ func (s *AteomService) CheckpointWorkload(ctx context.Context, req *ateompb.Chec
 		// rootfs_upper), and the tar durations scale with the actor's data.
 		slog.Duration("durable_dir", dDurable), slog.Duration("rootfs_upper", dUpper),
 		slog.Duration("teardown", dTeardown))
+	s.recordFinalIfEnded(ctx, hosted)
 	return &ateompb.CheckpointWorkloadResponse{SnapshotFiles: snapshotFiles, DataSnapshotFiles: durableFiles}, nil
 }
 
@@ -396,13 +405,40 @@ func (s *AteomService) TerminateWorkload(ctx context.Context, req *ateompb.Termi
 
 	attribution := ateomstats.ActorAttributionFromRequest(req)
 
-	if err := s.terminateWorkload(ctx, attribution, req.GetActorDirs()); err != nil {
+	hosted := s.lookupActor(attribution.UID)
+	if hosted != nil {
+		s.readFinal(ctx, hosted)
+	}
+	err := s.terminateWorkload(ctx, attribution, req.GetActorDirs())
+	s.recordFinalIfEnded(ctx, hosted)
+	if err != nil {
 		return nil, fmt.Errorf("failed to terminate workload: %w", err)
 	}
 
 	s.actorLogger.EmitLifecycleLog(ctx, "Actor terminated", attribution)
 
 	return &ateompb.TerminateWorkloadResponse{}, nil
+}
+
+// endPreviousActivation ends the activation a re-host is about to replace. A VM
+// still running for the actor would be dropped from tracking by the re-host and
+// left running, so it is stopped, read first for the final record. This happens
+// after a checkpoint that failed before its teardown, or on a retried Run or
+// Restore. Ending the activation also stops a late recordInitial from writing.
+func (s *AteomService) endPreviousActivation(ctx context.Context, actorUID string, actorDirs *ateompb.ActorDirs) error {
+	old := s.lookupActor(actorUID)
+	if s.runningVM(actorUID) != nil {
+		if old != nil {
+			s.readFinal(ctx, old)
+		}
+		if err := s.stopActorVM(ctx, actorUID, actorDirs); err != nil {
+			return fmt.Errorf("while stopping the actor's previous micro-VM: %w", err)
+		}
+	}
+	if old != nil {
+		s.recordFinal(ctx, old)
+	}
+	return nil
 }
 
 // stopActorVM tears down the actor's micro-VM, if any, keeping it hosted.

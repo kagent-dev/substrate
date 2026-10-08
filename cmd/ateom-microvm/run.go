@@ -269,15 +269,11 @@ func (s *AteomService) RunWorkload(ctx context.Context, req *ateompb.RunWorkload
 	attribution := p.actorAttribution()
 	s.actorLogger.EmitLifecycleLog(ctx, "Actor starting", attribution)
 
-	// A VM still running for this actor would be dropped from tracking by the
-	// re-host below and left running, so stop it first.
-	if s.runningVM(attribution.UID) != nil {
-		if err := s.stopActorVM(ctx, attribution.UID, req.GetActorDirs()); err != nil {
-			return nil, fmt.Errorf("while stopping the actor's previous micro-VM: %w", err)
-		}
+	if err := s.endPreviousActivation(ctx, attribution.UID, req.GetActorDirs()); err != nil {
+		return nil, err
 	}
 	// Publish attribution before boot so stats can include startup usage.
-	if _, err := s.hostActor(ctx, attribution); err != nil {
+	if _, err := s.hostActor(ctx, attribution, false); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -364,7 +360,7 @@ func (s *AteomService) coldBootActorRetrying(ctx context.Context, p actorBootPar
 			slog.String("id", p.actorUID), slog.Int("attempt", attempt), slog.Any("err", err))
 		// The failed attempt deactivated egress, which retires the listener
 		// bound to it, so the network is rebuilt. The actor keeps its slot.
-		if _, err := s.hostActor(ctx, p.attribution()); err != nil {
+		if _, err := s.hostActor(ctx, p.attribution(), false); err != nil {
 			return err
 		}
 	}
@@ -615,6 +611,11 @@ func (s *AteomService) coldBootActor(ctx context.Context, p actorBootParams) (re
 	// the handler polling a connection nobody owns. Same client the forwarding
 	// above reads over — ttrpc multiplexes, and teardownActor ends both.
 	s.setGuestStats(actorUID, &guestStatsTarget{actorUID: actorUID, agent: ac, workloadIDs: workloadIDs})
+	// Looked up while the caller holds the actor's lock, so it is this
+	// activation even if the read below outlives the RPC.
+	if hosted := s.lookupActor(actorUID); hosted != nil {
+		go s.recordInitial(context.WithoutCancel(ctx), hosted)
+	}
 
 	return nil
 }

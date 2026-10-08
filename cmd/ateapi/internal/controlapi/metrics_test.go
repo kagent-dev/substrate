@@ -381,7 +381,7 @@ func TestSchedulerAssignmentShapeAndOutcomes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inst, reader := newTestInstruments(t)
-			inst.recordSchedulerAssignment(context.Background(), time.Now(), tt.outcome, tt.poolNamespace, tt.pool, tt.class, tt.err)
+			inst.recordSchedulerAssignment(context.Background(), 0, tt.outcome, tt.poolNamespace, tt.pool, tt.class, tt.err)
 
 			dp := singleHistogramDP(t, reader, schedulerAssignmentMetric)
 			assertAttrKeys(t, dp, tt.wantKeys...)
