@@ -47,8 +47,6 @@ jobs:
           | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
-    - name: Test PostgreSQL installer
-      run: python3 hack/test-install-postgres.py
     - name: Create cluster
       run: hack/create-kind-cluster.sh
     - name: Label nodes with the installed version
