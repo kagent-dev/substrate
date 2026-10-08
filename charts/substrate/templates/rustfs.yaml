@@ -67,6 +67,7 @@ spec:
     metadata:
       labels:
         app: rustfs
+        {{- with include "substrate.podLabels" $ }}{{- . | nindent 8 }}{{- end }}
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "rustfs" .) }}
       securityContext:
