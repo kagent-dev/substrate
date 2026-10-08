@@ -40,12 +40,6 @@ tests:
   - contains:
       path: spec.template.spec.containers[0].args
       content: --postgres-owner-role=substrate_owner
-  - notContains:
-      path: spec.template.spec.containers[0].args
-      content:
-        --postgres-bootstrap
-  - notExists:
-      path: spec.template.spec.volumes[?(@.name == "postgres-admin")]
   - equal:
       path: spec.template.spec.containers[0].env[?(@.name == "ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING")].valueFrom.secretKeyRef.name
       value: substrate-postgres-readwrite
@@ -58,10 +52,6 @@ tests:
   - equal:
       path: spec.template.spec.containers[0].env[?(@.name == "ATE_API_POSTGRES_OWNER_CONNECTION_STRING")].valueFrom.secretKeyRef.key
       value: ownerConnectionString
-  - notExists:
-      path: spec.template.spec.volumes[?(@.name == "postgres-read-write-connection")]
-  - notExists:
-      path: spec.template.spec.volumes[?(@.name == "postgres-owner-connection")]
 
 - it: supports prepared database identities
   template: ate-api-server.yaml

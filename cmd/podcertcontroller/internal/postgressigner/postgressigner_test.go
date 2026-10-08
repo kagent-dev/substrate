@@ -39,8 +39,8 @@ import (
 
 func TestMakeCert(t *testing.T) {
 	for _, tc := range []struct {
-		serviceAccount                    string
 		name                              string
+		serviceAccount                    string
 		namespace                         string
 		mutate                            func(*certsv1beta1.PodCertificateRequest)
 		wantDenied, wantError, failUpdate bool
@@ -63,6 +63,14 @@ func TestMakeCert(t *testing.T) {
 			p.Namespace = "application"
 			p.Spec.ServiceAccountName = "controller"
 			p.Spec.UnverifiedUserAnnotations[UsernameAnnotation] = "application_user"
+		}},
+		{name: "additional usernames for the default client", lifetime: 24 * time.Hour, wantUsername: "extra_user", additionalClients: []Client{{Namespace: "ate-system", ServiceAccount: "ate-api-server", Usernames: []string{"extra_user"}}}, mutate: func(p *certsv1beta1.PodCertificateRequest) {
+			p.Spec.UnverifiedUserAnnotations[UsernameAnnotation] = "extra_user"
+		}},
+		{name: "repeated additional clients", lifetime: 24 * time.Hour, wantUsername: "second_user", additionalClients: []Client{{Namespace: "application", ServiceAccount: "controller", Usernames: []string{"first_user"}}, {Namespace: "application", ServiceAccount: "controller", Usernames: []string{"second_user"}}}, mutate: func(p *certsv1beta1.PodCertificateRequest) {
+			p.Namespace = "application"
+			p.Spec.ServiceAccountName = "controller"
+			p.Spec.UnverifiedUserAnnotations[UsernameAnnotation] = "second_user"
 		}},
 		{name: "default namespace denied after relocation", namespace: "team-a-substrate", wantDenied: true},
 		{name: "wrong service account after relocation", namespace: "team-a-substrate", wantDenied: true, mutate: func(p *certsv1beta1.PodCertificateRequest) {

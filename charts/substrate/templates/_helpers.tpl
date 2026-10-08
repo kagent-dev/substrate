@@ -195,7 +195,7 @@ it contains "." or ":" (the containerd rule); otherwise the reference is
 docker.io-implied and the mirror is prefixed. The repository path is preserved
 either way, so a mirror copies images under their existing paths.
 
-Usage: {{ include "substrate.thirdPartyImage" (list .Values.images.postgres .) }}
+Usage: {{ include "substrate.thirdPartyImage" (list .Values.images.rustfs .) }}
 */}}
 {{- define "substrate.thirdPartyImage" -}}
 {{- $ref := index . 0 -}}

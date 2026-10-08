@@ -141,8 +141,7 @@ func (h *Impl) MakeCert(ctx context.Context, pcr *certsv1beta1.PodCertificateReq
 	var allowedUsernames []string
 	for _, client := range h.clients {
 		if pcr.Namespace == client.Namespace && pcr.Spec.ServiceAccountName == client.ServiceAccount {
-			allowedUsernames = client.Usernames
-			break
+			allowedUsernames = append(allowedUsernames, client.Usernames...)
 		}
 	}
 	if allowedUsernames == nil {
