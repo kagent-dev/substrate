@@ -57,6 +57,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by read/write connections |
 | `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections |
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
+| `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.imageCredentialProviderConfig` | `""` | Host path to the kubelet credential provider config; set together with the bin directory |
@@ -83,6 +84,14 @@ controller and its CA pools. It deploys certificate-protected PostgreSQL,
 runs the shared bootstrap SQL, and creates both connection Secrets. Use `--kind`
 for the smaller Kind deployment; set `KUBECTL_CONTEXT` to select a cluster.
 Standalone manifest installations can continue to use `ate-setup`.
+
+When using `hack/install-postgres.sh`, install the application chart with
+`--set postgres.clientCertificates.enabled=true`. Its connection Secrets use
+the projected owner and runtime certificates. For external databases using
+password or provider-managed authentication, leave this setting disabled.
+Service-DNS and pod-identity certificates remain enabled for Substrate's
+internal connections. Standalone manifest generation enables the PostgreSQL
+certificates for the bundled development database.
 
 For an operator-managed database, the operator must provision the identities,
 schema, and grants, and create both connection Secrets in the release namespace.

@@ -59,6 +59,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 helm template substrate "${CHART_DIR}" \
   --namespace ate-system \
   --set auth.mode=mtls \
+  --set postgres.clientCertificates.enabled=true \
   --set createNamespace=true \
   --set image.registry=ko://github.com \
   --set image.repository=agent-substrate/substrate/cmd \

@@ -24,6 +24,9 @@
 createNamespace: false
 
 postgres:
+  # Project database login certificates only when the connection strings use them.
+  clientCertificates:
+    enabled: false
   # Read the read/write connection string from a pre-created Secret.
   readWriteConnectionStringSecretRef:
     name: substrate-postgres-readwrite

@@ -96,6 +96,7 @@ jobs:
           --namespace ate-system \
           --create-namespace \
           -f internal/e2e/suites/credentials/values.yaml \
+          --set postgres.clientCertificates.enabled=true \
           --set image.registry=localhost:5001 \
           --set image.tag=helm-e2e \
           --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \

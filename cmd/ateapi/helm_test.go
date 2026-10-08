@@ -63,15 +63,19 @@ func TestHelmAPIServerFlags(t *testing.T) {
 
 func TestHelmPostgresCertificates(t *testing.T) {
 	for _, tc := range []struct {
-		release, namespace string
-		external           bool
+		release, namespace     string
+		external, certificates bool
 	}{
 		{release: "substrate", namespace: "ate-system"},
-		{release: "team", namespace: "custom"},
+		{release: "substrate", namespace: "ate-system", certificates: true},
+		{release: "team", namespace: "custom", certificates: true},
 		{release: "team", namespace: "custom", external: true},
 	} {
-		t.Run(fmt.Sprintf("%s/%s/external=%t", tc.release, tc.namespace, tc.external), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/%s/external=%t/certificates=%t", tc.release, tc.namespace, tc.external, tc.certificates), func(t *testing.T) {
 			args := []string{"template", tc.release, "../../charts/substrate", "-n", tc.namespace}
+			if tc.certificates {
+				args = append(args, "--set", "postgres.clientCertificates.enabled=true")
+			}
 			if tc.external {
 				args = append(args, "--set", "postgres.readWriteConnectionStringSecretRef.name=external-runtime", "--set", "postgres.ownerConnectionStringSecretRef.name=external-owner")
 			}
@@ -153,14 +157,6 @@ func TestHelmPostgresCertificates(t *testing.T) {
 					}
 				}
 			}
-			if len(bundles) != 2 {
-				t.Fatalf("got %d PostgreSQL certificate projections, want two", len(bundles))
-			}
-			for _, user := range []string{postgressetup.OwnerUser, postgressetup.ReadWriteUser} {
-				if bundles[user+".pem"] != user {
-					t.Errorf("missing separate certificate for %s", user)
-				}
-			}
 			var mounted bool
 			for _, container := range api.Containers {
 				if container.Name == "ate-api-server" {
@@ -169,6 +165,26 @@ func TestHelmPostgresCertificates(t *testing.T) {
 					}
 				}
 			}
+			if !tc.certificates {
+				if len(bundles) != 0 || mounted {
+					t.Fatal("disabled PostgreSQL certificates must have no projections or mount")
+				}
+				for _, volume := range api.Volumes {
+					if volume.Name == "postgres" {
+						t.Error("disabled PostgreSQL certificates must have no postgres volume")
+					}
+				}
+				return
+			}
+			if len(bundles) != 2 {
+				t.Fatalf("got %d PostgreSQL certificate projections, want two", len(bundles))
+			}
+			for _, user := range []string{postgressetup.OwnerUser, postgressetup.ReadWriteUser} {
+				if bundles[user+".pem"] != user {
+					t.Errorf("missing separate certificate for %s", user)
+				}
+			}
+
 			if !mounted {
 				t.Error("API server cannot read its projected PostgreSQL certificates")
 			}
