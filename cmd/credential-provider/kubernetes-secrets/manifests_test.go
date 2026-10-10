@@ -330,7 +330,7 @@ func TestHelmAgentgatewayCredentialConfiguration(t *testing.T) {
 									if listener.TLS.Mode != "dynamicCa" || listener.TLS.Cert != "/run/egress-mitm/tls.crt" || listener.TLS.Key != "/run/egress-mitm/tls.key" {
 										t.Fatal("incorrect MITM configuration")
 									}
-									if len(route.Backends) != 1 || route.Backends[0].Dynamic == nil || len(route.Backends[0].Dynamic) != 0 || route.Backends[0].Policies.BackendTLS == nil || len(route.Backends[0].Policies.BackendTLS) != 0 {
+									if len(route.Backends) != 1 || route.Backends[0].Dynamic == nil || len(route.Backends[0].Dynamic) != 0 || route.Backends[0].Policies.BackendTLS["root"] != "/etc/ssl/certs/ca-certificates.crt" {
 										t.Fatal("HTTPS must use a dynamic destination with default public TLS trust")
 									}
 								} else if listener.Protocol != "HTTP" {

@@ -233,3 +233,24 @@ definition so the fallback cannot drift between pods.
 {{- define "substrate.imagePullPolicy" -}}
 {{- ((.Values.global).imagePullPolicy) | default "IfNotPresent" -}}
 {{- end -}}
+
+{{/* Object storage settings shared by snapshot plugins and atelet asset downloads. */}}
+{{- define "substrate.storage.env" -}}
+- name: ATE_STORAGE_BACKEND
+  value: {{ .Values.atelet.storageBackend | quote }}
+{{- if .Values.rustfs.enabled }}
+- name: AWS_REGION
+  value: us-east-1
+- name: AWS_ENDPOINT_URL
+  value: http://{{ include "substrate.fullname" (list "rustfs" .) }}.{{ .Release.Namespace }}.svc:9000
+- name: AWS_S3_USE_PATH_STYLE
+  value: "true"
+- name: AWS_ACCESS_KEY_ID
+  value: {{ .Values.rustfs.accessKey | quote }}
+- name: AWS_SECRET_ACCESS_KEY
+  value: {{ .Values.rustfs.secretKey | quote }}
+{{- end }}
+{{- with .Values.snapshotPlugin.extraEnv }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}

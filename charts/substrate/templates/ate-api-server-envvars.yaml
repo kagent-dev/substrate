@@ -27,3 +27,4 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   ATE_API_POSTGRES_SCHEMA: {{ .Values.postgres.schema | quote }}
+  ATE_API_ACTOR_JWT_ISSUER: {{ .Values.ateApi.actorJWTIssuer | default (printf "https://idp.%s.svc" .Release.Namespace) | quote }}

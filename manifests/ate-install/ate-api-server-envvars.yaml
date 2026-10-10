@@ -13,7 +13,7 @@
 #  limitations under the License.
 
 # DO NOT EDIT — generated from charts/substrate by hack/render-manifests.sh.
-# Run `make helm-template` to regenerate.
+# Run `hack/render-manifests.sh` to regenerate.
 
 apiVersion: v1
 kind: ConfigMap
@@ -22,3 +22,4 @@ metadata:
   namespace: ate-system
 data:
   ATE_API_POSTGRES_SCHEMA: "substrate"
+  ATE_API_ACTOR_JWT_ISSUER: "https://idp.ate-system.svc"

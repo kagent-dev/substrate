@@ -52,6 +52,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
+	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/spf13/pflag"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/sys/unix"
@@ -171,8 +172,8 @@ func do(ctx context.Context) error {
 
 	// Create ateom dir.
 	ateomDir := nodepath.AteomPath(*podUID)
-	if err := resources.ValidateAteomUID(*podUID); err != nil {
-		return fmt.Errorf("in resources.ValidateAteomUID: %w", err)
+	if err := resources.ValidateWorkerPodUID(*podUID); err != nil {
+		return fmt.Errorf("in resources.ValidateWorkerPodUID: %w", err)
 	}
 	if err := os.MkdirAll(ateomDir, 0o700); err != nil {
 		return fmt.Errorf("in os.MkdirAll(%q): %w", ateomDir, err)
@@ -282,6 +283,7 @@ func do(ctx context.Context) error {
 			TrustBundlePath:      tunnelConfig.TrustBundle,
 			AteletSPIFFEID:       tunnelConfig.BrokerIdentity,
 			Actors:               *maxActors,
+			SandboxClass:         string(atev1alpha1.SandboxClassMicroVM),
 		})
 		if err != nil && ctx.Err() == nil {
 			serverboot.Fatal(ctx, "Failed to report worker capacity", err)
@@ -412,6 +414,15 @@ func (s *AteomService) beginRPC(actorUID, name string, cancel context.CancelFunc
 // validateActorDirs rejects a request whose actor directories are unusable.
 func validateActorDirs(actorDirs *ateompb.ActorDirs) error {
 	if errs := resources.ValidateActorDirs(actorDirs, field.NewPath("actor_dirs")); len(errs) > 0 {
+		return apierror.InvalidArgument("%v", errs.ToAggregate())
+	}
+	return nil
+}
+
+// validateFidelity rejects a checkpoint or restore request whose fidelity
+// this runtime cannot serve.
+func validateFidelity(fidelity ateompb.SnapshotFidelity) error {
+	if errs := resources.ValidateSnapshotFidelity(fidelity, field.NewPath("fidelity")); len(errs) > 0 {
 		return apierror.InvalidArgument("%v", errs.ToAggregate())
 	}
 	return nil

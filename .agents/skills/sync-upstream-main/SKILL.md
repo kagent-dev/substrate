@@ -37,8 +37,8 @@ does not authorize merging it.
 
 ## Validate and investigate failures
 
-Run `make verify` (which includes the race-enabled unit tests),
-`make verify-helm-template`, and `make verify-crd-chart`. Use Go's default cache.
+Run `go test -race ./...`, `hack/verify-all.sh`,
+`hack/render-manifests.sh --check`, and `hack/verify/crd-chart.sh`. Use Go's default cache.
 Record failures and distinguish regressions from missing prerequisites and
 existing failures using evidence from the base revision when needed.
 

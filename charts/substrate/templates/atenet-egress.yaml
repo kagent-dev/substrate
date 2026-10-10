@@ -29,6 +29,8 @@ data:
   config.yaml: |
     # yaml-language-server: $schema=https://agentgateway.dev/schema/config
     frontendPolicies:
+      connect:
+        mode: tunnel
       accessLog:
         add:
           substrate.connect.authority: source.connectHeaders["host"]
@@ -43,16 +45,19 @@ data:
             key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
             root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
 
-    binds:
-    - port: 8443
-      tunnelProtocol: connect
-      listeners:
-      - protocol: HTTPS
+    # Bind the CONNECT front door to the pod IP so tunnel re-entry selects
+    # the wildcard internal listener instead of this gateway again.
+    gateways:
+      egress:
+        port: 8443
+        bindAddress: $POD_IP
+        protocol: HTTPS
         tls:
           cert: /run/servicedns.podcert.ate.dev/credential-bundle.pem
           key: /run/servicedns.podcert.ate.dev/credential-bundle.pem
           root: /run/actor-id-ca-certs/ca.crt
-        routes: []
+
+    binds:
     - mode: internal
       protocol: AUTO
       listeners:
@@ -62,10 +67,24 @@ data:
           cert: /run/egress-mitm/tls.crt
           key: /run/egress-mitm/tls.key
         routes:
+        - name: reject-websocket-upgrade
+          matches:
+          - headers:
+            - name: Connection
+              value:
+                regex: '(?i)(^|,)\s*upgrade\s*(,|$)'
+            - name: Upgrade
+              value:
+                regex: '(?i)(^|,)\s*websocket\s*(,|$)'
+          policies:
+            directResponse:
+              status: 403
+              body: WebSocket egress is not supported
         - backends:
           - dynamic: {}
             policies:
-              backendTLS: {}
+              backendTLS:
+                root: /etc/ssl/certs/ca-certificates.crt
           policies:
             substrateEgress:
               host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
@@ -85,6 +104,19 @@ data:
                       root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
       - protocol: HTTP
         routes:
+        - name: reject-websocket-upgrade
+          matches:
+          - headers:
+            - name: Connection
+              value:
+                regex: '(?i)(^|,)\s*upgrade\s*(,|$)'
+            - name: Upgrade
+              value:
+                regex: '(?i)(^|,)\s*websocket\s*(,|$)'
+          policies:
+            directResponse:
+              status: 403
+              body: WebSocket egress is not supported
         - backends:
           - dynamic:
               target: source.connectHeaders["host"]
@@ -143,6 +175,10 @@ spec:
         - -f
         - /etc/agentgateway/config.yaml
         env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         - name: RUST_LOG
           value: debug
         ports:

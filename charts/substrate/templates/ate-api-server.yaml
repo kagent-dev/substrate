@@ -81,12 +81,41 @@ spec:
       serviceAccountName: {{ include "substrate.fullname" (list "ate-api-server" .) }}
       terminationGracePeriodSeconds: 40
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
+      initContainers:
+      - name: snapshot-plugin
+        image: {{ include "substrate.componentImage" (list "snapshot-plugin" .) }}
+        restartPolicy: Always
+        args:
+        - control
+        - --socket=/run/snapshot-plugin/control.sock
+        startupProbe:
+          exec:
+            command:
+            - /ko-app/snapshot-plugin
+            - healthcheck
+            - --socket=/run/snapshot-plugin/control.sock
+          periodSeconds: 2
+          failureThreshold: 30
+        securityContext:
+          capabilities:
+            drop: [ALL]
+        resources:
+{{ toYaml .Values.snapshotPlugin.control.resources | indent 10 }}
+        env:
+{{- include "substrate.storage.env" . | nindent 8 }}
+{{- with include "substrate.otel.env" . }}
+{{- . | trim | nindent 8 }}
+{{- end }}
+        volumeMounts:
+        - name: snapshot-plugin
+          mountPath: /run/snapshot-plugin
       containers:
       - name: ate-api-server
         image: {{ include "substrate.componentImage" (list "ateapi" .) }}
         resources:
 {{ toYaml .Values.ateApi.resources | indent 10 }}
         args:
+        - --snapshot-plugin-socket=/run/snapshot-plugin/control.sock
         - "--grpc-listen-addr=0.0.0.0:443"
         - "--grpc-server-cred-bundle=/run/servicedns.podcert.ate.dev/credential-bundle.pem"
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
@@ -95,6 +124,7 @@ spec:
         - {{ printf "--postgres-read-write-role=%s" .Values.postgres.readWriteRole | quote }}
         - {{ printf "--postgres-owner-role=%s" .Values.postgres.ownerRole | quote }}
         - "--postgres-schema=@env"
+        - "--actor-jwt-issuer=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
         - "--actor-id-ca-pool=/run/actor-id-ca-pool/pool.json"
         - "--default-egress-gateway-address={{ include "substrate.fullname" (list "atenet-egress" .) }}.{{ .Release.Namespace }}.svc:443"
@@ -134,25 +164,13 @@ spec:
 {{- with include "substrate.otel.env" . }}
 {{- . | trim | nindent 8 }}
 {{- end }}
-        - name: ATE_STORAGE_BACKEND
-          value: {{ .Values.atelet.storageBackend | quote }}
-{{- if .Values.rustfs.enabled }}
-        - name: AWS_REGION
-          value: us-east-1
-        - name: AWS_ENDPOINT_URL
-          value: http://{{ include "substrate.fullname" (list "rustfs" .) }}.{{ .Release.Namespace }}.svc:9000
-        - name: AWS_S3_USE_PATH_STYLE
-          value: "true"
-        - name: AWS_ACCESS_KEY_ID
-          value: {{ .Values.rustfs.accessKey | quote }}
-        - name: AWS_SECRET_ACCESS_KEY
-          value: {{ .Values.rustfs.secretKey | quote }}
-{{- end }}
         envFrom:
         - configMapRef:
             name: {{ .Values.ateApiServerEnvVarsConfigMap }}
             optional: true
         volumeMounts:
+        - name: snapshot-plugin
+          mountPath: /run/snapshot-plugin
         - { name: servicedns,          mountPath: /run/servicedns.podcert.ate.dev }
         - { name: actor-id-jwt-pool,   mountPath: /run/actor-id-jwt-pool }
         - { name: actor-id-ca-pool,    mountPath: /run/actor-id-ca-pool, readOnly: true }
@@ -179,6 +197,8 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
       volumes:
+      - name: snapshot-plugin
+        emptyDir: {}
       - name: servicedns
         projected:
           sources:

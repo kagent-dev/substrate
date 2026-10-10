@@ -90,8 +90,21 @@ atelet:
       cpu: "2"
       memory: 1Gi
 
+# Object storage credentials/settings for both snapshot plugins and atelet asset downloads.
+snapshotPlugin:
+  extraEnv: []
+  control:
+    resources: {}
+  node:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
 # Additional arguments appended to the ateapi defaults.
 ateApi:
+  # Defaults to the in-cluster IdP URL; set a stable issuer for external consumers.
+  actorJWTIssuer: ""
   extraArgs: []
   resources:
     requests:

@@ -114,7 +114,7 @@ for src, docs in docs_by_source.items():
         "#  limitations under the License.\n"
         "\n"
         f"# DO NOT EDIT — generated from charts/{chart} by hack/render-manifests.sh.\n"
-        "# Run `make helm-template` to regenerate.\n"
+        "# Run `hack/render-manifests.sh` to regenerate.\n"
         "\n"
     )
     with open(os.path.join(out_dir, src), "w") as out:
@@ -134,7 +134,7 @@ if [ "${CHECK_MODE}" = "true" ]; then
     rm -f "${CHECK_TMP}/current/${file}" "${TMP_DIR}/out/${file}"
   done
   if ! diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" >/dev/null 2>&1; then
-    echo "manifests/ate-install/ is out of date. Run: make helm-template" >&2
+    echo "manifests/ate-install/ is out of date. Run: hack/render-manifests.sh" >&2
     diff -ruN "${CHECK_TMP}/current" "${TMP_DIR}/out" | head -60 >&2 || true
     exit 1
   fi
