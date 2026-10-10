@@ -391,9 +391,10 @@ func TestCAPoolCache_HitAndFileChange(t *testing.T) {
 
 	// Modify the file.
 	writeFile(t, caPath, ca.certPEM())
-	// Advance mtime explicitly; consecutive writes can share a filesystem tick.
-	modified := cache.fi.ModTime().Add(time.Second)
-	if err := os.Chtimes(caPath, modified, modified); err != nil {
+	// The cache intentionally keys on mtime and size; make the file change
+	// observable on filesystems whose timestamp granularity is coarse.
+	modifiedAt := time.Now().Add(time.Second)
+	if err := os.Chtimes(caPath, modifiedAt, modifiedAt); err != nil {
 		t.Fatal(err)
 	}
 

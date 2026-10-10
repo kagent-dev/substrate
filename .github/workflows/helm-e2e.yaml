@@ -63,7 +63,7 @@ jobs:
         # the chart composes {registry}/{repository}/{component}, so the local
         # registry serves each image where the default repository expects it --
         # the same path-preserving rule a production mirror follows.
-        for component in ateapi atecontroller atelet podcertcontroller atenet credential-provider/kubernetes-secrets; do
+        for component in ateapi atecontroller atelet podcertcontroller atenet snapshot-plugin credential-provider/kubernetes-secrets; do
           KO_DOCKER_REPO="localhost:5001/kagent-dev/substrate/${component##*/}" \
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
@@ -139,8 +139,7 @@ jobs:
     - name: Require every lane to have run tests
       if: always()
       run: |
-        make build-junittool
-        bin/junittool verify -manifest "${ARTIFACTS}/expected-junit.txt"
+        go -C tools/junittool run . verify -manifest "${ARTIFACTS}/expected-junit.txt"
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

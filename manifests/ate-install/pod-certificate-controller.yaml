@@ -13,7 +13,7 @@
 #  limitations under the License.
 
 # DO NOT EDIT — generated from charts/substrate-podcert by hack/render-manifests.sh.
-# Run `make helm-template` to regenerate.
+# Run `hack/render-manifests.sh` to regenerate.
 
 apiVersion: v1
 kind: Namespace

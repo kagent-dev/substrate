@@ -135,10 +135,44 @@ spec:
         operator: Exists
         effect: NoSchedule
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
+      initContainers:
+      - name: snapshot-plugin
+        image: {{ include "substrate.componentImage" (list "snapshot-plugin" .) }}
+        restartPolicy: Always
+        args:
+        - node
+        - --socket=/run/snapshot-plugin/node.sock
+        - --root=/var/lib/ate
+        startupProbe:
+          exec:
+            command:
+            - /ko-app/snapshot-plugin
+            - healthcheck
+            - --socket=/run/snapshot-plugin/node.sock
+          periodSeconds: 2
+          failureThreshold: 30
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          capabilities:
+            drop: [ALL]
+        resources:
+{{ toYaml .Values.snapshotPlugin.node.resources | indent 10 }}
+        env:
+{{- include "substrate.storage.env" . | nindent 8 }}
+{{- with include "substrate.otel.env" . }}
+{{- . | trim | nindent 8 }}
+{{- end }}
+        volumeMounts:
+        - name: run-ateom
+          mountPath: /var/lib/ate
+        - name: snapshot-plugin
+          mountPath: /run/snapshot-plugin
       containers:
       - name: atelet
         image: {{ include "substrate.componentImage" (list "atelet" .) }}
         args:
+        - --snapshot-plugin-socket=/run/snapshot-plugin/node.sock
 {{- if $credentialProviderConfig }}
         - --image-credential-provider-config=/run/image-credential-provider/config.yaml
         - --image-credential-provider-bin-dir=/run/image-credential-provider/bin
@@ -181,20 +215,7 @@ spec:
 {{- with include "substrate.otel.env" . }}
 {{- . | trim | nindent 8 }}
 {{- end }}
-        - name: ATE_STORAGE_BACKEND
-          value: {{ .Values.atelet.storageBackend | quote }}
-{{- if .Values.rustfs.enabled }}
-        - name: AWS_REGION
-          value: us-east-1
-        - name: AWS_ENDPOINT_URL
-          value: http://{{ include "substrate.fullname" (list "rustfs" .) }}.{{ .Release.Namespace }}.svc:9000
-        - name: AWS_S3_USE_PATH_STYLE
-          value: "true"
-        - name: AWS_ACCESS_KEY_ID
-          value: {{ .Values.rustfs.accessKey | quote }}
-        - name: AWS_SECRET_ACCESS_KEY
-          value: {{ .Values.rustfs.secretKey | quote }}
-{{- end }}
+{{- include "substrate.storage.env" . | nindent 8 }}
 {{- with .Values.atelet.extraEnv }}
 {{ toYaml . | indent 8 }}
 {{- end }}
@@ -207,6 +228,8 @@ spec:
           hostPort: 9090
           protocol: TCP
         volumeMounts:
+        - name: snapshot-plugin
+          mountPath: /run/snapshot-plugin
         - name: run-ateom
           mountPath: /var/lib/ate
         - name: podidentity
@@ -234,6 +257,8 @@ spec:
           readOnly: true
 {{- end }}
       volumes:
+      - name: snapshot-plugin
+        emptyDir: {}
       - name: run-ateom
         hostPath:
           path: /var/lib/ate
