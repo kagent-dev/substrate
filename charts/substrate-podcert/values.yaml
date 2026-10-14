@@ -38,6 +38,10 @@ global:
   imageRegistry: ""
   imagePullSecrets: []
 
+# Labels added to the controller pod, next to its own `app` label, which they
+# cannot replace.
+podLabels: {}
+
 imagePullSecrets: []
 image:
   registry: ghcr.io

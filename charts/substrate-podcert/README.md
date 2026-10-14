@@ -37,6 +37,9 @@ Configure the controller image through `image.registry`, `image.repository`,
 and `image.tag`. `global.imageRegistry` overrides the registry, and
 `imagePullSecrets` and `global.imagePullSecrets` are merged for the controller pod.
 
+`podLabels` adds labels to the controller pod, next to its `app` label, which
+they cannot replace.
+
 For an existing installation, the controller resources must be transferred out
 of the application release before the new release can own them. Installing this
 chart over resources still owned by the application release fails Helm ownership
