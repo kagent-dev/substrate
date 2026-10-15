@@ -72,7 +72,12 @@ done
 # rustfs must be serving and the bucket must exist before anything is uploaded.
 echo ">> Waiting for rustfs in namespace ${NAMESPACE}..."
 run_kubectl rollout status deploy/rustfs --timeout=300s
-run_kubectl wait --for=condition=Complete job/rustfs-bucket-init --timeout=300s
+# The TTL controller removes the initialization Job after it finishes. Wait
+# for it when it is still present; if it has expired, it already created the
+# bucket successfully.
+if run_kubectl get job/rustfs-bucket-init >/dev/null 2>&1; then
+  run_kubectl wait --for=condition=Complete job/rustfs-bucket-init --timeout=300s
+fi
 
 NODE="$("${ROOT}/hack/kind.sh" get nodes --name "${KIND_CLUSTER_NAME}" | head -n1)"
 if [[ -z "${NODE}" ]]; then

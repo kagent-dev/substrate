@@ -141,6 +141,7 @@ metadata:
   namespace: ate-system
 spec:
   backoffLimit: 10
+  ttlSecondsAfterFinished: 300
   template:
     spec:
       restartPolicy: OnFailure

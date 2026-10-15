@@ -161,3 +161,12 @@ tests:
       value:
       - protocol: TCP
         port: api
+- it: cleans up the bucket initialization job
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  asserts:
+  - equal:
+      path: spec.ttlSecondsAfterFinished
+      value: 300
