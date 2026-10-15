@@ -116,8 +116,12 @@ jobs:
     - name: Deploy egress demo
       run: hack/install-ate-kind.sh --deploy-demo-egress
     - name: Trust local E2E TLS origins
+      id: lanes-ready
       run: hack/setup-e2e-egress-tls-kind.sh
+    # Every lane below runs once the setup above succeeded, whatever an earlier
+    # lane did, so one lane's failure never hides another lane's result.
     - name: Run E2E tests (gVisor)
+      if: ${{ !cancelled() && steps.lanes-ready.outcome == 'success' }}
       # The egress credential suite replaces the shared provider policy.
       # Run it separately after the Helm suite has checked the chart's grants.
       # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
@@ -126,15 +130,18 @@ jobs:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-gvisor.xml
       run: hack/run-e2e-kind.sh -v -skip '^(TestActorIdentity_|TestActorEgressCredentialInjection$)' -args --no-color
     - name: Run E2E tests (micro-VM)
+      if: ${{ !cancelled() && steps.lanes-ready.outcome == 'success' }}
       env:
         E2E_SANDBOX_CLASS: microvm
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-microvm.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color
     - name: Run E2E tests (egress credential injection)
+      if: ${{ !cancelled() && steps.lanes-ready.outcome == 'success' }}
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color
     - name: Run E2E tests (identity and trust rotation)
+      if: ${{ !cancelled() && steps.lanes-ready.outcome == 'success' }}
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-identity.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/identity -v -args --no-color
