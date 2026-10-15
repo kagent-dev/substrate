@@ -139,9 +139,11 @@ kind: Job
 metadata:
   name: rustfs-bucket-init
   namespace: ate-system
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 10
-  ttlSecondsAfterFinished: 300
   template:
     spec:
       restartPolicy: OnFailure
