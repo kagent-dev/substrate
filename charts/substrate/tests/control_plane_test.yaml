@@ -161,3 +161,15 @@ tests:
       value:
       - protocol: TCP
         port: api
+- it: removes the bucket initialization job after it succeeds
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  asserts:
+  - equal:
+      path: metadata.annotations["helm.sh/hook"]
+      value: post-install,post-upgrade
+  - equal:
+      path: metadata.annotations["helm.sh/hook-delete-policy"]
+      value: before-hook-creation,hook-succeeded
