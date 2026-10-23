@@ -175,6 +175,18 @@ credentialProvider:
     limits:
       cpu: 500m
       memory: 256Mi
+  # Further providers the egress gateway resolves ate-secret:// URIs through,
+  # by URI authority (a lowercase DNS name), beside the bundled k8s.io
+  # one. host is <service>.<namespace>.svc:<port>: the gateway verifies the
+  # provider's servicedns.podcert.ate.dev serving certificate, which names its
+  # Service in that form, and the Service must select the provider's pod. The
+  # gateway presents its pod identity certificate
+  # (spiffe://cluster.local/ns/<release namespace>/sa/<release>-atenet-egress);
+  # the provider must require that client certificate, chained to the
+  # podidentity.podcert.ate.dev trust bundle, and refuse any other caller.
+  additionalProviders: []
+  # - uriAuthority: kagent.dev
+  #   host: kagent-credentials.kagent.svc:50051
 
 # Name of a ConfigMap in the release namespace that supplies per-environment
 # overrides for ate-api-server (ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING, ...).
