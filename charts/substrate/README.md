@@ -73,6 +73,7 @@ See `values.yaml` for the full set; the important keys:
 | `ateApi.logLevel` | `info` | API server log level in its mounted config; one of `debug`, `info`, `warn`, or `error` |
 | `ateApi.authorization.bootstrapOwners` | `[]` | Global owners; empty defaults to the release's shared `ate-client` ServiceAccount |
 | `ateApi.extraArgs` | `[]` | Additional command-line arguments appended to the ateapi defaults |
+| `podLabels` | `{}` | Labels added to every long-running pod, next to the chart's own `app` label |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics, the actor lifecycle events and the router access log |
 | `otel.traces.enabled` | `true` | Set to `false` to export no traces from the router; the Go components do not honor this yet |
 | `otel.traces.endpoint` | `""` | OTLP endpoint for traces, overriding `otel.endpoint` |
