@@ -1,0 +1,98 @@
+{{/*
+Copyright 2026 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+{{/*
+One PodMonitor per workload that serves metrics. Six do, from three sources,
+and no two agree on the port name:
+
+  ate-api-server, atelet, the atenet router, the atenet egress and the
+  Kubernetes credential provider start the metrics server themselves
+  (serverboot's StartMetricsServer). The first two name that port `prometheus`,
+  the other three name it `metrics`.
+
+  ate-controller serves controller-runtime's own metrics server. Its
+  ctrl.Options sets no Metrics field, and only BindAddress "0" disables that
+  server, so it binds the default :8080 — the port its pod already declares as
+  `metrics`. This endpoint carries the controller_runtime_* and workqueue_*
+  families that docs/metrics/substrate.yaml lists under
+  bridged_metric_families.
+
+  The router and the egress each run an agentgateway container of their own,
+  serving its stats on a second port: `gw-metrics` on the router, `stats` on
+  the egress. Those are the gateway's own metrics rather than the ate
+  registry's, and they are as uncollected as the rest, so each of those two
+  monitors carries both endpoints.
+
+Only the first three carry prometheus.io/* annotations, and an annotation is
+read only by a Prometheus configured for pod-annotation discovery. A Prometheus
+Operator installation discovers PodMonitors instead and ignores annotations, so
+without these objects every one of these endpoints is served and none is
+collected.
+
+A PodMonitor addresses a NAMED container port, so the name is per workload: one
+shared name would match some pods and silently miss the others. The pod label
+is per workload too — each carries a bare `app: <component>` except the
+credential provider, whose label is the substrate.fullname helper's output and
+so depends on the release name.
+
+podcertificate-controller gets no monitor: it emits no metrics, which
+docs/metrics/substrate.yaml states under blind_spots.
+
+One object per workload rather than one selecting several: an interval and a
+relabeling are a component's own, and the atelet is a DaemonSet whose series
+are per node.
+*/}}
+{{- if .Values.metrics.podMonitor.enabled }}
+{{- $components := list
+  (dict "app" "ate-api-server" "ports" (list "prometheus"))
+  (dict "app" "ate-controller" "ports" (list "metrics"))
+  (dict "app" "atelet" "ports" (list "prometheus"))
+  (dict "app" "atenet-egress" "ports" (list "metrics" "stats"))
+  (dict "app" "atenet-router" "ports" (list "metrics" "gw-metrics"))
+  (dict "app" "k8s-credential-provider" "ports" (list "metrics") "fullnameLabel" true)
+}}
+{{- range $components }}
+{{- $label := .app }}
+{{- if .fullnameLabel }}
+{{- $label = include "substrate.fullname" (list .app $) }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "substrate.fullname" (list .app $) }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $label }}
+    {{- with $.Values.metrics.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ $label }}
+  namespaceSelector:
+    matchNames:
+    - {{ $.Release.Namespace }}
+  podMetricsEndpoints:
+  {{- range .ports }}
+  - port: {{ . }}
+    path: /metrics
+    {{- with $.Values.metrics.podMonitor.interval }}
+    interval: {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
