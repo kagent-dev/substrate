@@ -114,6 +114,28 @@ tests:
         key: cloud.google.com/compute-class
         operator: Exists
         effect: NoSchedule
+- it: schedules atelet on every node by default
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - notExists:
+      path: spec.template.spec.nodeSelector
+- it: restricts atelet to nodes matching atelet.nodeSelector
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  set:
+    atelet:
+      nodeSelector:
+        pool: agents
+  asserts:
+  - equal:
+      path: spec.template.spec.nodeSelector
+      value:
+        pool: agents
 - it: probes the credential provider on its health listener
   template: k8s-credential-provider.yaml
   documentSelector:
