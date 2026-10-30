@@ -39,6 +39,8 @@ jobs:
     # default applies, and a wedged step occupies a runner for six hours.
     timeout-minutes: 45
     env:
+      # go tool -n needs Go's disk cache to return a persistent executable path.
+      GOCACHEPROG: ""
       # Where each runner writes its JUnit. Every invocation needs its own file;
       # a shared path means the last writer wins.
       ARTIFACTS: ${{ github.workspace }}/_artifacts
@@ -155,6 +157,8 @@ jobs:
         dataplane: ['agentgateway']
         preview: ['off', 'on']
     env:
+      # go tool -n needs Go's disk cache to return a persistent executable path.
+      GOCACHEPROG: ""
       E2E_ATENET_DATAPLANE: ${{ matrix.dataplane }}
       # Apply the e2e test component (short atelet snapshot delays) across the
       # initial install and the control plane redeploy in run-microvm-demo-kind.sh.
