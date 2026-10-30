@@ -43,6 +43,10 @@ chart over resources still owned by the application release fails Helm ownership
 validation. Perform the release split during a planned installation update;
 do not delete the existing CA-pool Secrets.
 
+The controller Deployment is named like its ServiceAccount (`podcertificate-controller`,
+prefixed by other release names). `podLabels` and `podAnnotations` add labels and
+annotations to its pod template.
+
 Set `resources.requests` and `resources.limits` on this release to size the
 controller container. Defaults are `10m` CPU and `64Mi` memory requests, with
 `500m` CPU and `256Mi` memory limits. For example:

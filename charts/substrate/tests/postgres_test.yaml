@@ -101,3 +101,40 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: postgres.ownerConnectionStringSecretRef.name is required
+
+- it: reads the role names from Secret keys when the SecretRefs are set
+  template: ate-api-server.yaml
+  documentIndex: 3
+  set:
+    postgres:
+      readWriteRoleSecretRef:
+        name: substrate-postgres-readwrite
+        key: username
+      ownerRoleSecretRef:
+        name: substrate-postgres-owner
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=$(ATE_API_POSTGRES_READ_WRITE_ROLE)
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-owner-role=$(ATE_API_POSTGRES_OWNER_ROLE)
+  - notContains:
+      path: spec.template.spec.containers[0].args
+      content: --postgres-read-write-role=substrate_readwrite
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_READ_WRITE_ROLE
+        valueFrom:
+          secretKeyRef:
+            name: substrate-postgres-readwrite
+            key: username
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: ATE_API_POSTGRES_OWNER_ROLE
+        valueFrom:
+          secretKeyRef:
+            name: substrate-postgres-owner
+            key: username

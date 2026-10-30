@@ -177,7 +177,13 @@ spec:
     metadata:
       labels:
         app: atenet-router
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "15020"
     spec:
