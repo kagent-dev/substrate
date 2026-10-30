@@ -215,7 +215,10 @@ spec:
             drop:
             - ALL
             add:
+            - CHOWN
             - DAC_OVERRIDE
+            - FOWNER
+            - FSETID
         resources:
 {{ toYaml .Values.atelet.resources | indent 10 }}
         env:

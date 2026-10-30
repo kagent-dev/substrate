@@ -309,9 +309,15 @@ Each entry in `containers` describes one process to run in the actor's sandbox.
 
 `command` and `args` resolve against the container image's `ENTRYPOINT`/`CMD` the same way [Kubernetes Pod `command`/`args`](https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/) resolve against `ENTRYPOINT`/`CMD`. If the resolved argv is empty — the image sets neither `ENTRYPOINT` nor `CMD`, and the container sets neither `command` nor `args` — `Run`/`Restore` fails.
 
+The process runs as the image's `USER`, resolved as Docker does against the image's own `/etc/passwd` and `/etc/group`: a numeric `uid:gid` as is; a bare uid with its login group, or gid 0 when it has no entry; a name must have an entry or `Run`/`Restore` fails. Group memberships become supplementary groups. Ids are at most 2147483647. No `USER` means root. There is no `runAsUser` field.
+
+The process starts in the image's `WORKDIR`, or in `/` when the image sets none. A `WORKDIR` the image lacks is created in the actor's writable layer. There is no `workingDir` field.
+
 ### Container Capabilities (`securityContext.capabilities`)
 
 Each container runs with a default set of Linux capabilities — `AUDIT_WRITE`, `KILL` and `NET_BIND_SERVICE`. `securityContext.capabilities` adjusts that set, mirroring `securityContext.capabilities` on a Kubernetes Pod container.
+
+A container running as root has that set as its effective capabilities. A container whose image `USER` is not root starts with no effective capabilities, as under Kubernetes, because ambient capabilities are not supported. Its set then only limits what a setuid-root program can gain.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
@@ -333,6 +339,7 @@ Each container runs with a default set of Linux capabilities — `AUDIT_WRITE`, 
 - **Ambient capabilities are not supported** ([gvisor#3166](https://github.com/google/gvisor/issues/3166)).
 - **Low ports.** A container may bind a port below 1024 without `NET_BIND_SERVICE` on both runtimes: gVisor's network stack has no privileged-port limit, and the micro-VM guest sets `net.ipv4.ip_unprivileged_port_start=0` to match.
 - **Setuid binaries work.** Neither runtime sets `no_new_privileges`, as for a Kubernetes container with `allowPrivilegeEscalation: true`; gVisor runs with `--allow-suid`.
+- **Image files owned by other users.** Image files keep the owner their image's layers record, as under containerd. A container running as its image's `USER` can use what the image gave that user, for example after `RUN chown -R app:app /app` and `USER app`. A container running as root, because its image sets no `USER` or `USER root`, has no `DAC_OVERRIDE` or `DAC_READ_SEARCH` by default. On a file or directory another user owns, it gets only what the permission bits grant to others. Add `DAC_OVERRIDE` if it writes to such files, or `DAC_READ_SEARCH` if it only reads them.
 
 The sandbox — gVisor or microVM — remains the isolation boundary; capabilities constrain the workload *inside* it.
 
