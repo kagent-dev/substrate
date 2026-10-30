@@ -71,6 +71,46 @@ func TestPublishReleaseImagesNeedsARegistry(t *testing.T) {
 	}
 }
 
+func TestPublishReleaseImagesNeedsSourceURL(t *testing.T) {
+	t.Setenv("VERSION", "v1.2.3")
+	e := &Env{Cfg: &config.Config{Root: t.TempDir(), KODockerRepo: "example.com/substrate"}}
+	err := e.PublishReleaseImages(t.Context(), io.Discard, PublishReleaseOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--source-url") {
+		t.Errorf("PublishReleaseImages() error = %v, want one naming --source-url", err)
+	}
+}
+
+func TestPublishReleaseImagesLabelsTheSource(t *testing.T) {
+	root := repoRoot(t)
+	bin := t.TempDir()
+	if err := os.Symlink(filepath.Join(root, "cmd/ate-setup/internal/steps/testdata/release-docker.sh"), filepath.Join(bin, "docker")); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(bin, "args")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RELEASE_TEST_DOCKER_ARGS", argsFile)
+	t.Setenv("VERSION", "v1.0.0")
+	e := &Env{
+		Cfg: &config.Config{Root: root, KODockerRepo: "ghcr.io/kagent-dev/substrate", KODefaultPlatforms: "linux/amd64,linux/arm64"},
+		// Dockerfile images build first; the fixture stops before ko runs.
+		resolver: &ko.Runner{},
+	}
+	err := e.PublishReleaseImages(t.Context(), io.Discard, PublishReleaseOptions{
+		Overwrite: true,
+		SourceURL: "https://github.com/kagent-dev/substrate",
+	})
+	if err == nil || !strings.Contains(err.Error(), "exit status 17") {
+		t.Fatalf("PublishReleaseImages() error = %v, want the build fixture to stop it", err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(strings.Split(string(args), "\n"), "--label=org.opencontainers.image.source=https://github.com/kagent-dev/substrate") {
+		t.Errorf("fork source label missing from build arguments:\n%s", args)
+	}
+}
+
 // Rerunning a release must not replace images that are already published, so
 // a complete set is left alone. The Root has no ko tool, so reaching the build
 // would fail this test.
@@ -99,7 +139,7 @@ func TestPublishReleaseImagesSkipsACompleteRelease(t *testing.T) {
 		KODockerRepo:       repo,
 		KODefaultPlatforms: "linux/amd64,linux/arm64",
 	}}
-	if err := e.PublishReleaseImages(t.Context(), io.Discard, PublishReleaseOptions{}); err != nil {
+	if err := e.PublishReleaseImages(t.Context(), io.Discard, PublishReleaseOptions{SourceURL: "https://github.com/kagent-dev/substrate"}); err != nil {
 		t.Errorf("PublishReleaseImages() error = %v, want nil with every image published", err)
 	}
 }

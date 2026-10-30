@@ -37,9 +37,8 @@ UPSTREAM_REPO='agent-substrate/substrate'
 REPO="${GITHUB_REPOSITORY:-${UPSTREAM_REPO}}"
 SEMVER='^v[0-9]+\.[0-9]+\.[0-9]+$'
 SEMVER_PRE='^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$'
-# Where the upstream release workflow publishes images (KO_DOCKER_REPO in
-# .github/workflows/release.yaml).
-RELEASE_IMAGE_REPO='ghcr.io/agent-substrate/substrate'
+# Use the same destination as the image publisher.
+RELEASE_IMAGE_REPO="${KO_DOCKER_REPO:-ghcr.io/${REPO}}"
 
 usage() {
   echo "usage: $0 [--dry-run] <tag>" >&2
@@ -146,10 +145,9 @@ if ! notes="$(api "generating notes" "repos/${REPO}/releases/generate-notes" \
   exit 1
 fi
 
-# Only the upstream release workflow publishes images (see
-# .github/workflows/release.yaml), so only its notes say where they are.
+# These repositories publish images and binaries in the release workflow.
 # docs/dev/releasing.md lists what they cover.
-if [[ "${REPO}" == "${UPSTREAM_REPO}" ]]; then
+if [[ "${REPO}" == "${UPSTREAM_REPO}" || "${REPO}" == "kagent-dev/substrate" ]]; then
   notes+=$'\n\n## Images\n\n'
   notes+="Container images for this release are published as \`${RELEASE_IMAGE_REPO}/<image>:${tag}\`"
   notes+=" for \`linux/amd64\` and \`linux/arm64\`. The images a release publishes are listed in"
@@ -175,6 +173,12 @@ if [[ "${REPO}" == "${UPSTREAM_REPO}" ]]; then
   notes+=$'shasum -a 256 -c kubectl-ate-linux-amd64.sha256\n'
   notes+=$'install -m 0755 kubectl-ate-linux-amd64 ~/.local/bin/kubectl-ate\n'
   notes+='```'
+fi
+
+if [[ "${REPO}" == "kagent-dev/substrate" ]]; then
+  notes+=$'\n\n## Helm charts\n\n'
+  notes+="Charts are published at \`oci://${RELEASE_IMAGE_REPO}/helm\` with version \`${tag#v}\`:"
+  notes+=$'\n\n- `substrate-crds`\n- `substrate`\n- `substrate-podcert`'
 fi
 
 # GitHub only lists first-time contributors; list everyone, as v0.1.0 did.

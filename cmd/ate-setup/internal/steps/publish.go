@@ -165,6 +165,8 @@ type PublishReleaseOptions struct {
 	// Overwrite rebuilds and replaces images the registry already holds for
 	// the tag. Without it, a complete set is left alone.
 	Overwrite bool
+	// SourceURL identifies the repository that built the images.
+	SourceURL string
 }
 
 // releaseImageRefs returns the tagged reference of every image a release
@@ -200,6 +202,9 @@ func (e *Env) PublishReleaseImages(ctx context.Context, w io.Writer, opts Publis
 	if err := images.CheckReleaseTag(e.Cfg.KODockerRepo, tag); err != nil {
 		return fmt.Errorf("the build version: %w; set VERSION to the release tag", err)
 	}
+	if opts.SourceURL == "" {
+		return fmt.Errorf("publishing release images needs their source repository; set --source-url")
+	}
 	log.Stepf("publish_release_images (%s)", tag)
 	platforms, err := images.Platforms(e.Cfg.Root, e.Cfg.KODefaultPlatforms)
 	if err != nil {
@@ -234,7 +239,7 @@ func (e *Env) PublishReleaseImages(ctx context.Context, w io.Writer, opts Publis
 		return fmt.Errorf("release images are labeled with the commit they were built from, and %s has none checked out", e.Cfg.Root)
 	}
 	labels := []string{
-		images.SourceLabel + "=" + images.SourceURL,
+		images.SourceLabel + "=" + opts.SourceURL,
 		images.RevisionLabel + "=" + revision,
 		images.VersionLabel + "=" + tag,
 	}
