@@ -17,10 +17,9 @@
 # kubectl-ate binaries attached. A maintainer edits and publishes it; see
 # docs/dev/releasing.md.
 #
-# Images are published only from agent-substrate/substrate, to
-# ghcr.io/agent-substrate/substrate. In any other repository (a fork) the
-# images job is skipped, because GitHub bills package storage to the fork's
-# owner, and the draft is created as before.
+# agent-substrate/substrate and kagent-dev/substrate publish images and binaries
+# under their own repository. kagent-dev/substrate also publishes Helm charts.
+# Other forks create a draft without publishing artifacts.
 #
 # Run manually to publish images or draft a release for an existing tag.
 # A complete image set is left unchanged unless overwrite is set; an incomplete
@@ -51,10 +50,12 @@ permissions:
   contents: read
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
+env:
+  KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
+  ATE_PUBLISH_SOURCE_URL: https://github.com/${{ github.repository }}
 jobs:
-  # The only job that writes to a registry.
   images:
-    if: github.repository == 'agent-substrate/substrate' && !inputs.dry_run_images
+    if: (github.repository == 'agent-substrate/substrate' || github.repository == 'kagent-dev/substrate') && !inputs.dry_run_images
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -63,7 +64,6 @@ jobs:
     # Read by ate-setup publish release-images.
     env:
       VERSION: ${{ inputs.tag || github.ref_name }}
-      KO_DOCKER_REPO: ghcr.io/agent-substrate/substrate
       KO_DEFAULTPLATFORMS: linux/amd64,linux/arm64
       # inputs.overwrite is empty on a tag push; this makes the value explicit.
       ATE_PUBLISH_OVERWRITE: ${{ inputs.overwrite == true }}
@@ -148,13 +148,36 @@ jobs:
             http = true
     - name: Publish images
       run: go run ./cmd/ate-setup publish release-images
-  draft:
+  charts:
     needs: images
-    # Runs after images succeeded, or when images was skipped (any repository
-    # other than agent-substrate/substrate). If images failed, no draft is
-    # created, so a release cannot be published without its images. Skipped
-    # in a dry run.
-    if: ${{ !cancelled() && !inputs.dry_run_images && (needs.images.result == 'success' || needs.images.result == 'skipped') }}
+    if: github.repository == 'kagent-dev/substrate' && !inputs.dry_run_images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        ref: refs/tags/${{ inputs.tag || github.ref_name }}
+        persist-credentials: false
+    - name: Install Helm
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      with:
+        version: v3.18.4
+    - name: Publish charts
+      run: .github/scripts/release/publish-charts.sh
+  draft:
+    needs: [images, charts]
+    # Repositories that publish artifacts must finish those jobs before drafting.
+    if: >-
+      ${{ !cancelled() && !inputs.dry_run_images &&
+          (needs.images.result == 'success' || needs.images.result == 'skipped') &&
+          (needs.charts.result == 'success' || needs.charts.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Creating a release needs contents: write.
@@ -178,10 +201,9 @@ jobs:
         # These jobs can write packages or releases, so they restore no cache
         # that another workflow could have written.
         cache: false
-    # Built before the draft exists, so a build failure leaves no draft, as an
-    # images failure does. A fork attaches no binaries, so it builds none.
+    # Build before creating the draft so a build failure leaves no draft.
     - name: Build kubectl-ate
-      if: github.repository == 'agent-substrate/substrate'
+      if: github.repository == 'agent-substrate/substrate' || github.repository == 'kagent-dev/substrate'
       env:
         VERSION: ${{ inputs.tag || github.ref_name }}
       run: go run ./cmd/ate-setup publish release-binaries --out bin/release
@@ -190,11 +212,9 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ inputs.tag || github.ref_name }}
       run: hack/release/draft-release.sh "${TAG}"
-    # Only agent-substrate/substrate attaches binaries; a fork's draft gets
-    # none. Assets are replaced only while the release is a draft, so a rerun
-    # never changes the files of a published release.
+    # Assets are replaced only while the release is a draft.
     - name: Attach kubectl-ate
-      if: github.repository == 'agent-substrate/substrate'
+      if: github.repository == 'agent-substrate/substrate' || github.repository == 'kagent-dev/substrate'
       env:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ inputs.tag || github.ref_name }}

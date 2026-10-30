@@ -126,7 +126,9 @@ to a build to use the ateworker.
 
 `publish release-images` builds and pushes every image a release publishes,
 all tagged with the build version; see [Installing pre-built
-images](#installing-pre-built-images).
+images](#installing-pre-built-images). `--source-url` (or `ATE_PUBLISH_SOURCE_URL`)
+sets the OCI source repository label and defaults to the upstream GitHub URL.
+Forks must set their own source URL so GHCR links the packages to their repository.
 
 `publish release-binaries` builds `kubectl-ate` for linux and darwin on amd64
 and arm64 into `--out` (default `bin/release`), stamped with the build version, commit,

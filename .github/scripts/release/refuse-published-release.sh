@@ -15,7 +15,7 @@
 # limitations under the License.
 
 # Fails if the tag VERSION has a published (non-draft) release in
-# GITHUB_REPOSITORY. Publishing a release's images again replaces the digests
+# GITHUB_REPOSITORY. Publishing a release's artifacts again replaces the digests
 # that operators install by tag, so it is refused once the release is
 # published, whether or not the run asked to overwrite.
 #
@@ -26,7 +26,7 @@
 # release. Any other failure stops the script. A release the API returns is
 # treated as published unless it says it is a draft.
 #
-# Used by the images job in .github/workflows/release.yaml.
+# Used by the image and chart publishers in .github/workflows/release.yaml.
 
 set -o errexit -o nounset -o pipefail
 
@@ -35,7 +35,7 @@ trap 'rm -f "${errfile}"' EXIT
 
 if draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" --jq .draft 2>"${errfile}")"; then
   if [[ "${draft}" != true ]]; then
-    echo "::error::${VERSION} has a published release; its images are not published again"
+    echo "::error::${VERSION} has a published release; its artifacts are not published again"
     exit 1
   fi
 elif ! grep -q 'HTTP 404' "${errfile}"; then
