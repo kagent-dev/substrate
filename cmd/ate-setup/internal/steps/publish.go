@@ -254,7 +254,7 @@ func (e *Env) PublishReleaseImages(ctx context.Context, w io.Writer, opts Publis
 		}
 		refs = append(refs, ref)
 	}
-	koRefs, err := runner.BuildTagged(ctx, tag, labels, pkgs...)
+	koRefs, err := runner.BuildEach(ctx, tag, labels, pkgs...)
 	if err != nil {
 		return err
 	}

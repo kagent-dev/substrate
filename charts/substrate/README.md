@@ -148,6 +148,11 @@ This replaces the previous `v5` config. Existing `v5` memory snapshots need a
 compatible runtime; falling back to a durable filesystem snapshot does not
 restore the actor's memory.
 
+The [image cache](../../internal/imagecache/README.md) now uses layout version 3
+to preserve image ownership and permissions. Atelet refuses version 2 caches.
+Stop the actors on each node before deleting its old image cache
+(`/var/lib/ate/image-cache` by default). Atelet recreates it on startup.
+
 When upgrading an installation with RustFS enabled, delete its completed bucket
 initializer Job before running `helm upgrade`. The default Job name is
 `rustfs-bucket-init` in the release namespace. This update changes the AWS CLI
