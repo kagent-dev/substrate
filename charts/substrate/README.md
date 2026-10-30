@@ -67,6 +67,7 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.imageCredentialProviderConfigYAML` | `""` | Credential provider config as text, rendered into a ConfigMap, for nodes where that file cannot be authored or must differ from the kubelet's; mutually exclusive with the host path |
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
+| `credentialProvider.additionalProviders` | `[]` | Further credential providers for the egress gateway, each `uriAuthority` (a lowercase DNS name) and `host` (`<service>.<namespace>.svc:<port>`); the gateway verifies the provider's `servicedns.podcert.ate.dev` serving certificate and presents its own pod identity, which the provider must require |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
 | `objectStorePlugin.extraEnv` | `[]` | Object storage credentials/settings shared by both object-store plugins |
 | `objectStorePlugin.control.resources` / `objectStorePlugin.node.resources` | see `values.yaml` | Resources for the API and node object-store sidecars |
