@@ -3,7 +3,7 @@ title: "Authorization"
 linkTitle: "Authorization"
 weight: 4
 description: >
-  How ate-api checks every call against an OpenFGA model, and how to manage roles and access.
+  How ate-api-server checks every call against an OpenFGA model, and how to manage roles and access.
 ---
 
 # ate-api Authorization
@@ -143,7 +143,7 @@ through their pod certificates. `ate-api-server`'s `--controller-spiffe-id`,
 | Role | Held by | Allows |
 |---|---|---|
 | `controller` | `ate-controller` | Create, get, list, update, delete and drain workers |
-| `egress_gateway` | `atenet-egress`, and any other SPIFFE IDs passed with `--egress-gateway-spiffe-id`, which ate-setup sets from `ATE_EGRESS_GATEWAY_EXTRA_SPIFFE_IDS` | Get actors and their egress policies; list actors across all atespaces; mint actor JWTs and certificates |
+| `egress_gateway` | `atenet-egress`, and any other SPIFFE IDs passed with `--egress-gateway-spiffe-id`, which ate-setup sets from `ATE_EGRESS_GATEWAY_EXTRA_SPIFFE_IDS` | Get actors and their egress policies; list actors across all atespaces; mint actor JWTs |
 | `ingress_router` | `atenet-router` | Resume actors; list actors across all atespaces |
 | `atelet` | `atelet` | Get actors' egress policies, for the worker that enforces them |
 | `api_server_sidecar` | the `ate-api-server` pod identity, which its sidecars share, today the objectstore control plugin | Get actors, to derive the snapshot prefixes a per-actor storage credential may cover |
@@ -183,7 +183,7 @@ viewer, and a global role holds the same role in every atespace. So
 | `GetActorTemplate` | `can_get`, the template | Viewer of its atespace |
 | `DeleteActorTemplate` | `can_delete`, the template | Editor of its atespace |
 | `ListActorTemplates` | `can_list_actor_templates`, the atespace, or global if none is given | Atespace viewer; global viewer for all atespaces |
-| `CreateActor` | 1. `can_create_actor`, the actor's atespace<br>2. `can_use_template`, the actor template<br>3. `can_use_tag`, the `sourceTag`, if one is given | 1. Atespace editor<br>2. Viewer of the template's atespace, which may be another one<br>3. Editor of the tag's atespace. Golden tags skip this check: the handler only accepts one built from the actor's own template. |
+| `CreateActor` | 1. `can_create_actor`, the actor's atespace<br>2. `can_use_template`, the actor template<br>3. `can_use_tag`, the `sourceTag`, if one is given | 1. Atespace editor<br>2. Viewer of the template's atespace, which may be another one<br>3. Editor of the tag's atespace. When `sourceTag` is omitted, the handler resolves the template's golden tag without checking `can_use_tag`. |
 | `UpdateActor` | 1. `can_update`, the actor<br>2. `can_use_template`, the template in the request | 1. Editor of its atespace<br>2. Viewer of the template's atespace, so an actor can't be switched to a template its editor can't use |
 | `GetActor` | `can_get`, the actor | Viewer of its atespace; `atenet-egress`; the objectstore control plugin |
 | `DeleteActor` | `can_delete`, the actor | Editor of its atespace |
@@ -192,7 +192,7 @@ viewer, and a global role holds the same role in every atespace. So
 | `ResumeActor` | `can_resume`, the actor | Editor of its atespace; `atenet-router` |
 | `GetActorEgressPolicy` | `can_get_egress_policy`, the actor | Viewer of its atespace; `atenet-egress`; `atelet` |
 | `CreateActorEgressPolicy`, `UpdateActorEgressPolicy`, `DeleteActorEgressPolicy` | `can_create_egress_policy` / `can_update_egress_policy` / `can_delete_egress_policy`, the actor | Editor of its atespace |
-| `MintActorJwt`, `MintActorCertificate` | `can_mint_actor_jwt` / `can_mint_actor_certificate`, the actor | `atenet-egress` only |
+| `MintActorJwt` | `can_mint_actor_jwt`, the actor | `atenet-egress` only |
 
 ### Tags
 

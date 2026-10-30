@@ -363,7 +363,6 @@ func main() {
 		objectstore.NewControlProviderClient(objectStorePluginConn),
 		*actorJWTIssuer,
 		actorIDJWTAuthorityPool,
-		actorIDCAPool,
 		*snapshotLocation,
 	)
 
