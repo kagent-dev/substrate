@@ -31,7 +31,7 @@ authorize pushing directly to protected branches or resetting their history.
    an existing sync PR or another agent working on the same destination.
 2. Fetch the relevant refs and record their SHAs. Pin both the fork destination
    and the selected upstream revision. For patch selection, also pin the fork
-   source revision, including the inventory and merge resolutions read from it.
+   source revision and inspect the merge resolutions at that revision.
    Another agent advancing `main` must not silently change that patch set. Honor
    an explicit release cutoff or tag; do not substitute latest `main`. Ask for
    the destination if the request and context do not identify it. Do not treat
@@ -47,29 +47,19 @@ authorize pushing directly to protected branches or resetting their history.
    consult `docs/reference/version-skew-policy.md` for release changes. API
    additions and schema migrations do not belong in patch releases.
 
-## Track the fork's patches
-
-Use `docs/fork-patches.md` on fork `main` as the canonical inventory when it
-exists. Record each maintained behavior, its source PR or commits, upstream
-status, supported-branch status, and the tests that exercise it. Identify a
-behavior by its purpose; cherry-picks have different SHAs across branches.
+## Preserve fork behavior
 
 Check both ordinary fork commits and integration changes in earlier sync
 merges. A list of non-merge commits alone can miss required behavior. Cover
 deployment and publishing changes as well as Go code. Preserve the relevant
-tests when upstream refactors the implementation.
-
-If no inventory exists, build the needed inventory from history and the
-upstream-to-fork diff before claiming all patches are preserved. Include it in
-the handoff; add the canonical document when establishing patch tracking is in
-scope. Do not guess a patch's purpose from its title alone.
+tests when upstream refactors the implementation. Do not guess a patch's
+purpose from its title alone.
 
 For a patch PR, state which supported branches need it. For a sync, account for
 patches affected by incoming changes and any redundant implementation removed.
-Mark a patch as supplied by upstream separately for each branch, only after that
-branch contains the replacement and the behavior is verified. When the task
-targets a release branch, report inventory updates for `main` without modifying
-or publishing another branch as an implicit side effect.
+A patch is supplied by upstream only once the destination branch contains the
+replacement and the behavior is verified. Do not modify or publish another
+branch as an implicit side effect.
 
 ## Routine upstream sync
 
@@ -128,7 +118,7 @@ Immediately before creating it, confirm the destination is still absent and
 use a create-only operation. If another actor created it, refetch and reconcile
 with that tip instead of overwriting it.
 
-Before calling the branch ready, verify the patch inventory, CI triggers,
+Before calling the branch ready, verify preserved fork behavior, CI triggers,
 required checks, and release configuration for that branch. Record gaps and
 prepare scoped fixes where authorized. Protection settings alone do not prove
 CI runs or blocks merges. Continue `main` development separately after the
@@ -178,7 +168,7 @@ refresh a latest-tip sync, but retain an explicitly pinned revision or cutoff.
 For routine syncs, rebuild the single merge instead of stacking more merges.
 Keep a PR's rebase or reconstruction push separate from fixes to reviewed code.
 
-Review the diff and confirm it matches the operation and patch inventory. For
+Review the diff and confirm it preserves the intended fork behavior. For
 substantial changes, obtain an independent review and validate its findings.
 Report the source and destination SHAs, patches preserved or backported,
 remaining branch work, validation results, and blockers. If publication is not
