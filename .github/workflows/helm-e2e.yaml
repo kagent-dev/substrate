@@ -21,8 +21,10 @@ permissions:
   contents: read
 jobs:
   e2e-test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
+      # go tool -n needs Go's disk cache to return a persistent executable path.
+      GOCACHEPROG: ""
       VERSION: helm-e2e
       E2E_ATENET_DATAPLANE: agentgateway
       E2E_CREDENTIAL_PROVIDER: "1"
