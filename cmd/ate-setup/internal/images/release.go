@@ -33,9 +33,8 @@ import (
 // lets the repository's workflows push later versions with their GITHUB_TOKEN.
 const SourceLabel = "org.opencontainers.image.source"
 
-// SourceURL is the SourceLabel value for images built from this repository:
-// its GitHub URL, which ghcr.io matches. It cannot be derived from ModulePath,
-// which is a vanity import path.
+// SourceURL is the default source repository for release images. Forks override
+// it with --source-url so ghcr.io links their packages to their own repository.
 const SourceURL = "https://github.com/agent-substrate/substrate"
 
 // RevisionLabel is the OCI image label naming the commit an image was built
