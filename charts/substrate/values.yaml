@@ -27,6 +27,14 @@ createNamespace: false
 # ExternalVolumes is required for external volume APIs and mounts.
 preview: []
 
+# Labels added to every pod template (all Deployments, the atelet DaemonSet and the RustFS
+# bucket-init Job).
+podLabels: {}
+# Annotations added to every pod template.
+podAnnotations: {}
+# Labels added to the RustFS PersistentVolumeClaim.
+commonLabels: {}
+
 postgres:
   # Project database login certificates only when the connection strings use them.
   clientCertificates:
@@ -42,11 +50,22 @@ postgres:
   # Roles assumed on each connection. Use distinct roles for installs sharing a database.
   readWriteRole: substrate_readwrite
   ownerRole: substrate_owner
+  # Read a role name from a Secret key ({name, key}; key defaults to "username") instead of
+  # the literal above, for databases whose login is generated and rotated by an external
+  # provisioner and is itself the role to assume.
+  readWriteRoleSecretRef: {}
+  ownerRoleSecretRef: {}
   schema: substrate
 
 rustfs:
   enabled: true
   storageSize: 1Gi
+  # StorageClass for the data PersistentVolumeClaim. Empty uses the cluster default class;
+  # the claim never binds on clusters without one.
+  storageClassName: ""
+  # Deployment strategy. The data volume is ReadWriteOnce, so a RollingUpdate cannot place
+  # the new pod while the old one holds it; set {type: Recreate} for in-place upgrades.
+  strategy: {}
   bucket: ate-snapshots
   accessKey: rustfsadmin
   secretKey: rustfsadmin
@@ -59,6 +78,13 @@ rustfs:
       memory: 1Gi
   # The Job that creates the snapshot bucket.
   bucketInit:
+    # Annotations on the Job (and its ServiceAccount when dedicated). Job templates are
+    # immutable, so GitOps tools need a hint to replace the Job on change, for example
+    # argocd.argoproj.io/hook: PostSync.
+    annotations: {}
+    # Run the Job under its own ServiceAccount, named like the Job, instead of the RustFS
+    # ServiceAccount.
+    dedicatedServiceAccount: false
     resources:
       requests:
         cpu: 10m
@@ -86,6 +112,23 @@ atelet:
   storageBackend: s3
   extraArgs: []
   extraEnv: []
+  # Tolerations of the atelet pods, replaced as a whole when overridden. The
+  # defaults run atelet on nodes reserved for any WorkerPool sandbox class and
+  # on GKE ComputeClass nodes. Platforms whose admission controllers rewrite
+  # DaemonSet tolerations (e.g. to a single operator: Exists) can set the same
+  # value here so the rendered manifest matches what the cluster stores.
+  tolerations:
+  - key: ate.dev/sandboxClass
+    operator: Exists
+    effect: NoSchedule
+  - key: cloud.google.com/compute-class
+    operator: Exists
+    effect: NoSchedule
+  # Appended verbatim to the atelet pod's volumes and the atelet container's
+  # volumeMounts, e.g. a kubernetes.io/dockerconfigjson Secret a credential
+  # provider plugin reads.
+  extraVolumes: []
+  extraVolumeMounts: []
   resources:
     requests:
       cpu: 50m

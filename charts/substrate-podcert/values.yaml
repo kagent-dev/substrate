@@ -43,3 +43,8 @@ image:
   registry: ghcr.io
   repository: kagent-dev/substrate
   tag: ""
+
+# Labels added to the controller pod template.
+podLabels: {}
+# Annotations added to the controller pod template.
+podAnnotations: {}

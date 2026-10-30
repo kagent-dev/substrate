@@ -136,7 +136,7 @@ subjects:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: podcertificate-controller
+  name: {{ include "podcert.fullname" (list "podcertificate-controller" .) }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: podcertificate-controller
@@ -149,6 +149,13 @@ spec:
     metadata:
       labels:
         app: podcertificate-controller
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- with include "podcert.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:

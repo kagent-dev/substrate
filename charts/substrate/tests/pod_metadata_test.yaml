@@ -1,0 +1,235 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: Pod metadata and RustFS knobs
+templates:
+- ate-api-server.yaml
+- ate-controller.yaml
+- atelet.yaml
+- rustfs.yaml
+release:
+  name: custom
+  namespace: custom-system
+tests:
+- it: adds podLabels and podAnnotations to a Deployment pod template
+  template: ate-controller.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  set:
+    podLabels:
+      sidecar.istio.io/inject: "false"
+    podAnnotations:
+      example.com/placement: quiet
+  asserts:
+  - equal:
+      path: spec.template.metadata.labels["sidecar.istio.io/inject"]
+      value: "false"
+  - equal:
+      path: spec.template.metadata.annotations["example.com/placement"]
+      value: quiet
+
+- it: merges podAnnotations with the annotations a template already sets
+  template: ate-api-server.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  set:
+    podAnnotations:
+      example.com/placement: quiet
+  asserts:
+  - equal:
+      path: spec.template.metadata.annotations["example.com/placement"]
+      value: quiet
+  - equal:
+      path: spec.template.metadata.annotations["prometheus.io/scrape"]
+      value: "true"
+
+- it: adds podLabels and podAnnotations to the atelet DaemonSet
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  set:
+    podLabels:
+      sidecar.istio.io/inject: "false"
+    podAnnotations:
+      example.com/placement: quiet
+  asserts:
+  - equal:
+      path: spec.template.metadata.labels["sidecar.istio.io/inject"]
+      value: "false"
+  - equal:
+      path: spec.template.metadata.annotations["example.com/placement"]
+      value: quiet
+
+- it: adds podLabels and podAnnotations to the bucket-init Job
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  set:
+    podLabels:
+      sidecar.istio.io/inject: "false"
+    podAnnotations:
+      example.com/placement: quiet
+  asserts:
+  - equal:
+      path: spec.template.metadata.labels["sidecar.istio.io/inject"]
+      value: "false"
+  - equal:
+      path: spec.template.metadata.annotations["example.com/placement"]
+      value: quiet
+
+- it: leaves the bucket-init Job pod template metadata out by default
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  asserts:
+  - notExists:
+      path: spec.template.metadata
+
+- it: labels the RustFS claim and selects its StorageClass
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: PersistentVolumeClaim
+  set:
+    commonLabels:
+      app.kubernetes.io/name: substrate
+    rustfs:
+      storageClassName: fast
+  asserts:
+  - equal:
+      path: metadata.labels["app.kubernetes.io/name"]
+      value: substrate
+  - equal:
+      path: spec.storageClassName
+      value: fast
+
+- it: uses the cluster default StorageClass and no claim labels by default
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: PersistentVolumeClaim
+  asserts:
+  - notExists:
+      path: spec.storageClassName
+  - notExists:
+      path: metadata.labels
+
+- it: applies the RustFS Deployment strategy
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  set:
+    rustfs:
+      strategy:
+        type: Recreate
+  asserts:
+  - equal:
+      path: spec.strategy.type
+      value: Recreate
+
+- it: runs the bucket-init Job under its own annotated ServiceAccount when dedicated
+  template: rustfs.yaml
+  documentSelector:
+    path: metadata.name
+    value: custom-rustfs-bucket-init
+    matchMany: true
+  set:
+    rustfs:
+      bucketInit:
+        dedicatedServiceAccount: true
+        annotations:
+          argocd.argoproj.io/hook: PostSync
+  asserts:
+  # The template renders one more document, the Job's ServiceAccount, than by default.
+  - hasDocuments:
+      count: 7
+  - matchRegex:
+      path: kind
+      pattern: ^(Job|ServiceAccount)$
+  - equal:
+      path: metadata.annotations["argocd.argoproj.io/hook"]
+      value: PostSync
+
+- it: renders no dedicated ServiceAccount by default
+  template: rustfs.yaml
+  documentSelector:
+    path: metadata.name
+    value: custom-rustfs-bucket-init
+    matchMany: true
+  asserts:
+  - hasDocuments:
+      count: 6
+  - isKind:
+      of: Job
+
+- it: runs the bucket-init Job under the RustFS ServiceAccount by default
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  asserts:
+  - equal:
+      path: spec.template.spec.serviceAccountName
+      value: custom-rustfs
+
+- it: runs the bucket-init Job under the dedicated ServiceAccount when enabled
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Job
+  set:
+    rustfs:
+      bucketInit:
+        dedicatedServiceAccount: true
+  asserts:
+  - equal:
+      path: spec.template.spec.serviceAccountName
+      value: custom-rustfs-bucket-init
+
+- it: tolerates sandbox-class and ComputeClass taints on atelet by default
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.spec.tolerations
+      value:
+      - key: ate.dev/sandboxClass
+        operator: Exists
+        effect: NoSchedule
+      - key: cloud.google.com/compute-class
+        operator: Exists
+        effect: NoSchedule
+
+- it: replaces atelet tolerations as a whole when overridden
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  set:
+    atelet:
+      tolerations:
+      - operator: Exists
+  asserts:
+  - equal:
+      path: spec.template.spec.tolerations
+      value:
+      - operator: Exists
