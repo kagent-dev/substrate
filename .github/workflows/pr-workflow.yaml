@@ -34,9 +34,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # A bound well clear of the observed runtime. Without one the platform
-    # default applies, and a wedged step burns a free-tier slot for six hours.
+    # default applies, and a wedged step occupies a runner for six hours.
     timeout-minutes: 45
     env:
       # Where each runner writes its JUnit. Every invocation needs its own file;
@@ -139,14 +139,13 @@ jobs:
       env:
         BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
       run: hack/verify/postgresql-migrations.sh "origin/${BASE_REF#refs/heads/}"
-  # One kind cluster exercises BOTH runtimes. Free x86-64 ubuntu-latest runners
-  # expose /dev/kvm (with a udev rule), so create-kind-cluster.sh mounts it and the
-  # micro-VM (kata + cloud-hypervisor) sandbox class works alongside gVisor.
+  # One kind cluster exercises both gVisor and microVM runtimes.
+  # The runner must expose /dev/kvm for the microVM sandbox class.
   # Each preview mode runs on a fresh cluster with agentgateway.
   # The default install retains the required e2e-test check name.
   e2e-test:
     name: ${{ matrix.preview == 'off' && 'e2e-test' || 'e2e-test (preview)' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Cluster bring-up, image builds and two sequential lanes; generous, but far
     # short of the six-hour platform default a hung lane would otherwise consume.
     timeout-minutes: 120
