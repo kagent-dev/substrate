@@ -1,3 +1,7 @@
+---
+docsite: false
+---
+
 # Kubernetes credential provider
 
 The `k8s-credential-provider` Deployment follows the provider from
@@ -62,13 +66,13 @@ For the manifest installer, set your grants in
 `manifests/egress-credential-injection/namespace-policy.yaml`, then deploy:
 
 ```sh
-kubectl kustomize manifests/egress-credential-injection | ko apply -f -
+kubectl apply -f manifests/egress-credential-injection/namespace-policy.yaml
 go run ./cmd/ate-setup deploy atenet \
-  --atenet-dataplane=agentgateway --credential-provider='{"enabled":false}'
+  --atenet-dataplane=agentgateway --credential-provider='{"name":"k8s.io"}'
 ```
 
-The provider is deployed separately above, so the installer's provider selection
-is disabled. The fork's agentgateway manifest already points at that provider.
+The installer deploys the provider and configures agentgateway to use it.
+It preserves the existing namespace policy ConfigMap when redeploying.
 Set grants under `data.namespace-policy.yaml` in the policy ConfigMap, using
 `policies:` with the same list as the Helm values. After applying policy changes,
 restart the provider with `kubectl rollout restart -n ate-system

@@ -114,6 +114,21 @@ tests:
         key: cloud.google.com/compute-class
         operator: Exists
         effect: NoSchedule
+- it: lets atelet preserve image ownership and permissions
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].securityContext
+      value:
+        allowPrivilegeEscalation: false
+        runAsUser: 0
+        runAsGroup: 0
+        capabilities:
+          drop: [ALL]
+          add: [CHOWN, DAC_OVERRIDE, FOWNER, FSETID]
 - it: probes the credential provider on its health listener
   template: k8s-credential-provider.yaml
   documentSelector:
