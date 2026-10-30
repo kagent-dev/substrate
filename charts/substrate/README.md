@@ -56,16 +56,28 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.ownerConnectionStringSecretRef` | `substrate-postgres-owner` | Read the owner connection from a pre-created Secret |
 | `postgres.readWriteRole` | `substrate_readwrite` | Role assumed by read/write connections |
 | `postgres.ownerRole` | `substrate_owner` | Role assumed by owner connections |
+| `postgres.readWriteRoleSecretRef` | `{}` | `{name, key}` of a Secret key holding the read/write role name, instead of `readWriteRole`; `key` defaults to `username` |
+| `postgres.ownerRoleSecretRef` | `{}` | Same for the owner role, instead of `ownerRole` |
 | `preview` | `[]` | Preview gates for the API server, controller and workers, and atelet; set `[ExternalVolumes]` to enable external volume APIs and mounts |
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
+| `rustfs.storageClassName` | `""` | StorageClass of the RustFS data claim; empty uses the cluster default |
+| `rustfs.strategy` | `{}` | RustFS Deployment strategy; set `{type: Recreate}` because the data volume is ReadWriteOnce |
+| `rustfs.bucketInit.annotations` | `{}` | Annotations on the bucket-init Job, e.g. a GitOps hook so the immutable Job is replaced on change |
+| `rustfs.bucketInit.dedicatedServiceAccount` | `false` | Run the bucket-init Job under its own ServiceAccount named like the Job |
+| `podLabels` | `{}` | Labels added to every pod template, e.g. `sidecar.istio.io/inject: "false"` |
+| `podAnnotations` | `{}` | Annotations added to every pod template, e.g. node placement hints |
+| `commonLabels` | `{}` | Labels added to the RustFS PersistentVolumeClaim |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.imageCredentialProviderConfig` | `""` | Host path to the kubelet credential provider config; set together with the bin directory |
 | `atelet.imageCredentialProviderConfigYAML` | `""` | Credential provider config as text, rendered into a ConfigMap, for nodes where that file cannot be authored or must differ from the kubelet's; mutually exclusive with the host path |
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
+| `atelet.extraVolumes` | `[]` | Extra volumes on the atelet pod, e.g. a `kubernetes.io/dockerconfigjson` Secret a plugin reads |
+| `atelet.extraVolumeMounts` | `[]` | Extra volume mounts on the atelet container |
+| `atelet.tolerations` | sandbox-class and GKE ComputeClass taints | Tolerations of the atelet pods, replaced as a whole; set to what the cluster's admission controllers produce if they rewrite DaemonSet tolerations |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
 | `objectStorePlugin.extraEnv` | `[]` | Object storage credentials/settings shared by both object-store plugins |
@@ -203,6 +215,10 @@ certificates for the bundled development database.
 
 For an operator-managed database, the operator must provision the identities,
 schema, and grants, and create both connection Secrets in the release namespace.
+When the provisioner generates and rotates the login and that login is itself the
+role to assume, set `postgres.readWriteRoleSecretRef` and `postgres.ownerRoleSecretRef`
+to the Secret key that holds the login name instead of fixed `readWriteRole` and
+`ownerRole` values; the API server reads the role names from those keys at start.
 
 Substrate runs `SET ROLE` for each new connection. It rejects a login without
 the required membership.

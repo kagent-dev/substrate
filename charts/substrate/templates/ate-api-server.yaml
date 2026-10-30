@@ -77,7 +77,13 @@ spec:
     metadata:
       labels:
         app: ate-api-server
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         checksum/api-config: {{ .Values.ateApi.logLevel | sha256sum }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
@@ -161,8 +167,16 @@ spec:
         - "--authentication-config=/etc/ateapi/authentication/authentication.yaml"
         - "--postgres-read-write-connection-string=@env"
         - "--postgres-owner-connection-string=@env"
+{{- if .Values.postgres.readWriteRoleSecretRef.name }}
+        - "--postgres-read-write-role=$(ATE_API_POSTGRES_READ_WRITE_ROLE)"
+{{- else }}
         - {{ printf "--postgres-read-write-role=%s" .Values.postgres.readWriteRole | quote }}
+{{- end }}
+{{- if .Values.postgres.ownerRoleSecretRef.name }}
+        - "--postgres-owner-role=$(ATE_API_POSTGRES_OWNER_ROLE)"
+{{- else }}
         - {{ printf "--postgres-owner-role=%s" .Values.postgres.ownerRole | quote }}
+{{- end }}
         - "--postgres-schema=@env"
         - "--actor-jwt-issuer=@env"
         - "--actor-id-jwt-pool=/run/actor-id-jwt-pool/pool.json"
@@ -205,6 +219,20 @@ spec:
             secretKeyRef:
               name: {{ include "substrate.postgres.ownerSecretName" . | quote }}
               key: {{ get $ownerConnectionStringSecretRef "key" | default "ownerConnectionString" | quote }}
+{{- with .Values.postgres.readWriteRoleSecretRef }}{{- if .name }}
+        - name: ATE_API_POSTGRES_READ_WRITE_ROLE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .name | quote }}
+              key: {{ .key | default "username" | quote }}
+{{- end }}{{- end }}
+{{- with .Values.postgres.ownerRoleSecretRef }}{{- if .name }}
+        - name: ATE_API_POSTGRES_OWNER_ROLE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .name | quote }}
+              key: {{ .key | default "username" | quote }}
+{{- end }}{{- end }}
 {{- with include "substrate.otel.env" . }}
 {{- . | trim | nindent 8 }}
 {{- end }}
