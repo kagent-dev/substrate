@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.ate.dev/substrate/cmd/ate-setup/internal/config"
+	"go.ate.dev/substrate/cmd/ate-setup/internal/images"
 	"go.ate.dev/substrate/cmd/ate-setup/internal/steps"
 )
 
@@ -67,7 +68,10 @@ built unless --overwrite is set. After pushing, every image is checked for
 every platform, and a missing one fails the command.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		opts := steps.PublishReleaseOptions{Overwrite: env.Cfg.Resolved().Bool("publish.overwrite")}
+		opts := steps.PublishReleaseOptions{
+			Overwrite: env.Cfg.Resolved().Bool("publish.overwrite"),
+			SourceURL: env.Cfg.Resolved().String("publish.sourceURL"),
+		}
 		return env.PublishReleaseImages(cmd.Context(), cmd.OutOrStdout(), opts)
 	},
 }
@@ -109,6 +113,12 @@ func init() {
 		Kind: config.KindBool, Default: "false",
 		Commands: []string{publishReleaseImagesPath},
 		Usage:    "Rebuild and replace images the registry already holds for the tag",
+	})
+	config.RegisterCommand(config.Setting{
+		Key: "publish.sourceURL", Env: "ATE_PUBLISH_SOURCE_URL", Flag: "source-url",
+		Kind: config.KindString, Default: images.SourceURL,
+		Commands: []string{publishReleaseImagesPath},
+		Usage:    "Source repository URL recorded in the release images' OCI labels",
 	})
 	config.BindCommandFlags(publishReleaseImagesPath, publishReleaseImagesCmd.Flags())
 }
