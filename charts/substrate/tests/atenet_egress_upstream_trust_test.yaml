@@ -1,0 +1,119 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: atenet egress upstream trust
+templates:
+- atenet-egress.yaml
+tests:
+- it: trusts the image's public roots only by default
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - notContains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: SSL_CERT_DIR
+        value: /run/egress-upstream-trust
+  - notExists:
+      path: spec.template.metadata.annotations
+  - lengthEqual:
+      path: spec.template.spec.volumes
+      count: 5
+
+- it: pins the dynamic HTTPS backend to the image's public bundle by default
+  documentSelector:
+    path: metadata.name
+    value: RELEASE-NAME-atenet-egress-agentgateway-config
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: '- dynamic: \{\}\s+policies:\s+backendTLS:\s+root: /etc/ssl/certs/ca-certificates.crt'
+
+- it: renders no upstream trust ConfigMap by default
+  asserts:
+  - containsDocument:
+      kind: ConfigMap
+      apiVersion: v1
+      name: RELEASE-NAME-atenet-egress-upstream-trust
+    not: true
+
+- it: publishes the bundle as a ConfigMap
+  set:
+    atenetEgress.upstreamTrust.caBundle: |
+      -----BEGIN CERTIFICATE-----
+      MIIBlab
+      -----END CERTIFICATE-----
+  documentSelector:
+    path: metadata.name
+    value: RELEASE-NAME-atenet-egress-upstream-trust
+  asserts:
+  - equal:
+      path: data["ca.crt"]
+      value: |
+        -----BEGIN CERTIFICATE-----
+        MIIBlab
+        -----END CERTIFICATE-----
+
+- it: adds the bundle to the public roots of the egress agentgateway and rolls on a change
+  set:
+    atenetEgress.upstreamTrust.caBundle: |
+      -----BEGIN CERTIFICATE-----
+      MIIBlab
+      -----END CERTIFICATE-----
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: SSL_CERT_FILE
+        value: /etc/ssl/certs/ca-certificates.crt
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: SSL_CERT_DIR
+        value: /run/egress-upstream-trust
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: upstream-trust
+        mountPath: /run/egress-upstream-trust
+        readOnly: true
+  - contains:
+      path: spec.template.spec.volumes
+      content:
+        name: upstream-trust
+        configMap:
+          name: RELEASE-NAME-atenet-egress-upstream-trust
+  - exists:
+      path: spec.template.metadata.annotations["checksum/upstream-trust"]
+
+- it: leaves root out of the dynamic HTTPS backend so the gateway loads the native roots
+  set:
+    atenetEgress.upstreamTrust.caBundle: |
+      -----BEGIN CERTIFICATE-----
+      MIIBlab
+      -----END CERTIFICATE-----
+  documentSelector:
+    path: metadata.name
+    value: RELEASE-NAME-atenet-egress-agentgateway-config
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: '- dynamic: \{\}\s+policies:\s+backendTLS: \{\}'
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: /etc/ssl/certs/ca-certificates.crt

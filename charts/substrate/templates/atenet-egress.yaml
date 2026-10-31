@@ -70,8 +70,15 @@ data:
         - backends:
           - dynamic: {}
             policies:
+              {{- if .Values.atenetEgress.upstreamTrust.caBundle }}
+              {{- /* No root: the gateway then trusts the native roots, which are
+                the image's public bundle plus upstreamTrust (SSL_CERT_FILE and
+                SSL_CERT_DIR on the agentgateway container). */}}
+              backendTLS: {}
+              {{- else }}
               backendTLS:
                 root: /etc/ssl/certs/ca-certificates.crt
+              {{- end }}
           policies:
             substrateEgress:
               host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
@@ -115,6 +122,17 @@ data:
         tcpRoutes:
         - backends:
           - dynamic: {}
+{{- with .Values.atenetEgress.upstreamTrust.caBundle }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "substrate.fullname" (list "atenet-egress-upstream-trust" $) }}
+  namespace: {{ $.Release.Namespace }}
+data:
+  ca.crt: |
+    {{- . | nindent 4 }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -132,6 +150,10 @@ spec:
     metadata:
       labels:
         app: atenet-egress
+      {{- with .Values.atenetEgress.upstreamTrust.caBundle }}
+      annotations:
+        checksum/upstream-trust: {{ . | sha256sum }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atenet-egress" .) }}
       securityContext:
@@ -155,6 +177,14 @@ spec:
               fieldPath: status.podIP
         - name: RUST_LOG
           value: debug
+        {{- if .Values.atenetEgress.upstreamTrust.caBundle }}
+        # Both set: the upstream roots are the image's public bundle plus
+        # upstreamTrust (rustls-native-certs reads the two and nothing else).
+        - name: SSL_CERT_FILE
+          value: /etc/ssl/certs/ca-certificates.crt
+        - name: SSL_CERT_DIR
+          value: /run/egress-upstream-trust
+        {{- end }}
         ports:
         - name: https
           containerPort: 8443
@@ -189,7 +219,17 @@ spec:
         - name: actor-id-ca-certs
           mountPath: /run/actor-id-ca-certs
           readOnly: true
+        {{- if .Values.atenetEgress.upstreamTrust.caBundle }}
+        - name: upstream-trust
+          mountPath: /run/egress-upstream-trust
+          readOnly: true
+        {{- end }}
       volumes:
+      {{- if .Values.atenetEgress.upstreamTrust.caBundle }}
+      - name: upstream-trust
+        configMap:
+          name: {{ include "substrate.fullname" (list "atenet-egress-upstream-trust" .) }}
+      {{- end }}
       - name: egress-mitm
         secret:
           secretName: egress-mitm-ca-pool
