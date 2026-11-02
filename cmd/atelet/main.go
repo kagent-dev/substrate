@@ -41,6 +41,7 @@ import (
 	"go.ate.dev/substrate/cmd/atelet/internal/apivalidation"
 	"go.ate.dev/substrate/cmd/atelet/internal/ateletpath"
 	"go.ate.dev/substrate/cmd/atelet/internal/credentialprovider"
+	"go.ate.dev/substrate/cmd/atelet/internal/dockerconfig"
 	"go.ate.dev/substrate/cmd/atelet/internal/filecache"
 	"go.ate.dev/substrate/cmd/atelet/internal/filecachegc"
 	"go.ate.dev/substrate/cmd/atelet/internal/snapshottracker"
@@ -117,6 +118,7 @@ var (
 	// no cloud SDK compiled in, on any cloud whose nodes configure a provider.
 	imageCredentialProviderConfig = pflag.String("image-credential-provider-config", "", "Path to a kubelet CredentialProviderConfig. Its exec plugins supply image pull credentials; without it, pulls are anonymous.")
 	imageCredentialProviderBinDir = pflag.String("image-credential-provider-bin-dir", "", "Directory holding the credential provider executables named by --image-credential-provider-config. Required when that flag is set.")
+	imagePullDockerConfigs        = pflag.StringSlice("image-pull-docker-config", nil, "Docker config files (a config.json, or the .dockerconfigjson of a mounted kubernetes.io/dockerconfigjson Secret) whose auths supply image pull credentials, tried after the credential providers. Repeatable; re-read on every pull.")
 
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
 	imageCacheDir                = pflag.String("image-cache-dir", ateletpath.ImageCacheDir, "Directory for the node-local OCI image layer cache. Must be on the volume shared with the worker pods (the cached layers are their overlay lowerdirs), and on a disk sized for both capacity and IOPS: unpack throughput is gated by the volume's IOPS.")
@@ -143,7 +145,10 @@ var (
 	snapshotReportGiveUpAfter = pflag.Duration("snapshot-report-give-up-after", snapshottracker.DefaultReportGiveUpAfter, "How long after a background upload or detach atelet keeps retrying a failed snapshot state report before giving up on it.")
 )
 
-var _ imagecache.CandidateKeychain = (*credentialprovider.Keychain)(nil)
+var (
+	_ imagecache.CandidateKeychain = (*credentialprovider.Keychain)(nil)
+	_ imagecache.CandidateKeychain = (*dockerconfig.Keychain)(nil)
+)
 
 func main() {
 	pflag.Parse()
@@ -243,9 +248,11 @@ func main() {
 
 	workerDialer := newWorkerDialer(256)
 
-	// Without a credential provider config, pulls are anonymous: all an
-	// unconfigured node (kind, say) can do and all a public registry needs.
-	var imageCredsKeychain authn.Keychain
+	// Pull credentials come from the node's credential provider plugins, from
+	// mounted Docker configs (image pull Secrets), or both, tried in that order.
+	// With neither, pulls are anonymous: all an unconfigured node (kind, say)
+	// can do and all a public registry needs.
+	var imageKeychains []authn.Keychain
 	if *imageCredentialProviderConfig != "" {
 		if *imageCredentialProviderBinDir == "" {
 			serverboot.Fatal(ctx, "Failed to configure image pull credentials",
@@ -255,8 +262,16 @@ func main() {
 		if err != nil {
 			serverboot.Fatal(ctx, "Failed to configure image pull credentials", err)
 		}
-		imageCredsKeychain = kc
+		imageKeychains = append(imageKeychains, kc)
 	}
+	if len(*imagePullDockerConfigs) > 0 {
+		kc, err := dockerconfig.New(*imagePullDockerConfigs...)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to configure image pull credentials", err)
+		}
+		imageKeychains = append(imageKeychains, kc)
+	}
+	imageCredsKeychain := imagecache.Chain(imageKeychains...)
 
 	// Validated before the caches are cleared, so a directory the flags
 	// reject is never emptied.
