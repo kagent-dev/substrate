@@ -109,6 +109,8 @@ data:
             body: Invalid ate-target-actor header
         substrateIngress:
           host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
+          requestParking:
+            budget: {{ .Values.atenetRouter.requestParking.budget | quote }}
           # AgentGateway only uses atunnel's CONNECT listener.
           connectTargetPort: 8443
           policies:
