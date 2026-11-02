@@ -200,6 +200,9 @@ spec:
         - --image-credential-provider-config=/run/image-credential-provider/config.yaml
         - --image-credential-provider-bin-dir=/run/image-credential-provider/bin
 {{- end }}
+{{- range $i, $name := .Values.atelet.actorImagePullSecrets }}
+        - --image-pull-docker-config=/run/actor-image-pull-secrets/{{ $name }}/.dockerconfigjson
+{{- end }}
         - --grpc-server-cred-bundle=/run/podidentity.podcert.ate.dev/credential-bundle.pem
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - '--herder-allowed-spiffe-id=spiffe://cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "substrate.fullname" (list "ate-api-server" .) }}'
@@ -298,6 +301,11 @@ spec:
 {{- end }}
           readOnly: true
 {{- end }}
+{{- range $i, $name := .Values.atelet.actorImagePullSecrets }}
+        - name: actor-image-pull-secret-{{ $i }}
+          mountPath: /run/actor-image-pull-secrets/{{ $name }}
+          readOnly: true
+{{- end }}
       volumes:
       - name: objectstore-plugin
         emptyDir: {}
@@ -358,3 +366,10 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+{{- range $i, $name := .Values.atelet.actorImagePullSecrets }}
+      # Volume names are indexed: Secret names may hold characters a volume
+      # name cannot (dots, say); the mount path keeps the Secret's name.
+      - name: actor-image-pull-secret-{{ $i }}
+        secret:
+          secretName: {{ $name | quote }}
+{{- end }}

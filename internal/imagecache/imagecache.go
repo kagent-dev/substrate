@@ -902,18 +902,7 @@ func (s *Store) withCredentials(ctx context.Context, parsedRef name.Reference, f
 }
 
 func (s *Store) credentials(ctx context.Context, repo name.Repository) ([]authn.Authenticator, error) {
-	switch kc := s.keychain.(type) {
-	case nil:
-		return nil, nil
-	case CandidateKeychain:
-		return kc.Candidates(ctx, repo)
-	default:
-		auth, err := authn.Resolve(ctx, kc, repo)
-		if err != nil {
-			return nil, err
-		}
-		return []authn.Authenticator{auth}, nil
-	}
+	return candidatesOf(ctx, s.keychain, repo)
 }
 
 // parseRef applies the localhost-registry rewrite (kind local registries) and
