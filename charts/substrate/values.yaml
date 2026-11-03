@@ -159,7 +159,6 @@ atenetRouter:
 
 atenetEgress:
   agentgateway:
-    # RUST_LOG filter. Use debug or a module filter when troubleshooting.
     logLevel: info
     resources:
       requests:
