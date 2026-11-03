@@ -26,7 +26,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "substrate.fullname" (list "rustfs-data" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.commonLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  {{- with .Values.rustfs.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   accessModes:
   - ReadWriteOnce
   resources:
@@ -56,6 +63,10 @@ metadata:
   name: {{ include "substrate.fullname" (list "rustfs" .) }}
   namespace: {{ .Release.Namespace }}
 spec:
+  {{- with .Values.rustfs.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   replicas: 1
   selector:
     matchLabels:
@@ -64,6 +75,13 @@ spec:
     metadata:
       labels:
         app: rustfs
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "rustfs" .) }}
       securityContext:
@@ -108,12 +126,31 @@ kind: Job
 metadata:
   name: {{ include "substrate.fullname" (list "rustfs-bucket-init" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.rustfs.bucketInit.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   backoffLimit: 10
   template:
+    {{- if or .Values.podLabels .Values.podAnnotations }}
+    metadata:
+      {{- with .Values.podLabels }}
+      labels:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
     spec:
       restartPolicy: OnFailure
+      {{- if .Values.rustfs.bucketInit.dedicatedServiceAccount }}
+      serviceAccountName: {{ include "substrate.fullname" (list "rustfs-bucket-init" .) }}
+      {{- else }}
       serviceAccountName: {{ include "substrate.fullname" (list "rustfs" .) }}
+      {{- end }}
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
       - name: create-bucket
@@ -175,4 +212,17 @@ spec:
     ports:
     - protocol: TCP
       port: api
+{{- end }}
+{{- if .Values.rustfs.bucketInit.dedicatedServiceAccount }}
+---
+# A ServiceAccount named like the Job, for admission policies that require it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "substrate.fullname" (list "rustfs-bucket-init" .) }}
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.rustfs.bucketInit.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

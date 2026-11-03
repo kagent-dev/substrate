@@ -126,21 +126,20 @@ spec:
     metadata:
       labels:
         app: atelet
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atelet" .) }}
       priorityClassName: {{ include "substrate.fullname" (list "ate-node-critical" .) }}
-      # Run on nodes reserved for any WorkerPool sandbox class.
       tolerations:
-      - key: ate.dev/sandboxClass
-        operator: Exists
-        effect: NoSchedule
-      # GKE reserves ComputeClass nodes with this taint.
-      - key: cloud.google.com/compute-class
-        operator: Exists
-        effect: NoSchedule
+{{ toYaml .Values.atelet.tolerations | indent 6 }}
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       initContainers:
       - name: objectstore-plugin
@@ -298,6 +297,9 @@ spec:
 {{- end }}
           readOnly: true
 {{- end }}
+{{- with .Values.atelet.extraVolumeMounts }}
+{{ toYaml . | indent 8 }}
+{{- end }}
       volumes:
       - name: objectstore-plugin
         emptyDir: {}
@@ -358,3 +360,6 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+{{- with .Values.atelet.extraVolumes }}
+{{ toYaml . | indent 6 }}
+{{- end }}
