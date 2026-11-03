@@ -374,3 +374,23 @@ tests:
   - matchRegex:
       path: data["config.yaml"]
       pattern: 'source.spiffeId in \["spiffe://cluster.local/ns/client/sa/router-client"\]'
+- it: keeps the router request parking budget at five seconds by default
+  template: atenet-router.yaml
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "5s"'
+- it: configures the router request parking budget
+  template: atenet-router.yaml
+  set:
+    atenetRouter.requestParking.budget: 30s
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "30s"'

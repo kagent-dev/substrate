@@ -143,6 +143,9 @@ ateController:
       memory: 512Mi
 
 atenetRouter:
+  requestParking:
+    # Maximum time to wait for a suspended actor to become routable.
+    budget: 5s
   # mTLS client identities allowed to reach actors. Empty denies all ingress.
   ingressAllowedSPIFFEIDs: []
   agentgateway:
