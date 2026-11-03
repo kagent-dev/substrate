@@ -576,7 +576,7 @@ func (s *AteWorkerService) coldBootActor(ctx context.Context, p actorBootParams)
 	tVsock := time.Now()
 	ac, err := dialAgentRetry(ctx, vsockPath, 60*time.Second)
 	if err != nil {
-		logGuestBootDiagnostics(ctx, actorUID, consoleLog)
+		logGuestDiagnostics(ctx, actorUID)
 		return fmt.Errorf("while dialing kata-agent: %w", err)
 	}
 	tDialed := time.Now()
@@ -799,9 +799,11 @@ func initParams(agentInit bool) string {
 // the earliest messages: hvc0 only exists once virtio-console probes, so the memory
 // map, CPU features and ACPI lines never reach the log. guestDebug adds the UART back
 // with earlycon (and pays the ~800ms) for diagnosing a guest that dies before then.
+//
+// swiotlb=noforce skips the software bounce buffer.
 func buildVMConfig(id, kernel, image, kparams, consoleLog string, memMiB, vcpus int, agentInit, debug bool) ch.VmConfig {
 	cmdline := "root=/dev/pmem0p1 rootflags=dax,data=ordered,errors=remount-ro ro rootfstype=ext4 " +
-		"panic=1 no_timer_check noreplace-smp console=hvc0 " +
+		"panic=1 no_timer_check noreplace-smp console=hvc0 swiotlb=noforce " +
 		initParams(agentInit)
 	if kparams != "" {
 		cmdline += " " + kparams
@@ -1005,13 +1007,11 @@ func dialAgentRetry(ctx context.Context, vsockPath string, timeout time.Duration
 	}
 }
 
-// logGuestBootDiagnostics dumps what the host recorded about a guest that never
-// reached the kata-agent: the console tail, where a guest-side panic or an early
-// power-off shows up, and each virtiofsd's log — cloud-hypervisor stops the VM
-// when a vhost-user backend dies, and that leaves the console silent.
-func logGuestBootDiagnostics(ctx context.Context, actorUID, consoleLog string) {
+// logGuestDiagnostics logs guest console and virtiofsd tails before failure
+// cleanup removes them.
+func logGuestDiagnostics(ctx context.Context, actorUID string) {
 	for _, l := range []struct{ name, path string }{
-		{"console", consoleLog},
+		{"console", kata.ConsoleLogPath(actorUID)},
 		{"serial", kata.SerialLogPath(actorUID)},
 		{"virtiofsd", virtiofsdLogPath(actorUID)},
 	} {
@@ -1019,7 +1019,7 @@ func logGuestBootDiagnostics(ctx context.Context, actorUID, consoleLog string) {
 		if err != nil || len(b) == 0 {
 			continue
 		}
-		slog.ErrorContext(ctx, "agent dial failed; guest boot diagnostics",
+		slog.ErrorContext(ctx, "Guest diagnostics after activation failure", slog.String("id", actorUID),
 			slog.String("log", l.name), slog.String("tail", tailString(string(b), 3000)))
 	}
 }
