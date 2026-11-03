@@ -154,7 +154,7 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         - name: RUST_LOG
-          value: debug
+          value: {{ .Values.atenetEgress.agentgateway.logLevel | quote }}
         ports:
         - name: https
           containerPort: 8443
