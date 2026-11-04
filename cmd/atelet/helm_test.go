@@ -15,10 +15,12 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +30,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 )
 
@@ -233,10 +237,11 @@ func TestHelmGVisorSandboxConfigMatchesManifest(t *testing.T) {
 	}
 }
 
-// helmTemplate returns the rendered manifests without their "# Source:"
-// comments, which name the chart. It reads stdout only, because Helm logs the
-// substrate-atelet chart's symlinked templates on stderr.
-func helmTemplate(t *testing.T, args ...string) string {
+// helmTemplate returns the objects helm template renders. Comparing objects
+// rather than text ignores the whitespace that differs between Helm versions.
+// It reads stdout only, because Helm logs the substrate-atelet chart's
+// symlinked templates on stderr.
+func helmTemplate(t *testing.T, args ...string) []unstructured.Unstructured {
 	t.Helper()
 	var stderr strings.Builder
 	cmd := exec.CommandContext(t.Context(), "helm", append([]string{"template"}, args...)...)
@@ -245,7 +250,19 @@ func helmTemplate(t *testing.T, args ...string) string {
 	if err != nil {
 		t.Fatalf("helm template %v: %v\n%s", args, err, stderr.String())
 	}
-	return regexp.MustCompile(`(?m)^# Source: .*\n`).ReplaceAllString(string(out), "")
+	var objs []unstructured.Unstructured
+	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	for {
+		var obj map[string]any
+		if err := decoder.Decode(&obj); errors.Is(err, io.EOF) {
+			return objs
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if obj != nil {
+			objs = append(objs, unstructured.Unstructured{Object: obj})
+		}
+	}
 }
 
 func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
@@ -264,6 +281,7 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "rustfs.enabled=false",
 				"--set", "ateApi.snapshotLocation=gs://snapshots/",
 				"--set", "atelet.storageBackend=gcs",
+				"--set", "atelet.nodeSelector.pool=agents",
 				"--set", "image.tag=test",
 			},
 		},
@@ -281,19 +299,12 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 }
 
 func TestHelmAteletOptOut(t *testing.T) {
-	out := helmTemplate(t, "substrate", "../../charts/substrate", "--set", "atelet.enabled=false")
-	for _, doc := range strings.Split(out, "\n---\n") {
-		var obj struct {
-			Kind     string
-			Metadata struct{ Name string }
-		}
-		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
-			t.Fatal(err)
-		}
+	for _, obj := range helmTemplate(t, "substrate", "../../charts/substrate", "--set", "atelet.enabled=false") {
+		kind, name := obj.GetKind(), obj.GetName()
 		// The NetworkPolicy still guards an atelet installed by substrate-atelet.
-		if obj.Kind == "DaemonSet" || obj.Kind == "PriorityClass" ||
-			(obj.Kind != "NetworkPolicy" && strings.HasPrefix(obj.Metadata.Name, "atelet")) {
-			t.Errorf("atelet.enabled=false still renders %s %s", obj.Kind, obj.Metadata.Name)
+		if kind == "DaemonSet" || kind == "PriorityClass" ||
+			(kind != "NetworkPolicy" && strings.HasPrefix(name, "atelet")) {
+			t.Errorf("atelet.enabled=false still renders %s %s", kind, name)
 		}
 	}
 }
