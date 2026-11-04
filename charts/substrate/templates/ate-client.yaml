@@ -21,3 +21,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     apps: ate-client
+    {{- with .Values.ateClient.serviceAccount.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.ateClient.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

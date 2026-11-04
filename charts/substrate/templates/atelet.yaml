@@ -28,6 +28,14 @@ kind: ServiceAccount
 metadata:
   name: {{ include "substrate.fullname" (list "atelet" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.atelet.serviceAccount.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.atelet.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- if .Values.atelet.imageCredentialProviderConfigYAML }}
 ---
 apiVersion: v1
