@@ -394,3 +394,48 @@ tests:
   - matchRegex:
       path: data["config.yaml"]
       pattern: 'requestParking:\n\s+budget: "30s"'
+- it: runs only the built-in API server containers by default
+  template: ate-api-server.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - lengthEqual:
+      path: spec.template.spec.initContainers
+      count: 1
+  - lengthEqual:
+      path: spec.template.spec.containers
+      count: 1
+- it: appends extra API server containers
+  template: ate-api-server.yaml
+  set:
+    ateApi.extraInitContainers:
+    - name: helper
+      image: example.com/helper:v1
+      restartPolicy: Always
+    ateApi.extraContainers:
+    - name: extra
+      image: example.com/extra:v1
+      args: [--port=5432]
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - equal:
+      path: spec.template.spec.initContainers[0].name
+      value: objectstore-plugin
+  - equal:
+      path: spec.template.spec.initContainers[1]
+      value:
+        name: helper
+        image: example.com/helper:v1
+        restartPolicy: Always
+  - equal:
+      path: spec.template.spec.containers[0].name
+      value: ate-api-server
+  - equal:
+      path: spec.template.spec.containers[1]
+      value:
+        name: extra
+        image: example.com/extra:v1
+        args: [--port=5432]
