@@ -159,6 +159,7 @@ atenetRouter:
 
 atenetEgress:
   agentgateway:
+    logLevel: info
     resources:
       requests:
         cpu: 50m
