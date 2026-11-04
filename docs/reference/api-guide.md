@@ -48,6 +48,43 @@ syntax.
 metadata; they do not affect actor scheduling. Actor selectors match
 `WorkerPool.metadata.labels`, not `WorkerPool.spec.template.labels`.
 
+#### Worker security
+
+Substrate sets a fixed capability set for each sandbox runtime. Every worker
+drops `ALL` container-runtime default capabilities and adds back only the set
+below: 9 capabilities for gVisor and 11 for microVM. These permissions are not
+configurable per pool. Actor containers are configured separately through
+`ActorTemplate.containers[].securityContext`.
+
+Workers run as UID/GID 0 with `privileged: false` and
+`allowPrivilegeEscalation: false`. They retain `SYS_ADMIN` and `NET_ADMIN` for
+mounts and networking, so they still require trusted nodes and the deployment
+permissions described in [Security](../security/security.md).
+
+| Capability | `gvisor` | `microvm` |
+| --- | --- | --- |
+| `SYS_CHROOT`, `SYS_PTRACE` | Not granted; runsc's sandbox user namespace supplies its own | Not granted |
+| `SETPCAP` | Not granted | Retained so virtiofsd's serving child can drop its bounding set (`PR_CAPBSET_DROP` needs `CAP_SETPCAP`) |
+| `CHOWN`, `FOWNER` | Retained for worker filesystem ownership and mode operations | Same; also used by virtiofsd for guest filesystem operations |
+| `MKNOD` | Not granted; since Linux 5.8, 0:0 overlay whiteouts do not require it | Retained for guest device-node creation |
+| `DAC_READ_SEARCH` | Not granted | Not granted; virtiofsd runs with file handles off (`--inode-file-handles=never`) and needs it only to open them |
+| `FSETID` | Not granted | Retained for virtiofsd's setgid-file behavior |
+| `NET_RAW` | Needed to open the sandbox's raw socket | Not granted |
+| `SETFCAP`, `SETUID` | Needed to start runsc's gofer | Retained in virtiofsd's child set; `SETUID` is needed for non-root guest file creation |
+| `SETGID` | Needed to start runsc's gofer | Needed by virtiofsd to drop supplementary groups |
+| `DAC_OVERRIDE` | Needed to mount the rootfs overlay | Same |
+| `NET_ADMIN` | Needed to set up actor networking | Same |
+| `SYS_ADMIN` | Needed to set up the worker's mounts | Same |
+
+MicroVM workers retain virtiofsd's eight default child capabilities to preserve
+guest filesystem operations. virtiofsd tracks guest inodes with `O_PATH` file
+descriptors instead of file handles, which is also what it falls back to by
+default on the worker's overlayfs rootfs. virtiofsd explicitly uses namespace
+isolation (`pivot_root`, not `chroot`) and its own seccomp filter.
+The outer worker's seccomp and AppArmor profiles remain `Unconfined` so the
+sandbox runtimes can set up their mounts; worker seccomp hardening is separate
+from these capability defaults.
+
 #### Worker Capacity (`spec.template.resources`)
 
 Setting `resources.limits` (CPU and Memory) on a `WorkerPool` establishes each worker pod's **capacity** — the envelope its actor sandboxes share, taken from the `ateworker` container's limits. The scheduler only places an actor on a worker whose remaining capacity is `>=` the actor's declared resource limits (see [Sandbox Right-Sizing](#sandbox-right-sizing-resources) on the `ActorTemplate`).
@@ -111,7 +148,7 @@ The `ActorTemplate` defines the code, environment, and state-management policies
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `containers` | `[]Container` | **Required.** The workload definition — see [Container Fields](#container-fields) below. Each container may also declare an optional `wakeupProbe` HTTP probe — see [Container Wakeup Probe](#container-wakeup-probe-wakeupprobe). |
-| `workerSelector` | `*Selector` | Optional. Gates which `WorkerPool`s actors from this template may use, by matching against each pool's labels (`matchLabels`). If unset, all pools are eligible (subject to the actor's own `worker_selector`). The pool sets the sandbox class, so this is also how a template pins one: if your cluster has pools of more than one sandbox class and the workload needs a particular class, make sure the selector points only at pools of that class. An actor booting with no snapshot and no selector may run on any class, and keeps it from its first checkpoint on. An actor created from the golden snapshot or a `sourceTag` runs on that snapshot's class. See [Sandbox Classes](sandbox-classes.md) for what differs between classes. |
+| `workerSelector` | `*Selector` | Optional. Gates which `WorkerPool`s actors from this template may use, by matching against each pool's labels (`matchLabels`). If unset, all pools are eligible (subject to the actor's own `worker_selector`). The pool sets the sandbox class, so this is also how a template pins one: if your cluster has pools of more than one sandbox class and the workload needs a particular class, make sure the selector points only at pools of that class. An actor booting with no snapshot and no selector may run on any class, and keeps it from its first checkpoint on. An actor created from the golden snapshot or a `sourceTag` runs on that snapshot's class. See [Sandbox Classes](sandbox-classes.md) for what differs between classes. The pools a template selects must also share a CPU architecture; see `sandboxRuntime` under [Snapshot Storage Layout](#snapshot-storage-layout). |
 | `snapshotConfig` | `SnapshotConfig` | Optional; omitted fields take their defaults. The base object-storage location snapshots are written under (a preview field that requires the `PerTemplateSnapshotLocation` gate), the snapshot fidelity (`preferredFidelity`) every Suspend captures, and automated golden snapshot creation (`goldenSnapshotConfig.mode`). See [Snapshot Storage Layout](#snapshot-storage-layout). |
 | `volumes` | `[]Volume` | Optional. Volumes the containers may mount, each a `durableDir`, an `image` read-only OCI image volume (`image.reference`, pinned by digest), an `external` CSI volume source (preview, behind the `ExternalVolumes` gate; see [CSI Volumes Guide](../guides/csi-volumes.md)), or a `systemInfo` volume (see [SystemInfo Volumes](#systeminfo-volumes)). Every declared volume must be mounted by at least one container. A `durableDir` is created `0777`, as Kubernetes creates an emptyDir, so a container running as any user can write it. A snapshot restores it with the mode it had, so the container's own chmod survives suspend and resume. |
 | `resources` | `*ResourceRequirements` | Required. Declares each actor's compute size via `limits`, which must set both `cpuMillicores` and `memoryBytes` — see [Sandbox Right-Sizing](#sandbox-right-sizing-resources). Immutable, like the rest of the template. |
@@ -321,10 +358,10 @@ A container running as root has that set as its effective capabilities. A contai
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `securityContext.capabilities.add` | `[]string` | Optional. Capabilities to grant on top of the default set. `ALL` is **not** accepted here. |
+| `securityContext.capabilities.add` | `[]string` | Optional. Capabilities to grant on top of the default set. Only the allowed capabilities listed below are accepted. |
 | `securityContext.capabilities.drop` | `[]string` | Optional. Capabilities to remove from the default set. `ALL` drops the whole set. |
 
-- **Naming.** Capabilities are named **without** the `CAP_` prefix, as in Kubernetes — `NET_BIND_SERVICE`, not `CAP_NET_BIND_SERVICE`. The prefixed spelling is rejected at admission rather than silently granting nothing.
+- **Naming.** Capabilities are named **without** the `CAP_` prefix, as in Kubernetes — `NET_BIND_SERVICE`, not `CAP_NET_BIND_SERVICE`. The prefixed spelling is rejected at admission rather than silently granting nothing. Unknown names are rejected too, in `drop` as well as `add`, so a typo in `drop` can't leave the capability granted.
 - **Order.** `drop` is applied first, then `add`. A capability named in both is therefore **granted**.
 - **Exact sets.** Because `drop: ["ALL"]` clears the default set, combining it with `add` expresses an exact capability set rather than a relative one:
 
@@ -335,12 +372,12 @@ A container running as root has that set as its effective capabilities. A contai
       add: ["NET_BIND_SERVICE"]
   ```
 
-- **`ALL` in `add` is rejected.** Kubernetes accepts it in the API and relies on PodSecurity admission to deny it; Substrate has no equivalent policy layer yet, so it is refused at admission instead. Name the capabilities the container needs.
+- **Allowed capabilities.** `add` accepts only `AUDIT_WRITE`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `KILL`, `NET_BIND_SERVICE`, `SETFCAP`, `SETGID`, `SETPCAP`, `SETUID` and `SYS_CHROOT`. Any other name, including `ALL`, `DAC_READ_SEARCH`, `MKNOD`, `NET_RAW`, `SYS_ADMIN` and `SYS_PTRACE`, is rejected at admission. These capabilities act on the microVM guest kernel and its devices, not just on the container. `drop` accepts any capability name.
 - **Ambient capabilities are not supported** ([gvisor#3166](https://github.com/google/gvisor/issues/3166)).
 - **Low ports.** A container may bind a port below 1024 without `NET_BIND_SERVICE` on both runtimes: gVisor's network stack has no privileged-port limit, and the microVM guest sets `net.ipv4.ip_unprivileged_port_start=0` to match.
-- **`NET_RAW`.** gVisor removes it even when `add` lists it, and microVM grants it. See [Capabilities (`NET_RAW`)](sandbox-classes.md#capabilities-net_raw).
+- **`ping` without `NET_RAW`.** `NET_RAW` can't be added. Both runtimes let any user open ICMP echo sockets, which is what `ping` uses: gVisor's network stack allows them, and the microVM guest sets `net.ipv4.ping_group_range=0 2147483647` to match.
 - **Setuid binaries work.** Neither runtime sets `no_new_privileges`, as for a Kubernetes container with `allowPrivilegeEscalation: true`; gVisor runs with `--allow-suid`.
-- **Image files owned by other users.** Image files keep the owner their image's layers record, as under containerd. A container running as its image's `USER` can use what the image gave that user, for example after `RUN chown -R app:app /app` and `USER app`. A container running as root, because its image sets no `USER` or `USER root`, has no `DAC_OVERRIDE` or `DAC_READ_SEARCH` by default. On a file or directory another user owns, it gets only what the permission bits grant to others. Add `DAC_OVERRIDE` if it writes to such files, or `DAC_READ_SEARCH` if it only reads them.
+- **Image files owned by other users.** Image files keep the owner their image's layers record, as under containerd. A container running as its image's `USER` can use what the image gave that user, for example after `RUN chown -R app:app /app` and `USER app`. A container running as root, because its image sets no `USER` or `USER root`, has no `DAC_OVERRIDE` by default. On a file or directory another user owns, it gets only what the permission bits grant to others. Add `DAC_OVERRIDE` if it reads or writes such files.
 
 The sandbox — gVisor or microVM — remains the isolation boundary; capabilities constrain the workload *inside* it.
 
@@ -547,7 +584,7 @@ Each entry of `versions` (`SandboxVersionConfig`):
 | :--- | :--- | :--- |
 | `name` | `string` | **Required.** Identifies the version within the config. A DNS label (lower-case alphanumerics and `-`, at most 63 characters). |
 | `state` | `string` | Optional. `Enabled` (default) or `Disabled`. The version named by `defaultVersion` cannot be `Disabled`. |
-| `assets` | `map[arch]map[name]AssetFile` | Content-addressed files atelet fetches, keyed by architecture (`amd64`, `arm64`) then asset name. gVisor expects a `gvisor` asset (the release's `gvisor.tar.zstd`), which atelet auto-extracts. A microVM backend expects several. Each `AssetFile` is a `{ url, sha256 }` pair; `url` is at most 2048 bytes. A `ValidatingAdmissionPolicy` enforces each class's required assets on every version. atelet holds no storage credentials: it fetches every URL through the node's object-store plugin (`AssetProvider`), with the plugin's credentials. Which schemes work depends on the plugin; the in-tree one serves only its storage backend's scheme, `gs://` on GCS and `s3://` on S3, as `<bucket>/<object>`, and rejects other schemes without reading them. A `gs://` URL the plugin cannot serve (it has no such object, rejects the URL, does not implement `AssetProvider`, is unreachable, or fails with an error it does not recognize, such as GCS refusing its credentials for a public bucket) is then read anonymously, which serves public buckets such as `gs://gvisor`; any other refusal by the plugin is final. The plugin returns an object only if its content matches `sha256`, and refuses any URL under a snapshot location (a snapshot location followed by `/atespaces/`), so assets must not be stored there. On GKE, setup-gcp lets the plugin read only the asset bucket, `<BUCKET_NAME>-assets`, so keep assets there. atelet verifies the sha256 again before using an asset. Its logs and errors show an asset URL as `scheme://host/path`. |
+| `assets` | `map[arch]map[name]AssetFile` | Content-addressed files atelet fetches, keyed by architecture (`amd64`, `arm64`) then asset name. gVisor expects a `gvisor` asset (the release's `gvisor.tar.zstd`), which atelet auto-extracts. A microVM backend expects several. Each `AssetFile` is a `{ url, sha256 }` pair; `url` is at most 2048 bytes. A `ValidatingAdmissionPolicy` enforces each class's required assets on every version. atelet holds no storage credentials: it fetches every URL through the node's object-store plugin (`AssetProvider`), with the plugin's credentials. Which schemes work depends on the plugin; the in-tree one serves only its storage backend's scheme, `gs://` on GCS and `s3://` on S3, as `<bucket>/<object>`, and rejects other schemes without reading them. A `gs://` URL the plugin cannot serve (it has no such object, rejects the URL, does not implement `AssetProvider`, is unreachable, or fails with an error it does not recognize, such as GCS refusing its credentials for a public bucket) is then read anonymously, which serves public buckets such as `gs://gvisor`; any other refusal by the plugin is final. The plugin returns an object only if its content matches `sha256`, and refuses any URL under a snapshot location (a snapshot location followed by `/atespaces/`), so assets must not be stored there. On GKE, substrate-gke's setup-gcp lets the plugin read only the asset bucket, `<BUCKET_NAME>-assets`, so keep assets there. atelet verifies the sha256 again before using an asset. Its logs and errors show an asset URL as `scheme://host/path`. |
 
 A cluster-wide gVisor `SandboxConfig` (`gvisor-default`, annotated as the class default) is installed with the platform, so gVisor `WorkerPool`s use it automatically without any extra setup.
 
@@ -586,7 +623,7 @@ metadata:
     sandboxconfig.ate.dev/is-class-default: "true"
 spec:
   sandboxClass: gvisor
-  defaultVersion: v6
+  defaultVersion: v7
   versions:
   - name: v6
     state: Enabled
@@ -599,13 +636,24 @@ spec:
         gvisor:
           url: "gs://gvisor/releases/release/20261026.0/aarch64/gvisor.tar.zstd"
           sha256: "6257e49955f13e6caceb2c4181c5dc5406c460e805940c944e67ad65553f5b02"
+  - name: v7
+    state: Enabled
+    assets:
+      amd64:
+        gvisor:
+          url: "gs://gvisor/releases/release/20261102.0/x86_64/gvisor.tar.zstd"
+          sha256: "a1439ffbba7d212e0fde32ea79fa9bb51cbc4c5f6c16af1f047260290b861d42"
+      arm64:
+        gvisor:
+          url: "gs://gvisor/releases/release/20261102.0/aarch64/gvisor.tar.zstd"
+          sha256: "f702ae92ad7a0c4134be34ca23f52966dbb696db0c0f5b8ec439210ab2cd7c6a"
 ```
 
 ### MicroVM SandboxConfig
 
 A `microvm` `SandboxConfig` supplies the [Kata Containers](https://katacontainers.io/) + [Cloud Hypervisor](https://www.cloudhypervisor.org/) toolchain instead of `runsc`. Each architecture of each version must define the full asset set — `cloud-hypervisor`, `virtiofsd`, `kata-kernel`, and `kata-image` — which a `ValidatingAdmissionPolicy` enforces at apply time. Worker pods for a microVM pool require `/dev/kvm` and nested-virtualization-capable nodes. The controller requests those devices on the pod automatically, and atelet advertises them only where they exist, so placement follows the hardware rather than a node label. Clusters that reserve nested-virt nodes with an `ate.dev/sandboxClass=microvm` taint are still tolerated: advertising a device attracts these pods to capable nodes but repels nothing else from them. The same convention applies to every class: worker pods of a pool tolerate `ate.dev/sandboxClass=<its class>:NoSchedule`, so a cluster can reserve a node pool per sandbox class with that taint, and the atelet DaemonSet tolerates the key for any value. On GKE, a pool can also select a ComputeClass with `template.nodeSelector` (`cloud.google.com/compute-class: <class>`): GKE taints the nodes it creates for the class `cloud.google.com/compute-class=<class>:NoSchedule` and adds the matching toleration to the worker pods, and the atelet DaemonSet tolerates that key as well.
 
-See [`hack/microvm-assets/`](../../hack/microvm-assets/) for scripts that assemble and stage these assets, plus a worked counter demo (`demos/counter/counter-microvm.yaml.tmpl`) that suspends and resumes an in-RAM counter across worker pods.
+`go run ./cmd/ate-setup deploy ate-system` (and `deploy sandboxconfig`) assembles and stages these assets automatically; see [`docs/dev/microvm-local.md`](../dev/microvm-local.md) for local bring-up and a worked counter demo (`demos/counter/counter-microvm.yaml.tmpl`) that suspends and resumes an in-RAM counter across worker pods.
 
 ---
 

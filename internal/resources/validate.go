@@ -39,6 +39,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/api/validate/content"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -406,30 +407,75 @@ func ValidatePinnedImage(fldPath *field.Path, value string) field.ErrorList {
 	return nil
 }
 
-// capabilityRE constrains Linux capability names: uppercase, without the
-// "CAP_" prefix (which is added when the OCI spec is written; the prefixed
-// spelling would silently grant nothing).
-var capabilityRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+// linuxCapabilities are the Linux capability names, in bit order, without the
+// "CAP_" prefix (which is added when the OCI spec is written). runsc and
+// kata-agent accept exactly these, and kata-agent panics on any other name.
+var linuxCapabilities = sets.New(
+	"CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER", "FSETID",
+	"KILL", "SETGID", "SETUID", "SETPCAP", "LINUX_IMMUTABLE",
+	"NET_BIND_SERVICE", "NET_BROADCAST", "NET_ADMIN", "NET_RAW", "IPC_LOCK",
+	"IPC_OWNER", "SYS_MODULE", "SYS_RAWIO", "SYS_CHROOT", "SYS_PTRACE",
+	"SYS_PACCT", "SYS_ADMIN", "SYS_BOOT", "SYS_NICE", "SYS_RESOURCE",
+	"SYS_TIME", "SYS_TTY_CONFIG", "MKNOD", "LEASE", "AUDIT_WRITE",
+	"AUDIT_CONTROL", "SETFCAP", "MAC_OVERRIDE", "MAC_ADMIN", "SYSLOG",
+	"WAKE_ALARM", "BLOCK_SUSPEND", "AUDIT_READ", "PERFMON", "BPF",
+	"CHECKPOINT_RESTORE",
+)
 
-// ValidateCapabilities checks each capability name. "ALL" is accepted only
-// when allowAll is set, which is the case for drop but not add.
-func ValidateCapabilities(fldPath *field.Path, caps []string, allowAll bool) field.ErrorList {
+// AllowedAddCapabilities are the capabilities a container may add.
+var AllowedAddCapabilities = sets.New(
+	"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL",
+	"NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT",
+)
+
+// ValidateAddCapabilities accepts only AllowedAddCapabilities.
+func ValidateAddCapabilities(fldPath *field.Path, caps []string) field.ErrorList {
 	var errs field.ErrorList
 	for i, c := range caps {
 		p := fldPath.Index(i)
-		switch {
-		case c == "ALL" && !allowAll:
-			errs = append(errs, field.Invalid(p, c, "add does not accept 'ALL'; name the individual capabilities the container needs"))
-		case c == "ALL":
-		case len(c) > 63:
-			errs = append(errs, field.TooLong(p, nil, 63))
-		case strings.HasPrefix(c, "CAP_"):
-			errs = append(errs, field.Invalid(p, c, "must be named without the 'CAP_' prefix (e.g. 'NET_BIND_SERVICE')"))
-		case !capabilityRE.MatchString(c):
-			errs = append(errs, field.Invalid(p, c, "must be an uppercase capability name like 'NET_BIND_SERVICE'"))
+		if c == "ALL" {
+			errs = append(errs, field.Invalid(p, c, "'ALL' is not accepted; name the individual capabilities the container needs, from: "+strings.Join(sets.List(AllowedAddCapabilities), ", ")))
+			continue
+		}
+		if err := validateCapabilityName(p, c); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !AllowedAddCapabilities.Has(c) {
+			errs = append(errs, field.NotSupported(p, c, sets.List(AllowedAddCapabilities)))
 		}
 	}
 	return errs
+}
+
+// ValidateDropCapabilities accepts "ALL" and any Linux capability name.
+func ValidateDropCapabilities(fldPath *field.Path, caps []string) field.ErrorList {
+	var errs field.ErrorList
+	for i, c := range caps {
+		p := fldPath.Index(i)
+		if c == "ALL" {
+			continue
+		}
+		if err := validateCapabilityName(p, c); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !linuxCapabilities.Has(c) {
+			errs = append(errs, field.NotSupported(p, c, append(sets.List(linuxCapabilities), "ALL")))
+		}
+	}
+	return errs
+}
+
+// validateCapabilityName rejects names too long or spelled with "CAP_".
+func validateCapabilityName(p *field.Path, c string) *field.Error {
+	switch {
+	case len(c) > 63:
+		return field.TooLong(p, nil, 63)
+	case strings.HasPrefix(c, "CAP_"):
+		return field.Invalid(p, c, "must be named without the 'CAP_' prefix (e.g. 'NET_BIND_SERVICE')")
+	}
+	return nil
 }
 
 // mountPathBadSegmentRE matches '.' or '..' path segments.
@@ -437,7 +483,8 @@ var mountPathBadSegmentRE = regexp.MustCompile(`(^|/)[.][.]?(/|$)`)
 
 // ValidateMountPath requires a clean absolute Unix path that starts with '/',
 // is not '/', and contains no ':', '.' or '..' segments, '//', trailing '/',
-// or control characters.
+// or control characters. It also rejects /dev, and /dev/pts, /proc, /sys and
+// the paths under them.
 func ValidateMountPath(fldPath *field.Path, p string) field.ErrorList {
 	if p == "" {
 		return nil
@@ -455,6 +502,15 @@ func ValidateMountPath(fldPath *field.Path, p string) field.ErrorList {
 	}
 	if bad {
 		return field.ErrorList{field.Invalid(fldPath, p, "must be a clean absolute Unix path: must start with '/', not be '/', and contain no ':', '..', '.', '//', trailing '/', or control characters")}
+	}
+	// A volume on these paths hides a filesystem the container needs: runsc
+	// replaces /dev and /dev/pts, and kata-agent refuses a bind under /proc.
+	reserved := p == "/dev"
+	for _, dir := range []string{"/dev/pts", "/proc", "/sys"} {
+		reserved = reserved || p == dir || strings.HasPrefix(p, dir+"/")
+	}
+	if reserved {
+		return field.ErrorList{field.Invalid(fldPath, p, "must not be /dev, and must not be /dev/pts, /proc, /sys, or a path under them")}
 	}
 	return nil
 }

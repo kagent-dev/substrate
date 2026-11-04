@@ -63,6 +63,44 @@ func TestHelmAPIServerFlags(t *testing.T) {
 	}
 }
 
+func TestHelmAPIServerConfigRollout(t *testing.T) {
+	render := func(t *testing.T, setting string) corev1.PodTemplateSpec {
+		t.Helper()
+		args := []string{"template", "test", "../../charts/substrate", "--show-only", "templates/ate-api-server.yaml"}
+		if setting != "" {
+			args = append(args, "--set", setting)
+		}
+		out, err := exec.CommandContext(t.Context(), "helm", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("render: %v\n%s", err, out)
+		}
+		for _, doc := range strings.Split(string(out), "\n---\n") {
+			var deployment appsv1.Deployment
+			if err := yaml.Unmarshal([]byte(doc), &deployment); err != nil {
+				t.Fatal(err)
+			}
+			if deployment.Kind == "Deployment" {
+				return deployment.Spec.Template
+			}
+		}
+		t.Fatal("missing API server deployment")
+		return corev1.PodTemplateSpec{}
+	}
+	baseline := render(t, "")
+	for _, setting := range []string{
+		"ateApi.actorJWTIssuer=https://actors.example.com",
+		"ateApi.snapshotLocation=gs://snapshots/prefix/",
+		"objectStorePlugin.transferServiceAccount=transfer@example.iam.gserviceaccount.com",
+		"postgres.schema=custom",
+	} {
+		t.Run(setting, func(t *testing.T) {
+			if reflect.DeepEqual(baseline, render(t, setting)) {
+				t.Error("API environment changed without rolling the pods")
+			}
+		})
+	}
+}
+
 func TestHelmPreviewGates(t *testing.T) {
 	for _, gates := range []string{"", "ExternalVolumes", "ALL"} {
 		t.Run("preview="+gates, func(t *testing.T) {
