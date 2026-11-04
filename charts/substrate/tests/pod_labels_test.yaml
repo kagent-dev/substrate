@@ -1,0 +1,75 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: Pod labels
+templates:
+- ate-api-server.yaml
+- ate-controller.yaml
+- atelet.yaml
+- atenet-egress.yaml
+- atenet-router.yaml
+- k8s-credential-provider.yaml
+- rustfs.yaml
+tests:
+- it: adds podLabels to every Deployment pod next to the app label
+  set:
+    podLabels:
+      giantswarm.io/tenant: team-a
+      example.com/tier: control
+  documentSelector:
+    path: kind
+    value: Deployment
+    skipEmptyTemplates: true
+    matchMany: true
+  asserts:
+  - isSubset:
+      path: spec.template.metadata.labels
+      content:
+        giantswarm.io/tenant: team-a
+        example.com/tier: control
+  - exists:
+      path: spec.template.metadata.labels.app
+  - notExists:
+      path: spec.selector.matchLabels["giantswarm.io/tenant"]
+
+- it: adds podLabels to the atelet DaemonSet pod
+  template: atelet.yaml
+  set:
+    podLabels:
+      giantswarm.io/tenant: team-a
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.metadata.labels
+      value:
+        app: atelet
+        giantswarm.io/tenant: team-a
+  - equal:
+      path: spec.selector.matchLabels
+      value:
+        app: atelet
+
+- it: leaves the rustfs-bucket-init Job pod without podLabels
+  template: rustfs.yaml
+  set:
+    podLabels:
+      giantswarm.io/tenant: team-a
+  documentSelector:
+    path: kind
+    value: Job
+  asserts:
+  - notExists:
+      path: spec.template.metadata.labels["giantswarm.io/tenant"]
