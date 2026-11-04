@@ -61,6 +61,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
 | `atenetRouter.requestParking.budget` | `5s` | Maximum wait for a suspended actor to become routable, e.g. `30s` for slower cold starts |
+| `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
