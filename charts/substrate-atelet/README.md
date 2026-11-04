@@ -35,6 +35,7 @@ To move atelet to this chart without restarting it, keep the objects through
 that upgrade, then hand them to the new release:
 
 ```sh
+# Runs a kubectl verb on every object the atelet template renders.
 objects() {
   local verb="$1"; shift
   kubectl -n ate-system "${verb}" serviceaccount/atelet daemonset/atelet \
@@ -42,12 +43,19 @@ objects() {
   kubectl "${verb}" clusterrole/atelet-role clusterrolebinding/atelet-binding \
     priorityclass/ate-node-critical "$@"
 }
+
+# 1. Keep the objects when the substrate release stops rendering them.
 objects annotate --overwrite helm.sh/resource-policy=keep
+# 2. Stop managing atelet in the substrate release.
 helm upgrade substrate ./charts/substrate -n ate-system \
   -f values.yaml --set atelet.enabled=false
+# 3. Hand the objects to the new release. Helm refuses to install over
+#    objects that name another release.
 objects annotate --overwrite meta.helm.sh/release-name=substrate-atelet
+# 4. Install the new release. It adopts the objects.
 helm upgrade --install substrate-atelet ./charts/substrate-atelet \
   -n ate-system -f values.yaml --wait
+# 5. Remove the keep policy so later upgrades can delete the objects.
 objects annotate helm.sh/resource-policy-
 ```
 
