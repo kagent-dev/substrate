@@ -18,6 +18,7 @@ templates:
 - ate-api-config.yaml
 - ate-controller.yaml
 - atenet-router.yaml
+- atenet-egress.yaml
 - role.yaml
 - atelet.yaml
 - k8s-credential-provider.yaml
@@ -114,6 +115,23 @@ tests:
         key: cloud.google.com/compute-class
         operator: Exists
         effect: NoSchedule
+- it: schedules atelet on every node by default
+  - notExists:
+      path: spec.template.spec.nodeSelector
+- it: restricts atelet to nodes matching atelet.nodeSelector
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  set:
+    atelet:
+      nodeSelector:
+        pool: agents
+  asserts:
+  - equal:
+      path: spec.template.spec.nodeSelector
+      value:
+        pool: agents
 - it: lets atelet preserve image ownership and permissions
   template: atelet.yaml
   documentSelector:
@@ -396,10 +414,6 @@ tests:
       pattern: 'requestParking:\n\s+budget: "30s"'
 - it: runs only the built-in API server containers by default
   template: ate-api-server.yaml
-  documentSelector:
-    path: kind
-    value: Deployment
-  asserts:
   - lengthEqual:
       path: spec.template.spec.initContainers
       count: 1
@@ -417,10 +431,6 @@ tests:
     - name: extra
       image: example.com/extra:v1
       args: [--port=5432]
-  documentSelector:
-    path: kind
-    value: Deployment
-  asserts:
   - equal:
       path: spec.template.spec.initContainers[0].name
       value: objectstore-plugin
@@ -439,3 +449,40 @@ tests:
         name: extra
         image: example.com/extra:v1
         args: [--port=5432]
+- it: defaults the egress proxy log filter to info
+  template: atenet-egress.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: info
+- it: configures the egress proxy log filter
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.agentgateway.logLevel: debug
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: debug
+- it: preserves module filters in the egress proxy log filter
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.agentgateway.logLevel: "info,agentgateway=debug"
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: "info,agentgateway=debug"

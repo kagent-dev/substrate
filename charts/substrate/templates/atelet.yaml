@@ -132,6 +132,10 @@ spec:
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atelet" .) }}
       priorityClassName: {{ include "substrate.fullname" (list "ate-node-critical" .) }}
+      {{- with .Values.atelet.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       # Run on nodes reserved for any WorkerPool sandbox class.
       tolerations:
       - key: ate.dev/sandboxClass
