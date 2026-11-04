@@ -116,6 +116,11 @@ tests:
         operator: Exists
         effect: NoSchedule
 - it: schedules atelet on every node by default
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
   - notExists:
       path: spec.template.spec.nodeSelector
 - it: restricts atelet to nodes matching atelet.nodeSelector
