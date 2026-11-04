@@ -91,6 +91,7 @@ jobs:
     - name: Provision PostgreSQL and connection Secrets
       run: hack/install-postgres.sh --kind
     - name: Install Agent Substrate with Helm
+      # Networking tests assert the debug-level CONNECT tunnel log.
       run: |
         helm upgrade --install substrate charts/substrate \
           --namespace ate-system \
@@ -101,6 +102,7 @@ jobs:
           --set image.tag=helm-e2e \
           --set 'preview[0]=ALL' \
           --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
+          --set atenetEgress.agentgateway.logLevel=debug \
           --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
           --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
           --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
