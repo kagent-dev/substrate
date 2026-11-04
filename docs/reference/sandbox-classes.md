@@ -3,7 +3,7 @@ title: "Sandbox Classes"
 linkTitle: "Sandbox Classes"
 weight: 6
 description: >
-  How the gvisor and microvm sandbox classes differ in sizing, capabilities, mounts, and snapshots.
+  How the gvisor and microvm sandbox classes differ in sizing, capabilities, and snapshots.
 ---
 
 # Sandbox Classes
@@ -22,10 +22,6 @@ An [`ActorTemplate`](api-guide.md#2-actortemplate-the-workload-blueprint) select
 | CPU limit enforcement | Host cgroup v2 `cpu.max` on the sandbox | Guest vCPU count, plus host cgroup v2 `cpu.max` on the VMM and `virtiofsd` |
 | Minimum `limits.memoryBytes` | None enforced by worker | `128 MiB` (`134217728` bytes) |
 | Per-container limits (`containers[].resources.limits`) | Accepted in the API, ignored at runtime | Enforced via guest cgroups (`cpuMillicores` floored at 10) |
-| `NET_RAW` capability | Stripped (`runsc` default `--net-raw=false`) | Granted when listed in `securityContext.capabilities.add` |
-| `/dev/shm` | `0755` directory on the `runsc` `dev` filesystem | `64 MiB` `tmpfs` (`mode=1777`) |
-| `/run` | Part of the container rootfs overlay | `64 MiB` `tmpfs` (`mode=0755`) |
-| `/tmp` | `tmpfs` when the image's `/tmp` is missing or empty, otherwise rootfs overlay | Part of the container rootfs overlay |
 | `VOLUMES` and `ROOTFS` snapshot format | `runsc` filesystem checkpoint bundles (`fs/`, `rootfs/`) | Tar archives of the host directories |
 
 ## CPU Count and Throttling
@@ -51,21 +47,13 @@ Containers may declare optional `containers[].resources.limits` (`cpuMillicores`
 
 See [Per-container limits](api-guide.md#per-container-limits) in the API Guide.
 
-## Capabilities (`NET_RAW`)
+## System Mounts (`/dev/shm` and `/tmp`)
 
-Both sandbox classes start from the same default capability set (`AUDIT_WRITE`, `KILL`, `NET_BIND_SERVICE`), allow binding ports below 1024 without `NET_BIND_SERVICE`, and allow `setuid` binaries.
+Each container gets its own `tmpfs` at `/dev/shm` (`64 MiB`, mode `1777`, `noexec`) and `/tmp` (mode `1777`). `/tmp` holds at most half of `limits.memoryBytes` on `gvisor`, and half of usable guest RAM (`MemTotal`) on `microvm`. The `/tmp` mount hides any files the image has in `/tmp`. A volume at either path replaces the `tmpfs`. Files in these `tmpfs` mounts count against the actor's memory limit. They live outside the container's rootfs overlay, so `MEMORY` snapshots keep them and `ROOTFS` snapshots start with them empty.
 
-They differ on `NET_RAW`:
+Neither sandbox class mounts anything at `/run`. As with containerd, `/run` is part of the container's rootfs overlay, so the image's files there stay visible and `ROOTFS` snapshots keep them.
 
-- **gVisor (`gvisor`):** `ateworker-gvisor` does not enable `runsc --net-raw`, which defaults to `false`. `runsc` then removes `CAP_NET_RAW` from the container and disables raw sockets (`AF_PACKET` and `SOCK_RAW`), even when `securityContext.capabilities.add` includes `NET_RAW`.
-- **MicroVM (`microvm`):** Adding `NET_RAW` in `securityContext.capabilities.add` grants `CAP_NET_RAW` inside the guest container.
-
-See [Container Capabilities](api-guide.md#container-capabilities-securitycontextcapabilities) in the API Guide.
-
-## System Mounts (`/dev/shm`, `/run`, `/tmp`)
-
-- **gVisor (`gvisor`):** `runsc` mounts its internal `dev` filesystem at `/dev`, where `/dev/shm` is a `0755` directory, so only root can create files there. `/run` lives on the container's rootfs overlay. `runsc` mounts a `tmpfs` (`mode=01777`) at `/tmp` when the image's `/tmp` is missing or empty and no volume is mounted there. Files in `/dev/shm` and in that `/tmp` `tmpfs` live outside the rootfs overlay, so only `MEMORY` snapshots keep them.
-- **MicroVM (`microvm`):** `ateworker-microvm` mounts a `64 MiB` `tmpfs` at `/dev/shm` (`mode=1777`, `nosuid`, `nodev`, `noexec`) and at `/run` (`mode=0755`, `nosuid`, `strictatime`). `/tmp` lives on the container's host-backed rootfs overlay, so `ROOTFS` snapshots keep its files. Files in `/dev/shm` and `/run` live in guest memory, so only `MEMORY` snapshots keep them.
+Volumes cannot mount at `/dev`, or at or under `/dev/pts`, `/proc`, or `/sys`.
 
 ## Snapshots (`VOLUMES`, `ROOTFS`, and `MEMORY`)
 

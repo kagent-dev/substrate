@@ -62,7 +62,7 @@ tests:
   - equal:
       path: data.ATE_API_SNAPSHOT_LOCATION
       value: ""
-- it: supplies the exchange identity and only public JWT keys
+- it: supplies the exchange identity and trust for OIDC discovery
   template: ate-api-server.yaml
   documentSelector:
     path: kind
@@ -105,25 +105,19 @@ tests:
   - contains:
       path: spec.template.spec.initContainers[0].volumeMounts
       content:
-        name: actor-id-jwt-jwks
-        mountPath: /run/actor-id-jwt-jwks
+        name: servicedns
+        mountPath: /run/servicedns.podcert.ate.dev
         readOnly: true
   - notContains:
       path: spec.template.spec.initContainers[0].volumeMounts
       content:
         name: actor-id-jwt-pool
       any: true
-  - contains:
+  - notContains:
       path: spec.template.spec.volumes
       content:
         name: actor-id-jwt-jwks
-        projected:
-          sources:
-          - secret:
-              name: actor-id-jwt-pool
-              items:
-              - key: jwks
-                path: jwks.json
+      any: true
 - it: exposes the exchange through the API service
   template: ate-api-server.yaml
   documentSelector:

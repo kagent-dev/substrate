@@ -358,7 +358,7 @@ A container running as root has that set as its effective capabilities. A contai
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `securityContext.capabilities.add` | `[]string` | Optional. Capabilities to grant on top of the default set. `ALL` is **not** accepted here. |
+| `securityContext.capabilities.add` | `[]string` | Optional. Capabilities to grant on top of the default set. Only the allowed capabilities listed below are accepted. |
 | `securityContext.capabilities.drop` | `[]string` | Optional. Capabilities to remove from the default set. `ALL` drops the whole set. |
 
 - **Naming.** Capabilities are named **without** the `CAP_` prefix, as in Kubernetes — `NET_BIND_SERVICE`, not `CAP_NET_BIND_SERVICE`. The prefixed spelling is rejected at admission rather than silently granting nothing. Unknown names are rejected too, in `drop` as well as `add`, so a typo in `drop` can't leave the capability granted.
@@ -372,12 +372,12 @@ A container running as root has that set as its effective capabilities. A contai
       add: ["NET_BIND_SERVICE"]
   ```
 
-- **`ALL` in `add` is rejected.** Kubernetes accepts it in the API and relies on PodSecurity admission to deny it; Substrate has no equivalent policy layer yet, so it is refused at admission instead. Name the capabilities the container needs.
+- **Allowed capabilities.** `add` accepts only `AUDIT_WRITE`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `KILL`, `NET_BIND_SERVICE`, `SETFCAP`, `SETGID`, `SETPCAP`, `SETUID` and `SYS_CHROOT`. Any other name, including `ALL`, `DAC_READ_SEARCH`, `MKNOD`, `NET_RAW`, `SYS_ADMIN` and `SYS_PTRACE`, is rejected at admission. These capabilities act on the microVM guest kernel and its devices, not just on the container. `drop` accepts any capability name.
 - **Ambient capabilities are not supported** ([gvisor#3166](https://github.com/google/gvisor/issues/3166)).
 - **Low ports.** A container may bind a port below 1024 without `NET_BIND_SERVICE` on both runtimes: gVisor's network stack has no privileged-port limit, and the microVM guest sets `net.ipv4.ip_unprivileged_port_start=0` to match.
-- **`NET_RAW`.** gVisor removes it even when `add` lists it, and microVM grants it. See [Capabilities (`NET_RAW`)](sandbox-classes.md#capabilities-net_raw).
+- **`ping` without `NET_RAW`.** `NET_RAW` can't be added. Both runtimes let any user open ICMP echo sockets, which is what `ping` uses: gVisor's network stack allows them, and the microVM guest sets `net.ipv4.ping_group_range=0 2147483647` to match.
 - **Setuid binaries work.** Neither runtime sets `no_new_privileges`, as for a Kubernetes container with `allowPrivilegeEscalation: true`; gVisor runs with `--allow-suid`.
-- **Image files owned by other users.** Image files keep the owner their image's layers record, as under containerd. A container running as its image's `USER` can use what the image gave that user, for example after `RUN chown -R app:app /app` and `USER app`. A container running as root, because its image sets no `USER` or `USER root`, has no `DAC_OVERRIDE` or `DAC_READ_SEARCH` by default. On a file or directory another user owns, it gets only what the permission bits grant to others. Add `DAC_OVERRIDE` if it writes to such files, or `DAC_READ_SEARCH` if it only reads them.
+- **Image files owned by other users.** Image files keep the owner their image's layers record, as under containerd. A container running as its image's `USER` can use what the image gave that user, for example after `RUN chown -R app:app /app` and `USER app`. A container running as root, because its image sets no `USER` or `USER root`, has no `DAC_OVERRIDE` by default. On a file or directory another user owns, it gets only what the permission bits grant to others. Add `DAC_OVERRIDE` if it reads or writes such files.
 
 The sandbox — gVisor or microVM — remains the isolation boundary; capabilities constrain the workload *inside* it.
 
@@ -584,7 +584,7 @@ Each entry of `versions` (`SandboxVersionConfig`):
 | :--- | :--- | :--- |
 | `name` | `string` | **Required.** Identifies the version within the config. A DNS label (lower-case alphanumerics and `-`, at most 63 characters). |
 | `state` | `string` | Optional. `Enabled` (default) or `Disabled`. The version named by `defaultVersion` cannot be `Disabled`. |
-| `assets` | `map[arch]map[name]AssetFile` | Content-addressed files atelet fetches, keyed by architecture (`amd64`, `arm64`) then asset name. gVisor expects a `gvisor` asset (the release's `gvisor.tar.zstd`), which atelet auto-extracts. A microVM backend expects several. Each `AssetFile` is a `{ url, sha256 }` pair; `url` is at most 2048 bytes. A `ValidatingAdmissionPolicy` enforces each class's required assets on every version. atelet holds no storage credentials: it fetches every URL through the node's object-store plugin (`AssetProvider`), with the plugin's credentials. Which schemes work depends on the plugin; the in-tree one serves only its storage backend's scheme, `gs://` on GCS and `s3://` on S3, as `<bucket>/<object>`, and rejects other schemes without reading them. A `gs://` URL the plugin cannot serve (it has no such object, rejects the URL, does not implement `AssetProvider`, is unreachable, or fails with an error it does not recognize, such as GCS refusing its credentials for a public bucket) is then read anonymously, which serves public buckets such as `gs://gvisor`; any other refusal by the plugin is final. The plugin returns an object only if its content matches `sha256`, and refuses any URL under a snapshot location (a snapshot location followed by `/atespaces/`), so assets must not be stored there. On GKE, setup-gcp lets the plugin read only the asset bucket, `<BUCKET_NAME>-assets`, so keep assets there. atelet verifies the sha256 again before using an asset. Its logs and errors show an asset URL as `scheme://host/path`. |
+| `assets` | `map[arch]map[name]AssetFile` | Content-addressed files atelet fetches, keyed by architecture (`amd64`, `arm64`) then asset name. gVisor expects a `gvisor` asset (the release's `gvisor.tar.zstd`), which atelet auto-extracts. A microVM backend expects several. Each `AssetFile` is a `{ url, sha256 }` pair; `url` is at most 2048 bytes. A `ValidatingAdmissionPolicy` enforces each class's required assets on every version. atelet holds no storage credentials: it fetches every URL through the node's object-store plugin (`AssetProvider`), with the plugin's credentials. Which schemes work depends on the plugin; the in-tree one serves only its storage backend's scheme, `gs://` on GCS and `s3://` on S3, as `<bucket>/<object>`, and rejects other schemes without reading them. A `gs://` URL the plugin cannot serve (it has no such object, rejects the URL, does not implement `AssetProvider`, is unreachable, or fails with an error it does not recognize, such as GCS refusing its credentials for a public bucket) is then read anonymously, which serves public buckets such as `gs://gvisor`; any other refusal by the plugin is final. The plugin returns an object only if its content matches `sha256`, and refuses any URL under a snapshot location (a snapshot location followed by `/atespaces/`), so assets must not be stored there. On GKE, substrate-gke's setup-gcp lets the plugin read only the asset bucket, `<BUCKET_NAME>-assets`, so keep assets there. atelet verifies the sha256 again before using an asset. Its logs and errors show an asset URL as `scheme://host/path`. |
 
 A cluster-wide gVisor `SandboxConfig` (`gvisor-default`, annotated as the class default) is installed with the platform, so gVisor `WorkerPool`s use it automatically without any extra setup.
 
@@ -623,7 +623,7 @@ metadata:
     sandboxconfig.ate.dev/is-class-default: "true"
 spec:
   sandboxClass: gvisor
-  defaultVersion: v6
+  defaultVersion: v7
   versions:
   - name: v6
     state: Enabled
@@ -636,6 +636,17 @@ spec:
         gvisor:
           url: "gs://gvisor/releases/release/20261026.0/aarch64/gvisor.tar.zstd"
           sha256: "6257e49955f13e6caceb2c4181c5dc5406c460e805940c944e67ad65553f5b02"
+  - name: v7
+    state: Enabled
+    assets:
+      amd64:
+        gvisor:
+          url: "gs://gvisor/releases/release/20261102.0/x86_64/gvisor.tar.zstd"
+          sha256: "a1439ffbba7d212e0fde32ea79fa9bb51cbc4c5f6c16af1f047260290b861d42"
+      arm64:
+        gvisor:
+          url: "gs://gvisor/releases/release/20261102.0/aarch64/gvisor.tar.zstd"
+          sha256: "f702ae92ad7a0c4134be34ca23f52966dbb696db0c0f5b8ec439210ab2cd7c6a"
 ```
 
 ### MicroVM SandboxConfig
