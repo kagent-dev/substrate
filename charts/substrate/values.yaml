@@ -84,6 +84,9 @@ atelet:
   imageCredentialProviderConfigYAML: ""
   imageCredentialProviderBinDir: ""
   storageBackend: s3
+  # Restricts atelet to matching nodes. Every node that runs WorkerPool pods
+  # needs an atelet, so cover each pool's nodeSelector here.
+  nodeSelector: {}
   extraArgs: []
   extraEnv: []
   resources:
