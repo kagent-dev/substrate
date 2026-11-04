@@ -422,29 +422,60 @@ var linuxCapabilities = sets.New(
 	"CHECKPOINT_RESTORE",
 )
 
-// ValidateCapabilities checks each capability name. "ALL" is accepted only
-// when allowAll is set, which is the case for drop but not add.
-func ValidateCapabilities(fldPath *field.Path, caps []string, allowAll bool) field.ErrorList {
+// AllowedAddCapabilities are the capabilities a container may add.
+var AllowedAddCapabilities = sets.New(
+	"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL",
+	"NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT",
+)
+
+// ValidateAddCapabilities accepts only AllowedAddCapabilities.
+func ValidateAddCapabilities(fldPath *field.Path, caps []string) field.ErrorList {
 	var errs field.ErrorList
 	for i, c := range caps {
 		p := fldPath.Index(i)
-		switch {
-		case c == "ALL" && !allowAll:
-			errs = append(errs, field.Invalid(p, c, "add does not accept 'ALL'; name the individual capabilities the container needs"))
-		case c == "ALL":
-		case len(c) > 63:
-			errs = append(errs, field.TooLong(p, nil, 63))
-		case strings.HasPrefix(c, "CAP_"):
-			errs = append(errs, field.Invalid(p, c, "must be named without the 'CAP_' prefix (e.g. 'NET_BIND_SERVICE')"))
-		case !linuxCapabilities.Has(c):
-			supported := sets.List(linuxCapabilities)
-			if allowAll {
-				supported = append(supported, "ALL")
-			}
-			errs = append(errs, field.NotSupported(p, c, supported))
+		if c == "ALL" {
+			errs = append(errs, field.Invalid(p, c, "'ALL' is not accepted; name the individual capabilities the container needs, from: "+strings.Join(sets.List(AllowedAddCapabilities), ", ")))
+			continue
+		}
+		if err := validateCapabilityName(p, c); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !AllowedAddCapabilities.Has(c) {
+			errs = append(errs, field.NotSupported(p, c, sets.List(AllowedAddCapabilities)))
 		}
 	}
 	return errs
+}
+
+// ValidateDropCapabilities accepts "ALL" and any Linux capability name.
+func ValidateDropCapabilities(fldPath *field.Path, caps []string) field.ErrorList {
+	var errs field.ErrorList
+	for i, c := range caps {
+		p := fldPath.Index(i)
+		if c == "ALL" {
+			continue
+		}
+		if err := validateCapabilityName(p, c); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !linuxCapabilities.Has(c) {
+			errs = append(errs, field.NotSupported(p, c, append(sets.List(linuxCapabilities), "ALL")))
+		}
+	}
+	return errs
+}
+
+// validateCapabilityName rejects names too long or spelled with "CAP_".
+func validateCapabilityName(p *field.Path, c string) *field.Error {
+	switch {
+	case len(c) > 63:
+		return field.TooLong(p, nil, 63)
+	case strings.HasPrefix(c, "CAP_"):
+		return field.Invalid(p, c, "must be named without the 'CAP_' prefix (e.g. 'NET_BIND_SERVICE')")
+	}
+	return nil
 }
 
 // mountPathBadSegmentRE matches '.' or '..' path segments.
@@ -452,7 +483,8 @@ var mountPathBadSegmentRE = regexp.MustCompile(`(^|/)[.][.]?(/|$)`)
 
 // ValidateMountPath requires a clean absolute Unix path that starts with '/',
 // is not '/', and contains no ':', '.' or '..' segments, '//', trailing '/',
-// or control characters.
+// or control characters. It also rejects /dev, and /dev/pts, /proc, /sys and
+// the paths under them.
 func ValidateMountPath(fldPath *field.Path, p string) field.ErrorList {
 	if p == "" {
 		return nil
@@ -470,6 +502,15 @@ func ValidateMountPath(fldPath *field.Path, p string) field.ErrorList {
 	}
 	if bad {
 		return field.ErrorList{field.Invalid(fldPath, p, "must be a clean absolute Unix path: must start with '/', not be '/', and contain no ':', '..', '.', '//', trailing '/', or control characters")}
+	}
+	// A volume on these paths hides a filesystem the container needs: runsc
+	// replaces /dev and /dev/pts, and kata-agent refuses a bind under /proc.
+	reserved := p == "/dev"
+	for _, dir := range []string{"/dev/pts", "/proc", "/sys"} {
+		reserved = reserved || p == dir || strings.HasPrefix(p, dir+"/")
+	}
+	if reserved {
+		return field.ErrorList{field.Invalid(fldPath, p, "must not be /dev, and must not be /dev/pts, /proc, /sys, or a path under them")}
 	}
 	return nil
 }
