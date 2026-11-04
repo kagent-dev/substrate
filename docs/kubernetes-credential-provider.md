@@ -1,3 +1,7 @@
+---
+docsite: false
+---
+
 # Kubernetes credential provider
 
 The `k8s-credential-provider` Deployment follows the provider from
@@ -28,12 +32,12 @@ and the current [FetchSecret contract](../api/credprovider/v1/credprovider.proto
 Create the MITM CA Secret using the existing installation tooling:
 
 ```sh
-hack/install-ate-kind.sh --create-egress-mitm-ca-pool-secret
+go run ./cmd/ate-setup --kind create egress-mitm-ca-pool
 ```
 
 The gateway needs `egress-mitm-ca-pool` with `tls.crt` and `tls.key` in its namespace.
 Actors making HTTPS requests must trust this CA; see the
-[MITM trust bundle guide](egress-trust-bundle.md).
+[MITM trust bundle guide](guides/egress-trust-bundle.md).
 
 For Helm, add these values to your release configuration:
 
@@ -62,13 +66,13 @@ For the manifest installer, set your grants in
 `manifests/egress-credential-injection/namespace-policy.yaml`, then deploy:
 
 ```sh
-kubectl kustomize manifests/egress-credential-injection | ko apply -f -
-hack/install-ate.sh --deploy-atenet \
-  --atenet-dataplane=agentgateway --credential-provider='{"enabled":false}'
+kubectl apply -f manifests/egress-credential-injection/namespace-policy.yaml
+go run ./cmd/ate-setup deploy atenet \
+  --atenet-dataplane=agentgateway --credential-provider='{"name":"k8s.io"}'
 ```
 
-The provider is deployed separately above, so the installer's provider selection
-is disabled. The fork's agentgateway manifest already points at that provider.
+The installer deploys the provider and configures agentgateway to use it.
+It preserves the existing namespace policy ConfigMap when redeploying.
 Set grants under `data.namespace-policy.yaml` in the policy ConfigMap, using
 `policies:` with the same list as the Helm values. After applying policy changes,
 restart the provider with `kubectl rollout restart -n ate-system

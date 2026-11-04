@@ -17,6 +17,7 @@ templates:
 - ate-api-server.yaml
 - ate-api-config.yaml
 - ate-controller.yaml
+- atenet-router.yaml
 - role.yaml
 - atelet.yaml
 - k8s-credential-provider.yaml
@@ -67,6 +68,12 @@ tests:
         apiGroups: [ate.dev]
         resources: [sandboxconfigs, workerpools]
         verbs: [get, list, watch]
+  - contains:
+      path: rules
+      content:
+        apiGroups: [events.k8s.io]
+        resources: [events]
+        verbs: [create, patch]
 - it: probes atelet health without exposing host ports
   template: atelet.yaml
   documentSelector:
@@ -108,11 +115,6 @@ tests:
         operator: Exists
         effect: NoSchedule
 - it: schedules atelet on every node by default
-  template: atelet.yaml
-  documentSelector:
-    path: kind
-    value: DaemonSet
-  asserts:
   - notExists:
       path: spec.template.spec.nodeSelector
 - it: restricts atelet to nodes matching atelet.nodeSelector
@@ -129,6 +131,21 @@ tests:
       path: spec.template.spec.nodeSelector
       value:
         pool: agents
+- it: lets atelet preserve image ownership and permissions
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].securityContext
+      value:
+        allowPrivilegeEscalation: false
+        runAsUser: 0
+        runAsGroup: 0
+        capabilities:
+          drop: [ALL]
+          add: [CHOWN, DAC_OVERRIDE, FOWNER, FSETID]
 - it: probes the credential provider on its health listener
   template: k8s-credential-provider.yaml
   documentSelector:
@@ -346,3 +363,51 @@ tests:
         apiGroups: [ate.dev]
         resources: [workerpools, csidriverconfigs]
         verbs: [get, watch, list]
+
+- it: requires a trusted and explicitly allowed router client
+  template: atenet-router.yaml
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'source.spiffeId in \[\]'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'root: /run/podidentity.podcert.ate.dev/trust-bundle.pem'
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: 'port: 808[01]'
+- it: allows the configured router client identities
+  template: atenet-router.yaml
+  set:
+    atenetRouter.ingressAllowedSPIFFEIDs:
+    - spiffe://cluster.local/ns/client/sa/router-client
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'source.spiffeId in \["spiffe://cluster.local/ns/client/sa/router-client"\]'
+- it: keeps the router request parking budget at five seconds by default
+  template: atenet-router.yaml
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "5s"'
+- it: configures the router request parking budget
+  template: atenet-router.yaml
+  set:
+    atenetRouter.requestParking.budget: 30s
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "30s"'

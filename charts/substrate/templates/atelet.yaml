@@ -51,6 +51,10 @@ rules:
 - apiGroups: ["ate.dev"]
   resources: ["csidriverconfigs"]
   verbs: ["get", "watch", "list"]
+# Sync failures are reported as Warning Events on the worker pod.
+- apiGroups: ["events.k8s.io"]
+  resources: ["events"]
+  verbs: ["create", "patch"]
 # ClusterTrustBundles referenced by SystemInfo trustBundle data sources are
 # resolved on the node: atelet reads them through an informer and projects
 # the sanitized PEM into actors (see cmd/atelet/trustbundle.go).
@@ -163,6 +167,7 @@ spec:
           periodSeconds: 2
           failureThreshold: 30
         securityContext:
+          allowPrivilegeEscalation: false
           runAsUser: 0
           runAsGroup: 0
           capabilities:
@@ -207,13 +212,17 @@ spec:
 {{ toYaml . | indent 8 }}
 {{- end }}
         securityContext:
+          allowPrivilegeEscalation: false
           runAsUser: 0
           runAsGroup: 0
           capabilities:
             drop:
             - ALL
             add:
+            - CHOWN
             - DAC_OVERRIDE
+            - FOWNER
+            - FSETID
         resources:
 {{ toYaml .Values.atelet.resources | indent 10 }}
         env:

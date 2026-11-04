@@ -60,6 +60,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
+| `atenetRouter.requestParking.budget` | `5s` | Maximum wait for a suspended actor to become routable, e.g. `30s` for slower cold starts |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
@@ -141,10 +142,29 @@ snapshot bucket, and let the API server's identity impersonate it. See
 [the GCP setup guide](../../tools/setup-gcp/README.md#what-create-iam-actually-grants)
 for the required IAM grants. S3 and RustFS do not need this setting.
 
-The default gVisor config now uses the 2026-10-17 nightly (`v4`) for separate
+The default gVisor config now uses release `20261026.0` (`v6`) for separate
 container-rootfs and durable-directory checkpoint bundles. Upgrade the sandbox config together with ateworker-gvisor;
 custom configs must pin a release with the same checkpoint support and supply
 the `gvisor` release tarball asset. Bare `runsc` assets are no longer accepted.
+This replaces the previous `v5` config. Existing `v5` memory snapshots need a
+compatible runtime; falling back to a durable filesystem snapshot does not
+restore the actor's memory.
+
+The [image cache](../../internal/imagecache/README.md) now uses layout version 3
+to preserve image ownership and permissions. Atelet refuses version 2 caches.
+Stop the actors on each node before deleting its old image cache
+(`/var/lib/ate/image-cache` by default). Atelet recreates it on startup.
+
+When upgrading an installation with RustFS enabled, delete its completed bucket
+initializer Job before running `helm upgrade`. The default Job name is
+`rustfs-bucket-init` in the release namespace. This update changes the AWS CLI
+image, and Kubernetes cannot patch an existing Job's pod template. Helm
+recreates the Job, which keeps the existing bucket and its contents.
+
+The router now requires mTLS on ports 8443 and 8444. Set
+`atenetRouter.ingressAllowedSPIFFEIDs` to the client identities allowed to reach
+actors; its empty default denies all ingress. Plaintext ports 8080 and 8081
+no longer accept connections.
 
 The chart now denies ingress to the control-plane namespace by default and
 allows the component, router, egress, storage, and monitoring traffic it needs.
@@ -161,6 +181,10 @@ Update API clients for pagination under `ListOptions`, the renamed
 clients and components together.
 
 ## PostgreSQL setup
+
+Upstream squashed the migrations through v0.6.0 into `000001_initial.sql`.
+Databases created before that squash cannot be upgraded in place and must be
+recreated. See [PostgreSQL schema evolution](../../docs/dev/postgresql-schema-evolution.md).
 
 The chart does not deploy or initialize PostgreSQL. Prepare the database,
 schema, login users, and the configured `readWriteRole` and `ownerRole` before
@@ -203,7 +227,7 @@ shared `ate-client` ServiceAccount is a bootstrap global owner so demos and
 CLI access work. For shared installs, set `ateApi.authorization.bootstrapOwners`
 to your operators' own principals and grant tenant access with `kubectl ate
 create access-policy`; anyone who can mint the shared client's token otherwise has
-global owner access. See [authorization](../../docs/authorization.md).
+global owner access. See [authorization](../../docs/guides/authorization.md).
 
 Upstream renumbered protobuf fields, so older clients and binaries are not
 wire compatible. Upgrade clients and components together: upstream now uses the

@@ -36,11 +36,16 @@ data:
       # not retain an idle connection that may belong to the previous actor.
       backend:
         poolMaxSize: 0
+        # Actor CONNECT authorities resolve through the worker atunnel.
+        allowDynamicLoopback: true
 
 {{- $traces := include "substrate.otel.signalEndpoint" (list "traces" .) }}
 {{- $logs := include "substrate.otel.signalEndpoint" (list "logs" .) }}
-{{- if or $traces $logs }}
     frontendPolicies:
+      networkAuthorization:
+        rules:
+        - allow: >-
+            source.spiffeId in {{ .Values.atenetRouter.ingressAllowedSPIFFEIDs | toJson }}
 {{- if $traces }}
       tracing:
         host: $AGENTGATEWAY_OTLP_TRACES_ADDRESS
@@ -55,7 +60,6 @@ data:
         otlp:
           host: $AGENTGATEWAY_OTLP_LOGS_ADDRESS
           protocol: grpc
-{{- end }}
 {{- end }}
 
     backends:
@@ -76,27 +80,24 @@ data:
               insecureHost: true
 
     gateways:
-      http:
-        port: 8080
-        protocol: HTTP
       https:
         port: 8443
         protocol: HTTPS
         tls:
           cert: /run/servicedns.podcert.ate.dev/credential-bundle.pem
           key: /run/servicedns.podcert.ate.dev/credential-bundle.pem
+          root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
 
     routes:
     - name: substrate-actors
       gateways:
-      - http
       - https
       matches:
       - path:
           pathPrefix: /
       policies: &substrate-ingress
-        # Inspect every value before forwarding; substrateIngress reads only
-        # the first actor header. Apply this to HTTP, gRPC, and CONNECT traffic.
+        # Reject duplicates in both CONNECT and inner request headers, even
+        # when actor selection uses only one of those header maps.
         directResponse:
           conditional:
           - condition: >-
@@ -108,6 +109,8 @@ data:
             body: Invalid ate-target-actor header
         substrateIngress:
           host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
+          requestParking:
+            budget: {{ .Values.atenetRouter.requestParking.budget | quote }}
           # AgentGateway only uses atunnel's CONNECT listener.
           connectTargetPort: 8443
           policies:
@@ -119,7 +122,6 @@ data:
       - backend: /dynamic
     - name: substrate-actors-grpc
       gateways:
-      - http
       - https
       matches: &grpc-matches
       - method: POST
@@ -136,11 +138,6 @@ data:
 
     # Terminate client CONNECT before internal HTTP routing.
     binds:
-    - port: 8081
-      tunnelProtocol: connect
-      listeners:
-      - protocol: HTTP
-        routes: []
     - port: 8444
       tunnelProtocol: connect
       listeners:
@@ -148,6 +145,7 @@ data:
         tls:
           cert: /run/servicedns.podcert.ate.dev/credential-bundle.pem
           key: /run/servicedns.podcert.ate.dev/credential-bundle.pem
+          root: /run/podidentity.podcert.ate.dev/trust-bundle.pem
         routes: []
     - mode: internal
       listeners:

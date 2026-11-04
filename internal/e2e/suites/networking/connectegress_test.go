@@ -29,15 +29,18 @@ import (
 // to the IP:port the actor dialed. A CONNECT the actor sends itself -- what a
 // client configured with a forward proxy sends first, in the clear or inside
 // TLS -- arrives as a request inside that tunnel, and the gateway refuses it
-// (docs/egress-traffic.md): the request would otherwise be policed
+// with a 403 (docs/egress-traffic.md): the request would otherwise be policed
 // as its authority's host on the port the actor dialed, while the tunnel went
 // to the port the authority names.
 //
 // Each test sends the CONNECT to two proxies. One is an origin the test
-// deploys, which answers any CONNECT 200: the denial the actor sees cannot be
+// deploys, which answers any CONNECT 200: the 403 the actor sees cannot be
 // its doing, so the gateway refused the CONNECT before it reached anything
 // that would have accepted it. The other is the gateway's own Service, the
 // address a client that knew about the gateway would configure.
+
+// connectDeniedBody is the body both dataplanes refuse the CONNECT with.
+const connectDeniedBody = "CONNECT egress is not supported"
 
 // egressConnectResponse mirrors the egress demo's /connect observation: the
 // proxy's answer to the CONNECT.
@@ -90,7 +93,7 @@ func TestActorEgressConnect(t *testing.T) {
 // TestActorEgressSecureConnect: the actor sends its CONNECT inside TLS, as a
 // client configured with an https:// proxy does. The gateway terminates that
 // TLS under the actor's https rule, so the CONNECT is read and refused on the
-// decrypted leg, and the actor sees the denial over a connection it verified.
+// decrypted leg, and the actor sees the 403 over a connection it verified.
 func TestActorEgressSecureConnect(t *testing.T) {
 	ctx := t.Context()
 	_, proxy, _ := prepareProtocolOrigin(t, ctx, connectProxySpec(80, 443), true)
@@ -105,7 +108,7 @@ func TestActorEgressSecureConnect(t *testing.T) {
 }
 
 // assertActorConnectRefused has the actor send proxy a CONNECT, over TLS when
-// encrypted, and checks the dataplane's explicit denial. The actor's answer is
+// encrypted, and checks that the gateway answered it 403. The actor's answer is
 // retried until it has one: a failed TLS handshake is reported as a 502 by the
 // demo, and the first handshake with a minted leaf can fail until kubelet has
 // propagated the gateway's CA to the actor.
@@ -126,9 +129,8 @@ func assertActorConnectRefused(t *testing.T, ctx context.Context, router *e2e.Ro
 	if got.StatusCode/100 == 2 {
 		t.Fatalf("CONNECT %s via %s was answered %d: the gateway opened a tunnel for the actor's own CONNECT: %+v", connectTunnelTarget, proxy, got.StatusCode, got)
 	}
-	wantStatus, wantBody := e2e.CurrentAtenetDataplane().EgressConnectDeniedResponse()
-	if got.StatusCode != wantStatus || got.Body != wantBody {
-		t.Fatalf("CONNECT %s via %s was answered %d %q, want %d %q: %+v", connectTunnelTarget, proxy, got.StatusCode, got.Body, wantStatus, wantBody, got)
+	if got.StatusCode != http.StatusForbidden || got.Body != connectDeniedBody {
+		t.Fatalf("CONNECT %s via %s was answered %d %q, want %d %q: %+v", connectTunnelTarget, proxy, got.StatusCode, got.Body, http.StatusForbidden, connectDeniedBody, got)
 	}
 	if got.TLS != encrypted {
 		t.Errorf("CONNECT %s via %s went over verified TLS = %t, want %t: %+v", connectTunnelTarget, proxy, got.TLS, encrypted, got)

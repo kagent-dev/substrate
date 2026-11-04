@@ -40,12 +40,10 @@ func TestKubernetesCredentialInjection(t *testing.T) {
 	if os.Getenv("E2E_CREDENTIAL_PROVIDER") == "" {
 		t.Skip("requires credential E2E namespace grants and E2E_CREDENTIAL_PROVIDER=1")
 	}
-	env, err := e2e.CheckEnv("BUCKET_NAME", "KO_DOCKER_REPO")
-	require.NoError(t, err)
 	ctx := t.Context()
 	clients := e2e.GetClients()
-	namespace, template := e2e.DeployProbe(t, env["BUCKET_NAME"], "credentials")
-	deniedAtespace, deniedTemplate := e2e.DeployProbe(t, env["BUCKET_NAME"], "credentials-denied")
+	namespace, template := e2e.DeployProbe(t, "credentials")
+	deniedAtespace, deniedTemplate := e2e.DeployProbe(t, "credentials-denied")
 	otherNamespace := e2e.CreateNamespace(t).Name
 
 	for _, secret := range []struct{ namespace, name string }{

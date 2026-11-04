@@ -16,7 +16,7 @@ name: helm-e2e
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, release-1.0]
 permissions:
   contents: read
 jobs:
@@ -74,12 +74,12 @@ jobs:
       run: helm upgrade --install substrate-crds charts/substrate-crds
     - name: Bootstrap mTLS authorities
       run: |
-        hack/install-ate-kind.sh create podcertificate-controller-cas
-        hack/install-ate-kind.sh create jwt-authority-pool
-        hack/install-ate-kind.sh create actor-id-ca-pool
-        hack/install-ate-kind.sh create actor-id-ca-certs
-        hack/install-ate-kind.sh create api-authentication-config
-        hack/install-ate-kind.sh create egress-mitm-ca-pool
+        go run ./cmd/ate-setup --kind create podcertificate-controller-cas
+        go run ./cmd/ate-setup --kind create jwt-authority-pool
+        go run ./cmd/ate-setup --kind create actor-id-ca-pool
+        go run ./cmd/ate-setup --kind create actor-id-ca-certs
+        go run ./cmd/ate-setup --kind create api-authentication-config
+        go run ./cmd/ate-setup --kind create egress-mitm-ca-pool
     - name: Install certificate controller
       run: |
         helm upgrade --install substrate-podcert charts/substrate-podcert \
@@ -100,7 +100,10 @@ jobs:
           --set image.registry=localhost:5001 \
           --set image.tag=helm-e2e \
           --set 'preview[0]=ALL' \
+          --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
           --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
+          --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
+          --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
           --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
           --wait --timeout=10m
     - name: Enable NFS
@@ -108,16 +111,16 @@ jobs:
         sudo modprobe nfs || true
         sudo modprobe nfsd || true
     - name: Install CSI NFS driver
-      run: hack/install-ate-kind.sh setup csi nfs
+      run: go run ./cmd/ate-setup --kind setup csi nfs
     - name: Deploy micro-VM counter demo
       # The deploy creates the substrate ActorTemplate and waits for its golden
       # snapshot internally; the ActorTemplate CRD (and its Ready condition)
       # no longer exists to wait on.
       run: hack/run-microvm-demo-kind.sh --skip-control-plane
     - name: Deploy gVisor counter demo
-      run: hack/install-ate-kind.sh deploy demo counter
+      run: go run ./cmd/ate-setup --kind deploy demo counter
     - name: Deploy egress demo
-      run: hack/install-ate-kind.sh deploy demo egress
+      run: go run ./cmd/ate-setup --kind deploy demo egress
     - name: Trust local E2E TLS origins
       run: hack/setup-e2e-egress-tls-kind.sh
     - name: Run E2E tests (gVisor)

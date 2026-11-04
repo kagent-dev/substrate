@@ -55,8 +55,8 @@ func TestActorEgressWebSocket(t *testing.T) {
 	if got.StatusCode != http.StatusForbidden {
 		t.Errorf("WebSocket handshake status = %d, want %d", got.StatusCode, http.StatusForbidden)
 	}
-	if want := e2e.CurrentAtenetDataplane().EgressUpgradeDeniedBody(); got.HandshakeBody != want {
-		t.Errorf("WebSocket handshake body = %q, want %q", got.HandshakeBody, want)
+	if got.HandshakeBody != "WebSocket egress is not supported" {
+		t.Errorf("WebSocket handshake body = %q, want %q", got.HandshakeBody, "WebSocket egress is not supported")
 	}
 	if got.Error == "" {
 		t.Error("WebSocket handshake error is empty")
@@ -83,8 +83,8 @@ func TestActorEgressSecureWebSocket(t *testing.T) {
 	if got.StatusCode != http.StatusForbidden {
 		t.Errorf("secure WebSocket handshake status = %d, want %d", got.StatusCode, http.StatusForbidden)
 	}
-	if want := e2e.CurrentAtenetDataplane().EgressUpgradeDeniedBody(); got.HandshakeBody != want {
-		t.Errorf("secure WebSocket handshake body = %q, want %q", got.HandshakeBody, want)
+	if got.HandshakeBody != "WebSocket egress is not supported" {
+		t.Errorf("secure WebSocket handshake body = %q, want %q", got.HandshakeBody, "WebSocket egress is not supported")
 	}
 	if got.Error == "" {
 		t.Error("secure WebSocket handshake error is empty")

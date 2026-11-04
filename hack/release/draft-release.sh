@@ -16,7 +16,7 @@
 
 # Creates a DRAFT GitHub release for an existing tag, with notes generated
 # from .github/release.yml plus a committer list. A maintainer edits and
-# publishes the draft (see docs/dev/release-notes.md).
+# publishes the draft (see docs/dev/releasing.md).
 #
 #   hack/release/draft-release.sh [--dry-run] <tag>
 #
@@ -33,9 +33,12 @@
 set -o errexit -o nounset -o pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-REPO="${GITHUB_REPOSITORY:-agent-substrate/substrate}"
+UPSTREAM_REPO='agent-substrate/substrate'
+REPO="${GITHUB_REPOSITORY:-${UPSTREAM_REPO}}"
 SEMVER='^v[0-9]+\.[0-9]+\.[0-9]+$'
 SEMVER_PRE='^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$'
+# Use the same destination as the image publisher.
+RELEASE_IMAGE_REPO="${KO_DOCKER_REPO:-ghcr.io/${REPO}}"
 
 usage() {
   echo "usage: $0 [--dry-run] <tag>" >&2
@@ -140,6 +143,42 @@ if ! notes="$(api "generating notes" "repos/${REPO}/releases/generate-notes" \
       "Generating notes needs write access, even for --dry-run." >&2
   fi
   exit 1
+fi
+
+# These repositories publish images and binaries in the release workflow.
+# docs/dev/releasing.md lists what they cover.
+if [[ "${REPO}" == "${UPSTREAM_REPO}" || "${REPO}" == "kagent-dev/substrate" ]]; then
+  notes+=$'\n\n## Images\n\n'
+  notes+="Container images for this release are published as \`${RELEASE_IMAGE_REPO}/<image>:${tag}\`"
+  notes+=" for \`linux/amd64\` and \`linux/arm64\`. The images a release publishes are listed in"
+  notes+=" [Release images](https://github.com/${REPO}/blob/${tag}/docs/dev/releasing.md#release-images)."
+  notes+=$'\n\n## Install\n\n'
+  notes+="From a checkout of \`${tag}\`, with Go, install the release images into the current kubectl context."
+  notes+=" Add \`--kind\` for a kind cluster."
+  notes+=$'\n\n```sh\n'
+  notes+="git clone --depth 1 --branch ${tag} https://github.com/${REPO}.git"$'\n'
+  notes+=$'cd substrate\n'
+  notes+=$'go run ./cmd/ate-setup deploy ate-system \\\n'
+  notes+="  --image-repo ${RELEASE_IMAGE_REPO} --image-tag ${tag} \\"$'\n'
+  notes+=$'  --credential-provider=\'{"name":"k8s.io"}\' \\\n'
+  notes+=$'  --ingress-allowed-spiffe-ids=<SPIFFE IDs of your ingress clients>\n'
+  notes+='```'
+  notes+=$'\n\n'"See [Installing pre-built images](https://github.com/${REPO}/blob/${tag}/cmd/ate-setup/commands.md#installing-pre-built-images) for the flags."
+  # The workflow attaches these after creating the draft; see the
+  # "Attach kubectl-ate" step in .github/workflows/release.yaml.
+  notes+=$'\n\n## kubectl-ate\n\n'
+  notes+="\`kubectl-ate\` is attached for Linux and macOS on amd64 and arm64."
+  notes+=" Download the binary for your platform and its \`.sha256\` file, check it, and put it on your \`PATH\` as \`kubectl-ate\`:"
+  notes+=$'\n\n```sh\n'
+  notes+=$'shasum -a 256 -c kubectl-ate-linux-amd64.sha256\n'
+  notes+=$'install -m 0755 kubectl-ate-linux-amd64 ~/.local/bin/kubectl-ate\n'
+  notes+='```'
+fi
+
+if [[ "${REPO}" == "kagent-dev/substrate" ]]; then
+  notes+=$'\n\n## Helm charts\n\n'
+  notes+="Charts are published at \`oci://${RELEASE_IMAGE_REPO}/helm\` with version \`${tag#v}\`:"
+  notes+=$'\n\n- `substrate-crds`\n- `substrate`\n- `substrate-podcert`'
 fi
 
 # GitHub only lists first-time contributors; list everyone, as v0.1.0 did.

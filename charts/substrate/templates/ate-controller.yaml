@@ -84,6 +84,12 @@ spec:
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
       - name: ate-controller
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop: [ALL]
         image: {{ include "substrate.componentImage" (list "atecontroller" .) }}
         resources:
 {{ toYaml .Values.ateController.resources | indent 10 }}

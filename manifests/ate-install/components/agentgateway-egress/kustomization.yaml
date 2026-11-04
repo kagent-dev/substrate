@@ -63,7 +63,7 @@ patches:
               mode: tunnel
             accessLog:
               add:
-                substrate.connect.authority: source.connectHeaders["host"]
+                substrate.connect.authority: 'destination.address + ":" + string(destination.port)'
             substrateEgressActorResolution:
               host: api.ate-system.svc:443
               policies:
@@ -95,6 +95,19 @@ patches:
                 cert: /run/egress-mitm/tls.crt
                 key: /run/egress-mitm/tls.key
               routes:
+              - name: reject-websocket-upgrade
+                matches:
+                - headers:
+                  - name: Connection
+                    value:
+                      regex: '(?i)(^|,)\s*upgrade\s*(,|$)'
+                  - name: Upgrade
+                    value:
+                      regex: '(?i)(^|,)\s*websocket\s*(,|$)'
+                policies:
+                  directResponse:
+                    status: 403
+                    body: WebSocket egress is not supported
               - backends:
                 - dynamic: {}
                   policies:
@@ -111,9 +124,22 @@ patches:
                         root: /run/servicedns-ca/trust-bundle.pem
             - protocol: HTTP
               routes:
+              - name: reject-websocket-upgrade
+                matches:
+                - headers:
+                  - name: Connection
+                    value:
+                      regex: '(?i)(^|,)\s*upgrade\s*(,|$)'
+                  - name: Upgrade
+                    value:
+                      regex: '(?i)(^|,)\s*websocket\s*(,|$)'
+                policies:
+                  directResponse:
+                    status: 403
+                    body: WebSocket egress is not supported
               - backends:
                 - dynamic:
-                    target: source.connectHeaders["host"]
+                    target: 'destination.address + ":" + string(destination.port)'
                 policies:
                   substrateEgress: *egressPolicy
             - protocol: TLS
