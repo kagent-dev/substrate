@@ -12,13 +12,12 @@ chart.
 
 ## Install
 
-Install the substrate chart with `atelet.enabled=false`, then install this
-chart in the same namespace. With the substrate chart's bundled RustFS:
+Install this chart first, then the substrate chart with `atelet.enabled=false`
+in the same namespace. Upgrade them in the same order. With the substrate
+chart's bundled RustFS:
 
 ```sh
-helm upgrade --install substrate ./charts/substrate \
-  --namespace ate-system --create-namespace \
-  -f values.yaml --set atelet.enabled=false
+kubectl create namespace ate-system
 kubectl create secret generic rustfs-credentials -n ate-system \
   --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
   --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
@@ -30,6 +29,9 @@ helm upgrade --install substrate-atelet ./charts/substrate-atelet \
   --set objectStore.pathStyle=true \
   --set objectStore.credentialsSecret=rustfs-credentials \
   --wait
+helm upgrade --install substrate ./charts/substrate \
+  --namespace ate-system \
+  -f values.yaml --set atelet.enabled=false
 ```
 
 Use the credentials from the substrate release's `rustfs.accessKey` and

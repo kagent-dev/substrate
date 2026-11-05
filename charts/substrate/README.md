@@ -20,14 +20,8 @@ go run ./cmd/ate-setup create podcertificate-controller-cas
 helm upgrade --install substrate-podcert ./charts/substrate-podcert \
   --namespace podcertificate-controller-system --create-namespace --wait
 
-# Install Substrate after creating the database identities and Secrets
-helm upgrade --install substrate ./charts/substrate \
-  --namespace ate-system --create-namespace \
-  --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
-  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner \
-  --set atelet.enabled=false
-
 # Install atelet as its own release, using the bundled RustFS
+kubectl create namespace ate-system
 kubectl create secret generic rustfs-credentials -n ate-system \
   --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
   --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
@@ -37,7 +31,18 @@ helm upgrade --install substrate-atelet ./charts/substrate-atelet \
   --set objectStore.region=us-east-1 \
   --set objectStore.pathStyle=true \
   --set objectStore.credentialsSecret=rustfs-credentials
+
+# Install Substrate after creating the database identities and Secrets
+helm upgrade --install substrate ./charts/substrate \
+  --namespace ate-system \
+  --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
+  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner \
+  --set atelet.enabled=false
 ```
+
+Install substrate-atelet before substrate, and upgrade them in that order. The
+[version skew policy](../../docs/reference/version-skew-policy.md) upgrades
+atelet before ate-api-server.
 
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
 using the chart `appVersion` as the tag. Override `image.registry` and
