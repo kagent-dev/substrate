@@ -73,6 +73,15 @@ spec:
           spec:
             description: spec defines the desired state of WorkerPool
             properties:
+              maxActorsPerWorker:
+                description: |-
+                  maxActorsPerWorker is the maximum number of actors each worker hosts at
+                  once. When omitted, the worker uses its default limit. Zero prevents
+                  workers from accepting actors. Changing this value rolls the workers.
+                format: int32
+                maximum: 2147483647
+                minimum: 0
+                type: integer
               replicas:
                 description: replicas is the number of worker pods to run.
                 format: int32

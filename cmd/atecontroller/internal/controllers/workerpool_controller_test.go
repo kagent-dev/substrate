@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,6 +195,49 @@ func TestWorkerPoolReplicasUpdate(t *testing.T) {
 		}
 		return dep.Spec.Replicas != nil && *dep.Spec.Replicas == 5, nil
 	})
+}
+
+func TestWorkerPoolMaxActorsPerWorkerUpdate(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	wp := makeWorkerPool("test-max-actors", "default", 1, "worker:v1")
+	wp.Spec.MaxActorsPerWorker = ptr.To(int32(3))
+	if err := k8sClient.Create(ctx, wp); err != nil {
+		t.Fatalf("create WorkerPool: %v", err)
+	}
+	deleteOnCleanup(t, wp)
+
+	for _, tt := range []struct {
+		name  string
+		limit *int32
+		want  string
+	}{
+		{name: "create", limit: ptr.To(int32(3)), want: "--max-actors=3"},
+		{name: "update", limit: ptr.To(int32(6)), want: "--max-actors=6"},
+		{name: "clear"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name != "create" {
+				updateWorkerPoolSpec(t, ctx, wp, "update WorkerPool actor limit", func(current *atev1.WorkerPool) {
+					current.Spec.MaxActorsPerWorker = tt.limit
+				})
+			}
+			eventually(t, func(ctx context.Context) (bool, error) {
+				dep, err := getDeployment(ctx, wp)
+				if err != nil || len(dep.Spec.Template.Spec.Containers) == 0 {
+					return false, nil
+				}
+				args := dep.Spec.Template.Spec.Containers[0].Args
+				limits := slices.DeleteFunc(append([]string(nil), args...), func(arg string) bool {
+					return !strings.HasPrefix(arg, "--max-actors=")
+				})
+				if tt.want == "" {
+					return len(limits) == 0, nil
+				}
+				return len(limits) == 1 && limits[0] == tt.want, nil
+			})
+		})
+	}
 }
 
 // TestWorkerPoolImageUpdate verifies that changing spec.workerImage on a
