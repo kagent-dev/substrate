@@ -181,6 +181,12 @@ atenetEgress:
 # Kubernetes Secret provider and AGW HTTP/HTTPS credential injection.
 # Includes get-only Secret RBAC. HTTPS requires egress-mitm-ca-pool and actor trust.
 credentialProvider:
+  rbac:
+    # Namespaces the provider reads Secrets in. Empty (the default), its
+    # Secret reader ClusterRole is bound cluster-wide. Set, the ClusterRole is
+    # bound by RoleBinding in each listed namespace only; a namespace added
+    # later needs its own RoleBinding to it.
+    namespaces: []
   namespacePolicies: []
   # - atespace: team-a
   #   allowedNamespaces: [team-a-secrets]
