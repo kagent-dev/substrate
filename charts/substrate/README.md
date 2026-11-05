@@ -221,6 +221,8 @@ roles.
 The API server now requires `--config-file`. The chart mounts its generated
 `ate-api-config` ConfigMap and rolls the API pods when `ateApi.logLevel` changes.
 Replace `--log-level` in `ateApi.extraArgs` with `ateApi.logLevel`.
+The pods also roll when the chart's environment ConfigMap changes, including
+the actor JWT issuer, snapshot location, transfer service account, or schema.
 
 API authorization is always enforced, matching `ate-setup`. Remove
 `ateApi.authorization.enabled` from custom values. The release's

@@ -15,6 +15,7 @@
 suite: Control plane integration
 templates:
 - ate-api-server.yaml
+- ate-api-server-envvars.yaml
 - ate-api-config.yaml
 - ate-controller.yaml
 - atenet-router.yaml

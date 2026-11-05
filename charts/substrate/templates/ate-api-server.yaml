@@ -79,6 +79,7 @@ spec:
         app: ate-api-server
       annotations:
         checksum/api-config: {{ .Values.ateApi.logLevel | sha256sum }}
+        checksum/api-envvars: {{ include (print $.Template.BasePath "/ate-api-server-envvars.yaml") . | sha256sum }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
     spec:
@@ -138,7 +139,6 @@ spec:
           mountPath: /run/objectstore-plugin
         - { name: servicedns, mountPath: /run/servicedns.podcert.ate.dev, readOnly: true }
         - { name: podidentity, mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
-        - { name: actor-id-jwt-jwks, mountPath: /run/actor-id-jwt-jwks, readOnly: true }
       containers:
       - name: ate-api-server
         securityContext:
@@ -272,13 +272,6 @@ spec:
               name: actor-id-jwt-pool
               items:
               - { key: pool, path: pool.json }
-      - name: actor-id-jwt-jwks
-        projected:
-          sources:
-          - secret:
-              name: actor-id-jwt-pool
-              items:
-              - { key: jwks, path: jwks.json }
       - name: actor-id-ca-pool
         projected:
           sources:

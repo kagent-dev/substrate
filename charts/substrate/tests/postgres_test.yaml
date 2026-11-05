@@ -87,7 +87,7 @@ tests:
       value: connectionString
 
 - it: requires a read-write Secret
-  template: ate-api-server-envvars.yaml
+  template: ate-api-server.yaml
   set:
     postgres.readWriteConnectionStringSecretRef.name: ""
   asserts:
@@ -95,7 +95,7 @@ tests:
       errorMessage: postgres.readWriteConnectionStringSecretRef.name is required
 
 - it: requires an owner Secret
-  template: ate-api-server-envvars.yaml
+  template: ate-api-server.yaml
   set:
     postgres.ownerConnectionStringSecretRef.name: ""
   asserts:

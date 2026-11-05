@@ -41,8 +41,8 @@ jobs:
     - name: Cache micro-VM assets
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        path: bin/microvm-assets/amd64
-        key: microvm-assets-amd64-${{ hashFiles('hack/microvm-assets/assemble.sh') }}
+        path: bin/microvm-assets
+        key: microvm-assets-${{ hashFiles('manifests/ate-install/sandboxconfig-microvm.yaml.tmpl') }}
     - name: Enable KVM
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -114,11 +114,10 @@ jobs:
         sudo modprobe nfsd || true
     - name: Install CSI NFS driver
       run: go run ./cmd/ate-setup --kind setup csi nfs
-    - name: Deploy micro-VM counter demo
-      # The deploy creates the substrate ActorTemplate and waits for its golden
-      # snapshot internally; the ActorTemplate CRD (and its Ready condition)
-      # no longer exists to wait on.
-      run: hack/run-microvm-demo-kind.sh --skip-control-plane
+    - name: Install microVM SandboxConfig
+      run: go run ./cmd/ate-setup --kind deploy sandboxconfig --sandbox-classes=microvm
+    - name: Deploy microVM counter demo
+      run: go run ./cmd/ate-setup --kind deploy demo counter-microvm
     - name: Deploy gVisor counter demo
       run: go run ./cmd/ate-setup --kind deploy demo counter
     - name: Deploy egress demo
