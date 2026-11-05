@@ -374,7 +374,7 @@ tests:
   - matchRegex:
       path: data["config.yaml"]
       pattern: 'source.spiffeId in \["spiffe://cluster.local/ns/client/sa/router-client"\]'
-- it: keeps the router request parking budget at five seconds by default
+- it: defaults router parking and API request timeouts to sixty seconds
   template: atenet-router.yaml
   documentSelector:
     path: kind
@@ -382,7 +382,10 @@ tests:
   asserts:
   - matchRegex:
       path: data["config.yaml"]
-      pattern: 'requestParking:\n\s+budget: "5s"'
+      pattern: 'requestParking:\n\s+budget: "60s"'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'policies:\n\s+http:\n\s+requestTimeout: "60s"'
 - it: configures the router request parking budget
   template: atenet-router.yaml
   set:
@@ -394,3 +397,49 @@ tests:
   - matchRegex:
       path: data["config.yaml"]
       pattern: 'requestParking:\n\s+budget: "30s"'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'policies:\n\s+http:\n\s+requestTimeout: "60s"'
+- it: configures the router API request timeout independently
+  template: atenet-router.yaml
+  set:
+    atenetRouter.requestTimeout: 2m
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "60s"'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'policies:\n\s+http:\n\s+requestTimeout: "2m"'
+- it: configures both router timeouts
+  template: atenet-router.yaml
+  set:
+    atenetRouter.requestParking.budget: 90s
+    atenetRouter.requestTimeout: 45s
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "90s"'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'policies:\n\s+http:\n\s+requestTimeout: "45s"'
+- it: keeps a five-second parking budget in the E2E fixture
+  template: atenet-router.yaml
+  values:
+  - ../../../internal/e2e/suites/parking/values.yaml
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'requestParking:\n\s+budget: "5s"'
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'policies:\n\s+http:\n\s+requestTimeout: "60s"'
