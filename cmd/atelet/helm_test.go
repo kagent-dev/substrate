@@ -239,8 +239,6 @@ func TestHelmGVisorSandboxConfigMatchesManifest(t *testing.T) {
 
 // helmTemplate returns the objects helm template renders. Comparing objects
 // rather than text ignores the whitespace that differs between Helm versions.
-// It reads stdout only, because Helm logs the substrate-atelet chart's
-// symlinked templates on stderr.
 func helmTemplate(t *testing.T, args ...string) []unstructured.Unstructured {
 	t.Helper()
 	var stderr strings.Builder
@@ -266,31 +264,51 @@ func helmTemplate(t *testing.T, args ...string) []unstructured.Unstructured {
 }
 
 func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
+	// substrate-atelet configures object storage under objectStore. The
+	// substrate chart gets the same env through objectStorePlugin.extraEnv.
+	noRustFS := []string{"--set", "rustfs.enabled=false", "--set", "ateApi.snapshotLocation=gs://snapshots/"}
 	for _, tc := range []struct {
-		name, release, namespace string
-		values                   []string
+		name, release, namespace  string
+		shared, substrate, atelet []string
 	}{
-		{name: "defaults", release: "substrate", namespace: "ate-system"},
+		{name: "defaults", release: "substrate", namespace: "ate-system", substrate: noRustFS},
 		{
-			name:      "shared values",
+			name:      "gcs",
+			release:   "substrate",
+			namespace: "ate-system",
+			substrate: append([]string{"--set", "atelet.storageBackend=gcs"}, noRustFS...),
+			atelet:    []string{"--set", "objectStore.backend=gcs"},
+		},
+		{
+			name:      "custom values",
 			release:   "team",
 			namespace: "custom",
-			values: []string{
+			shared: []string{
 				"--set", "preview[0]=ALL",
 				"--set", "otel.endpoint=http://collector:4317",
-				"--set", "rustfs.enabled=false",
-				"--set", "ateApi.snapshotLocation=gs://snapshots/",
-				"--set", "atelet.storageBackend=gcs",
 				"--set", "atelet.nodeSelector.pool=agents",
 				"--set", "image.tag=test",
+			},
+			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[
+				{"name": "AWS_REGION", "value": "us-east-1"},
+				{"name": "AWS_ENDPOINT_URL", "value": "http://store:9000"},
+				{"name": "AWS_S3_USE_PATH_STYLE", "value": "true"},
+				{"name": "AWS_ACCESS_KEY_ID", "valueFrom": {"secretKeyRef": {"name": "store", "key": "AWS_ACCESS_KEY_ID"}}},
+				{"name": "AWS_SECRET_ACCESS_KEY", "valueFrom": {"secretKeyRef": {"name": "store", "key": "AWS_SECRET_ACCESS_KEY"}}}]`},
+				noRustFS...),
+			atelet: []string{
+				"--set", "objectStore.region=us-east-1",
+				"--set", "objectStore.endpoint=http://store:9000",
+				"--set", "objectStore.pathStyle=true",
+				"--set", "objectStore.credentialsSecret=store",
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want := helmTemplate(t, append([]string{tc.release, "../../charts/substrate", "-n", tc.namespace,
-				"--show-only", "templates/atelet.yaml"}, tc.values...)...)
-			got := helmTemplate(t, append([]string{"atelet", "../../charts/substrate-atelet", "-n", tc.namespace,
-				"--set", "substrateReleaseName=" + tc.release}, tc.values...)...)
+			want := helmTemplate(t, slices.Concat([]string{tc.release, "../../charts/substrate", "-n", tc.namespace,
+				"--show-only", "templates/atelet.yaml"}, tc.shared, tc.substrate)...)
+			got := helmTemplate(t, slices.Concat([]string{"atelet", "../../charts/substrate-atelet", "-n", tc.namespace,
+				"--set", "substrateReleaseName=" + tc.release}, tc.shared, tc.atelet)...)
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("substrate-atelet renders a different atelet than the substrate chart (-substrate +substrate-atelet):\n%s", diff)
 			}

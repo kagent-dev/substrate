@@ -1,77 +1,66 @@
 # substrate-atelet
 
 Install the atelet DaemonSet as a release separate from the
-[substrate](../substrate/README.md) chart, so it can be upgraded on its own
-schedule. The substrate chart renders the same atelet when `atelet.enabled` is
-true, which is its default.
+[substrate](../substrate/README.md) chart, so it can be upgraded in the order
+the [version skew policy](../../docs/reference/version-skew-policy.md) requires:
+atelet before workers, and workers before ate-api-server.
+
+The substrate chart also renders atelet when `atelet.enabled` is true, which is
+its default. That mode is deprecated, because one upgrade of the substrate
+release moves atelet and ate-api-server together. New installs should use this
+chart.
+
+## Install
 
 Install the substrate chart with `atelet.enabled=false`, then install this
-chart in the same namespace:
+chart in the same namespace. With the substrate chart's bundled RustFS:
 
 ```sh
 helm upgrade --install substrate ./charts/substrate \
   --namespace ate-system --create-namespace \
   -f values.yaml --set atelet.enabled=false
+kubectl create secret generic rustfs-credentials -n ate-system \
+  --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
+  --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
 helm upgrade --install substrate-atelet ./charts/substrate-atelet \
   --namespace ate-system \
-  -f values.yaml --wait
+  -f values.yaml \
+  --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
+  --set objectStore.region=us-east-1 \
+  --set objectStore.pathStyle=true \
+  --set objectStore.credentialsSecret=rustfs-credentials \
+  --wait
 ```
 
-This chart reads the same value paths as the substrate chart: `atelet`,
+Use the credentials from the substrate release's `rustfs.accessKey` and
+`rustfs.secretKey`.
+
+## Values
+
+This chart reads the same value paths as the substrate chart for `atelet`,
 `objectStorePlugin.node`, `objectStorePlugin.extraEnv`, `preview`, `otel`,
-`rustfs.enabled` and its credentials, `image`, `imagePullSecrets`, and `global`.
-Pass the substrate release's values file to both releases so the settings
-match.
+`image`, `imagePullSecrets` and `global`, so the substrate release's values
+file can configure both releases.
+
+Object storage is set under `objectStore` instead of `rustfs` and
+`atelet.storageBackend`:
+
+| Key | Default | Description |
+|---|---|---|
+| `objectStore.backend` | `s3` | Snapshot backend, `s3` or `gcs` |
+| `objectStore.endpoint` | `""` | S3 endpoint URL. Empty uses the AWS endpoint for the region |
+| `objectStore.region` | `""` | S3 region |
+| `objectStore.pathStyle` | `false` | Address buckets by path rather than by virtual host |
+| `objectStore.credentialsSecret` | `""` | Secret with `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` keys. Empty uses the SDK's default credential chain |
 
 Set `substrateReleaseName` to the substrate release's name. It defaults to
 `substrate`. atelet's objects take their names from it, because the substrate
 release grants permissions to the atelet ServiceAccount by name. atelet also
-uses it to reach that release's API server.
+uses it to reach that release's API server. Names other than `substrate`
+prefix each object with the release name, for example `team-atelet`.
 
-## Moving atelet out of an existing substrate release
+## Existing installs
 
 Upgrading the substrate release with `atelet.enabled=false` deletes atelet.
-To move atelet to this chart without restarting it, keep the objects through
-that upgrade, then hand them to the new release:
-
-```sh
-# Runs a kubectl verb on every object the atelet template renders.
-objects() {
-  local verb="$1"; shift
-  kubectl -n ate-system "${verb}" serviceaccount/atelet daemonset/atelet \
-    role/atelet-endpointslices rolebinding/atelet-endpointslices "$@"
-  kubectl "${verb}" clusterrole/atelet-role clusterrolebinding/atelet-binding \
-    priorityclass/ate-node-critical "$@"
-}
-
-# 1. Keep the objects when the substrate release stops rendering them.
-objects annotate --overwrite helm.sh/resource-policy=keep
-# 2. Stop managing atelet in the substrate release.
-helm upgrade substrate ./charts/substrate -n ate-system \
-  -f values.yaml --set atelet.enabled=false
-# 3. Hand the objects to the new release. Helm refuses to install over
-#    objects that name another release.
-objects annotate --overwrite meta.helm.sh/release-name=substrate-atelet
-# 4. Install the new release. It adopts the objects.
-helm upgrade --install substrate-atelet ./charts/substrate-atelet \
-  -n ate-system -f values.yaml --wait
-# 5. Remove the keep policy so later upgrades can delete the objects.
-objects annotate helm.sh/resource-policy-
-```
-
-Names other than `substrate` prefix each object with the release name, for
-example `team-atelet`. If `atelet.imageCredentialProviderConfigYAML` is set,
-also move `configmap/atelet-image-credential-provider`.
-
-Use the same values for both releases. Then the DaemonSet's pod template does
-not change and the atelet pods keep running.
-
-To move atelet back, let the substrate release adopt the objects, then delete
-this release's records. Do not run `helm uninstall substrate-atelet`. It
-deletes atelet even when the objects carry `helm.sh/resource-policy: keep`.
-
-```sh
-objects annotate --overwrite meta.helm.sh/release-name=substrate
-helm upgrade substrate ./charts/substrate -n ate-system -f values.yaml
-kubectl -n ate-system delete secret -l owner=helm,name=substrate-atelet
-```
+Switch an existing install to this chart when you next reinstall, which every
+minor upgrade before 1.0 requires.

@@ -14,8 +14,8 @@
 
 # Default values for the substrate-atelet chart.
 #
-# These keys have the same paths and defaults as in the substrate chart, so the
-# values file for the substrate release also configures this one.
+# Most keys have the same paths and defaults as in the substrate chart. Object
+# storage is configured under objectStore instead of rustfs.
 
 # Release name of the substrate chart this atelet serves. Install this chart in
 # that release's namespace. Object names follow the substrate release, so
@@ -25,16 +25,24 @@ substrateReleaseName: substrate
 # Preview gates for atelet. Match the substrate release's preview gates.
 preview: []
 
-# Bundled RustFS settings from the substrate release. When enabled, the
-# object-store plugin uses the in-cluster RustFS endpoint and credentials.
-rustfs:
-  enabled: true
-  accessKey: rustfsadmin
-  secretKey: rustfsadmin
+# Object store the node object-store plugin reads and writes snapshots in. Use
+# the same store as the substrate release. For the substrate chart's bundled
+# RustFS, set endpoint to http://rustfs.<namespace>.svc:9000 (prefixed with the
+# release name unless it is "substrate"), region to us-east-1 and pathStyle to
+# true.
+objectStore:
+  # Snapshot backend: s3 or gcs.
+  backend: s3
+  # S3 endpoint URL. Empty uses the AWS endpoint for the region.
+  endpoint: ""
+  region: ""
+  # Address buckets by path rather than by virtual host.
+  pathStyle: false
+  # Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY keys. Empty uses the
+  # SDK's default credential chain.
+  credentialsSecret: ""
 
-# atelet daemonset overrides. Defaults use the in-cluster RustFS deployment for
-# snapshots. Set rustfs.enabled=false and override these fields when using
-# external storage.
+# atelet daemonset overrides.
 # extraArgs / extraEnv are appended verbatim for installer-specific knobs
 # (e.g. registry replacement for kind).
 atelet:
@@ -48,7 +56,6 @@ atelet:
   # either one still needs the bin directory.
   imageCredentialProviderConfigYAML: ""
   imageCredentialProviderBinDir: ""
-  storageBackend: s3
   # Restricts atelet to matching nodes. Every node that runs WorkerPool pods
   # needs an atelet, so cover each pool's nodeSelector here.
   nodeSelector: {}

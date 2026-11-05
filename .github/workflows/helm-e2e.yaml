@@ -110,8 +110,15 @@ jobs:
       # TestHelmAteletChartMatchesSubstrateChart checks that this release
       # renders the same atelet as the substrate chart.
       run: |
+        kubectl create secret generic rustfs-credentials -n ate-system \
+          --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
+          --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
         helm upgrade --install substrate-atelet charts/substrate-atelet \
           --namespace ate-system \
+          --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
+          --set objectStore.region=us-east-1 \
+          --set objectStore.pathStyle=true \
+          --set objectStore.credentialsSecret=rustfs-credentials \
           --set image.registry=localhost:5001 \
           --set image.tag=helm-e2e \
           --set 'preview[0]=ALL' \
