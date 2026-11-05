@@ -191,6 +191,12 @@ atenetEgress:
 credentialProvider:
   # Deploy the Kubernetes Secret provider and route k8s.io credential URIs to it.
   enabled: true
+  rbac:
+    # Namespaces the provider reads Secrets in. Empty (the default), its
+    # Secret reader ClusterRole is bound cluster-wide. Set, the ClusterRole is
+    # bound by RoleBinding in each listed namespace only; a namespace added
+    # later needs its own RoleBinding to it.
+    namespaces: []
   namespacePolicies: []
   # - atespace: team-a
   #   allowedNamespaces: [team-a-secrets]

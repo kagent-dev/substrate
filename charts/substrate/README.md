@@ -97,6 +97,7 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.nodeSelector` | `{}` | Node labels atelet pods must match; must cover the nodes of every WorkerPool |
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
 | `credentialProvider.enabled` | `true` | Deploy the Kubernetes Secret provider and route `k8s.io` credential URIs to it. With no provider, every credential injection fails closed |
+| `credentialProvider.rbac.namespaces` | `[]` | Namespaces the provider reads Secrets in. Empty, its Secret reader ClusterRole (`k8s-credential-provider-secret-reader`, prefixed with the release name unless the release is `substrate`) is bound cluster-wide; set, it is bound by RoleBinding in each listed namespace only, and a namespace added later needs its own RoleBinding to it |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
 | `objectStorePlugin.extraEnv` | `[]` | Object storage credentials/settings shared by both object-store plugins |
