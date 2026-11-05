@@ -114,6 +114,36 @@ tests:
         key: cloud.google.com/compute-class
         operator: Exists
         effect: NoSchedule
+- it: keeps atelet running under node pressure
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.spec.priorityClassName
+      value: system-cluster-critical
+- it: admits critical atelet pods in the release namespace
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: ResourceQuota
+  asserts:
+  - equal:
+      path: metadata.name
+      value: custom-atelet-critical-pods
+  - equal:
+      path: metadata.namespace
+      value: custom-system
+  - equal:
+      path: spec.hard.pods
+      value: 1G
+  - contains:
+      path: spec.scopeSelector.matchExpressions
+      content:
+        scopeName: PriorityClass
+        operator: In
+        values: [system-node-critical, system-cluster-critical]
 - it: lets atelet preserve image ownership and permissions
   template: atelet.yaml
   documentSelector:

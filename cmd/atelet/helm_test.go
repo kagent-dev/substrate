@@ -25,7 +25,6 @@ import (
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 )
 
@@ -201,9 +200,8 @@ func TestHelmSandboxAssetStorage(t *testing.T) {
 				}
 			}
 			i := slices.IndexFunc(pod.Volumes, func(v corev1.Volume) bool { return v.Name == mount.Name })
-			if i < 0 || pod.Volumes[i].EmptyDir == nil || pod.Volumes[i].EmptyDir.SizeLimit == nil ||
-				pod.Volumes[i].EmptyDir.SizeLimit.Cmp(resource.MustParse("9Gi")) != 0 {
-				t.Error("asset staging needs an emptyDir with capacity plus filesystem overhead")
+			if i < 0 || pod.Volumes[i].EmptyDir == nil || pod.Volumes[i].EmptyDir.SizeLimit != nil {
+				t.Error("asset staging needs an emptyDir without an eviction size limit")
 			}
 		})
 	}
