@@ -60,7 +60,8 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
-| `atenetRouter.requestParking.budget` | `5s` | Maximum wait for a suspended actor to become routable, e.g. `30s` for slower cold starts |
+| `atenetRouter.requestParking.budget` | `60s` | Total budget for actor resolution and resume retries |
+| `atenetRouter.requestTimeout` | `60s` | Timeout for each Substrate ingress API call, including actor resolution |
 | `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
@@ -84,6 +85,30 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateworkers, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+
+## Router timeouts
+
+The router uses `ResumeActor` to resolve actor assignments, including actors
+that already run. `atenetRouter.requestTimeout` sets the HTTP backend request
+timeout for those API calls. `atenetRouter.requestParking.budget` bounds the
+resume attempts and retry delays. Both apply to direct and CONNECT-tunneled
+HTTP/gRPC routes. Both default to `60s`, allowing each attempt to use the
+remaining parking budget.
+
+A resume must finish within both the per-call timeout and the remaining parking
+budget. A shorter client deadline can still cancel it. Set both values as
+duration strings when slow restores need more time, for example:
+
+```yaml
+atenetRouter:
+  requestParking:
+    budget: "120s"
+  requestTimeout: "120s"
+```
+
+Choose limits using measured restore latency. A parking budget of `0s` uses
+agentgateway's default budget; it does not disable the limit. These settings
+govern API calls during routing, not the actor's application request duration.
 
 ## Upgrading sandbox and snapshot configuration
 
