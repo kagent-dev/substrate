@@ -148,7 +148,9 @@ ateController:
 atenetRouter:
   requestParking:
     # Maximum time to wait for a suspended actor to become routable.
-    budget: 5s
+    budget: "60s"
+  # Timeout for each Substrate ingress API call, including actor resolution.
+  requestTimeout: "60s"
   # mTLS client identities allowed to reach actors. Empty denies all ingress.
   ingressAllowedSPIFFEIDs: []
   agentgateway:

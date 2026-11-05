@@ -114,6 +114,8 @@ data:
           # AgentGateway only uses atunnel's CONNECT listener.
           connectTargetPort: 8443
           policies:
+            http:
+              requestTimeout: {{ .Values.atenetRouter.requestTimeout | quote }}
             backendTLS:
               cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
               key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
