@@ -232,6 +232,38 @@ func TestBuildDeploymentApplyConfig(t *testing.T) {
 	}
 }
 
+func TestBuildDeploymentApplyConfigMaxActorsPerWorker(t *testing.T) {
+	for _, class := range []atev1.SandboxClass{atev1.SandboxClassGvisor, atev1.SandboxClassMicroVM} {
+		t.Run(string(class), func(t *testing.T) {
+			for _, tt := range []struct {
+				name  string
+				limit *int32
+				want  string
+			}{
+				{name: "omitted"},
+				{name: "zero", limit: ptr.To(int32(0)), want: "--max-actors=0"},
+				{name: "three", limit: ptr.To(int32(3)), want: "--max-actors=3"},
+				{name: "maximum", limit: ptr.To(int32(2147483647)), want: "--max-actors=2147483647"},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					wp := testWorkerPoolApplyConfig(nil)
+					wp.Spec.SandboxClasses = []atev1.WorkerPoolSandboxClass{{Name: class}}
+					baseline := buildDeploymentApplyConfig(wp, workerOTelSettings{}, installdefaults.SystemNamespace, installdefaults.AteletServiceAccount, installdefaults.RouterServiceAccount, egresspolicy.DNSEgressPolicyEnforceInAtunnel)
+					want := append([]string(nil), baseline.Spec.Template.Spec.Containers[0].Args...)
+					if tt.want != "" {
+						want = append(want, tt.want)
+					}
+					wp.Spec.MaxActorsPerWorker = tt.limit
+					got := buildDeploymentApplyConfig(wp, workerOTelSettings{}, installdefaults.SystemNamespace, installdefaults.AteletServiceAccount, installdefaults.RouterServiceAccount, egresspolicy.DNSEgressPolicyEnforceInAtunnel)
+					if diff := cmp.Diff(want, got.Spec.Template.Spec.Containers[0].Args); diff != "" {
+						t.Fatalf("worker arguments mismatch (-want +got):\n%s", diff)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestBuildDeploymentApplyConfigMetadata(t *testing.T) {
 	wp := testWorkerPoolApplyConfig(&atev1.WorkerPoolPodTemplate{
 		Labels: map[string]atev1.WorkerPoolLabelValue{

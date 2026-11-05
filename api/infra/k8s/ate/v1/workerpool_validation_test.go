@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 const gpuResourceName = corev1.ResourceName("nvidia.com/gpu")
@@ -77,6 +78,28 @@ func TestWorkerPoolValidation(t *testing.T) {
 		},
 		wantErr: true,
 		errMsg:  "spec.replicas: Invalid value: -1: spec.replicas in body should be greater than or equal to 0",
+	}, {
+		name: "actor limit of three",
+		mutate: func(wp *WorkerPool) {
+			wp.Spec.MaxActorsPerWorker = ptr.To(int32(3))
+		},
+	}, {
+		name: "zero actor limit",
+		mutate: func(wp *WorkerPool) {
+			wp.Spec.MaxActorsPerWorker = ptr.To(int32(0))
+		},
+	}, {
+		name: "maximum actor limit",
+		mutate: func(wp *WorkerPool) {
+			wp.Spec.MaxActorsPerWorker = ptr.To(int32(2147483647))
+		},
+	}, {
+		name: "negative actor limit",
+		mutate: func(wp *WorkerPool) {
+			wp.Spec.MaxActorsPerWorker = ptr.To(int32(-1))
+		},
+		wantErr: true,
+		errMsg:  "spec.maxActorsPerWorker in body should be greater than or equal to 0",
 	}, {
 		name: "missing workerImage",
 		mutate: func(wp *WorkerPool) {

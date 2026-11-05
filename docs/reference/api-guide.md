@@ -24,6 +24,7 @@ The `WorkerPool` defines the pool of physical "warm" compute capacity. It manage
 | `replicas` | `int32` | **Required.** Number of physical standby pods to maintain in the cluster. |
 | `workerImage` | `string` | **Required.** The container image for the `ateworker` process (e.g. `ko://go.ate.dev/substrate/cmd/ateworker-gvisor`). |
 | `sandboxClasses` | `[]WorkerPoolSandboxClass` | **Required.** The sandbox runtime families the pool runs; exactly one entry today. Each entry has `name` (**required**, `gvisor` or `microvm`, immutable), which drives the worker pod shape (e.g. KVM device mounts, node placement), and `configRef.name` (optional), which names a cluster-scoped [`SandboxConfig`](#3-sandboxconfig-the-sandbox-itself) of the same class. Without `configRef`, the pool uses the class default (see [Class default](#class-default)). The controller records the result in `status.sandboxClasses`. The sandbox binaries an actor boots with come from the `SandboxConfig` the pool of its assigned worker resolved. |
+| `maxActorsPerWorker` | `int32` | **Optional.** Maximum actors each worker hosts at once. Zero accepts no actors. Omission keeps the worker default (1000). |
 | `template` | `WorkerPoolPodTemplate` | **Optional.** Metadata, scheduling, and resource settings for worker workloads. |
 
 #### `WorkerPoolPodTemplate` (`spec.template`)
@@ -53,7 +54,8 @@ metadata; they do not affect actor scheduling. Actor selectors match
 Setting `resources.limits` (CPU and Memory) on a `WorkerPool` establishes each worker pod's **capacity** — the envelope its actor sandboxes share, taken from the `ateworker` container's limits. The scheduler only places an actor on a worker whose remaining capacity is `>=` the actor's declared resource limits (see [Sandbox Right-Sizing](#sandbox-right-sizing-resources) on the `ActorTemplate`).
 
 - Worker capacity is a shared budget: each actor placed on a worker subtracts its declared limits from what is left. Size a pool's `limits` for the actors it should host together.
-- A worker also has an actor limit, set by the ateworker's `--max-actors` flag (default 1000). Placement stops at whichever runs out first.
+- `spec.maxActorsPerWorker` sets each worker's `--max-actors` flag. Omission keeps the worker default (1000). Placement stops when either the actor count or resource capacity runs out.
+- Changing or removing `maxActorsPerWorker` rolls the workers through the normal drain process. The limit applies to each worker, not to the whole pool.
 - A worker keeps some of its memory limit for itself and reports the rest as capacity. Each actor can also use memory on its worker outside its own limits, e.g. for the microVM's VMM. The worker reports this overhead with each runtime, placement counts it against capacity, and it shows in the worker's allocated resources.
 - Capacity is advisory for placement only: a worker that declares no CPU/memory limit reports zero capacity for that dimension, which the scheduler treats as **unconstrained** (placement is never blocked by missing data). The actual sandbox size still comes from the `ActorTemplate`.
 
@@ -69,6 +71,7 @@ metadata:
     workload: secret-agent
 spec:
   replicas: 10
+  maxActorsPerWorker: 3
   workerImage: ko://go.ate.dev/substrate/cmd/ateworker-gvisor
   sandboxClasses:
   - name: gvisor

@@ -91,6 +91,15 @@ type WorkerPoolSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
+	// maxActorsPerWorker is the maximum number of actors each worker hosts at
+	// once. When omitted, the worker uses its default limit. Zero prevents
+	// workers from accepting actors. Changing this value rolls the workers.
+	//
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=2147483647
+	MaxActorsPerWorker *int32 `json:"maxActorsPerWorker,omitempty"`
+
 	// workerImage is the worker container image to deploy as workers.
 	// +kubebuilder:validation:MinLength=1
 	// +required

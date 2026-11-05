@@ -16,6 +16,7 @@ package controllers
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -167,6 +168,9 @@ func buildDeploymentApplyConfig(wp *atev1.WorkerPool, otel workerOTelSettings, s
 	}
 	previewArg := "--preview=" + strings.Join(enabledGates(), ",")
 	args = append(args, previewArg)
+	if wp.Spec.MaxActorsPerWorker != nil {
+		args = append(args, "--max-actors="+strconv.FormatInt(int64(*wp.Spec.MaxActorsPerWorker), 10))
+	}
 
 	containerAC := corev1ac.Container().
 		WithName("worker").
