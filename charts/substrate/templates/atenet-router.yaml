@@ -21,6 +21,13 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: atenet-router
+    {{- with .Values.atenetRouter.serviceAccount.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.atenetRouter.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

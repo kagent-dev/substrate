@@ -60,6 +60,7 @@ See `values.yaml` for the full set; the important keys:
 | `postgres.schema` | `substrate` | Store the Substrate tables in this PostgreSQL schema |
 | `postgres.clientCertificates.enabled` | `false` | Project separate owner and runtime login certificates into the API server |
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
+| `<component>.serviceAccount.labels` / `<component>.serviceAccount.annotations` | `{}` | Metadata for each component's ServiceAccount, e.g. `ateApi.serviceAccount.annotations` for workload identity. Components: `ateApi`, `ateClient`, `ateController`, `ateIdpServer`, `atelet`, `atenetRouter`, `atenetEgress`, `credentialProvider`, `rustfs` |
 | `atenetRouter.requestParking.budget` | `5s` | Maximum wait for a suspended actor to become routable, e.g. `30s` for slower cold starts |
 | `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |

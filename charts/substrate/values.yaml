@@ -66,6 +66,9 @@ rustfs:
       limits:
         cpu: 500m
         memory: 256Mi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 # atelet daemonset overrides. Defaults use the in-cluster RustFS deployment for
 # snapshots. Set rustfs.enabled=false and override these fields when using
@@ -96,6 +99,9 @@ atelet:
     limits:
       cpu: "2"
       memory: 1Gi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 # Object storage credentials/settings for snapshot transfers and private sandbox assets.
 objectStorePlugin:
@@ -132,9 +138,23 @@ ateApi:
     limits:
       cpu: "2"
       memory: 1Gi
+  # Labels and annotations for the ServiceAccount, e.g. for workload identity.
+  # Every component with a ServiceAccount takes the same block.
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 ateIdpServer:
   resources: {}
+  serviceAccount:
+    annotations: {}
+    labels: {}
+
+# The ate-client ServiceAccount that kubectl ate and demos use.
+ateClient:
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 ateController:
   resources:
@@ -144,6 +164,9 @@ ateController:
     limits:
       cpu: "1"
       memory: 512Mi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 atenetRouter:
   requestParking:
@@ -159,6 +182,9 @@ atenetRouter:
       limits:
         cpu: "2"
         memory: 1Gi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 atenetEgress:
   agentgateway:
@@ -170,6 +196,9 @@ atenetEgress:
       limits:
         cpu: "2"
         memory: 1Gi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 # Kubernetes Secret provider and AGW HTTP/HTTPS credential injection.
 # Includes get-only Secret RBAC. HTTPS requires egress-mitm-ca-pool and actor trust.
@@ -184,6 +213,9 @@ credentialProvider:
     limits:
       cpu: 500m
       memory: 256Mi
+  serviceAccount:
+    annotations: {}
+    labels: {}
 
 # Name of a ConfigMap in the release namespace that supplies per-environment
 # overrides for ate-api-server (ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING, ...).

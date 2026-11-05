@@ -20,6 +20,14 @@ kind: ServiceAccount
 metadata:
   name: {{ include "substrate.fullname" (list "rustfs" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.rustfs.serviceAccount.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.rustfs.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

@@ -19,6 +19,14 @@ kind: ServiceAccount
 metadata:
   name: {{ include "substrate.fullname" (list "ate-idp-server" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.ateIdpServer.serviceAccount.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.ateIdpServer.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1

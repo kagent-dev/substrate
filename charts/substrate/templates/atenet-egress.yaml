@@ -19,6 +19,14 @@ kind: ServiceAccount
 metadata:
   name: {{ include "substrate.fullname" (list "atenet-egress" .) }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.atenetEgress.serviceAccount.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.atenetEgress.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
