@@ -125,6 +125,9 @@ ateApi:
   # Defaults to the in-cluster IdP URL; set a stable issuer for external consumers.
   actorJWTIssuer: ""
   extraArgs: []
+  # Additional containers added to the API server pod.
+  extraInitContainers: []
+  extraContainers: []
   resources:
     requests:
       cpu: 100m

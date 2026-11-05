@@ -139,6 +139,9 @@ spec:
         - { name: servicedns, mountPath: /run/servicedns.podcert.ate.dev, readOnly: true }
         - { name: podidentity, mountPath: /run/podidentity.podcert.ate.dev, readOnly: true }
         - { name: actor-id-jwt-jwks, mountPath: /run/actor-id-jwt-jwks, readOnly: true }
+{{- with .Values.ateApi.extraInitContainers }}
+{{ toYaml . | indent 6 }}
+{{- end }}
       containers:
       - name: ate-api-server
         securityContext:
@@ -249,6 +252,9 @@ spec:
             port: health
           initialDelaySeconds: 10
           periodSeconds: 10
+{{- with .Values.ateApi.extraContainers }}
+{{ toYaml . | indent 6 }}
+{{- end }}
       volumes:
       - name: objectstore-plugin
         emptyDir: {}
