@@ -54,7 +54,7 @@ as described in the [credential provider setup](../../docs/kubernetes-credential
 Namespace grants default to an empty list, denying credential access.
 
 This chart installs atelet by default. That is deprecated and will be removed
-before 1.0, because one upgrade of this release moves atelet and
+in the future, because one upgrade of this release moves atelet and
 ate-api-server together, which the
 [version skew policy](../../docs/reference/version-skew-policy.md) does not
 allow. New installs should set `atelet.enabled=false` and install the
