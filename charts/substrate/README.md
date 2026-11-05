@@ -20,12 +20,29 @@ go run ./cmd/ate-setup create podcertificate-controller-cas
 helm upgrade --install substrate-podcert ./charts/substrate-podcert \
   --namespace podcertificate-controller-system --create-namespace --wait
 
+# Install atelet as its own release, using the bundled RustFS
+kubectl create namespace ate-system
+kubectl create secret generic rustfs-credentials -n ate-system \
+  --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
+  --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
+helm upgrade --install substrate-atelet ./charts/substrate-atelet \
+  --namespace ate-system \
+  --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
+  --set objectStore.region=us-east-1 \
+  --set objectStore.pathStyle=true \
+  --set objectStore.credentialsSecret=rustfs-credentials
+
 # Install Substrate after creating the database identities and Secrets
 helm upgrade --install substrate ./charts/substrate \
-  --namespace ate-system --create-namespace \
+  --namespace ate-system \
   --set postgres.readWriteConnectionStringSecretRef.name=substrate-postgres-readwrite \
-  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner
+  --set postgres.ownerConnectionStringSecretRef.name=substrate-postgres-owner \
+  --set atelet.enabled=false
 ```
+
+Install substrate-atelet before substrate, and upgrade them in that order. The
+[version skew policy](../../docs/reference/version-skew-policy.md) upgrades
+atelet before ate-api-server.
 
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
 using the chart `appVersion` as the tag. Override `image.registry` and
@@ -35,6 +52,13 @@ The chart installs the Kubernetes credential provider and enables HTTPS egress
 interception. Create the `egress-mitm-ca-pool` Secret and configure actor trust
 as described in the [credential provider setup](../../docs/kubernetes-credential-provider.md).
 Namespace grants default to an empty list, denying credential access.
+
+This chart installs atelet by default. That is deprecated and will be removed
+in the future, because one upgrade of this release moves atelet and
+ate-api-server together, which the
+[version skew policy](../../docs/reference/version-skew-policy.md) does not
+allow. New installs should set `atelet.enabled=false` and install the
+[substrate-atelet](../substrate-atelet/README.md) chart as a second release.
 
 ## Render manifests without applying
 
@@ -64,6 +88,7 @@ See `values.yaml` for the full set; the important keys:
 | `atenetRouter.requestTimeout` | `60s` | Timeout for each Substrate ingress API call, including actor resolution |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
+| `atelet.enabled` | `true` | Deprecated. Set to `false` and install atelet with the [substrate-atelet](../substrate-atelet/README.md) chart |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
 | `atelet.imageCredentialProviderConfig` | `""` | Host path to the kubelet credential provider config; set together with the bin directory |
 | `atelet.imageCredentialProviderConfigYAML` | `""` | Credential provider config as text, rendered into a ConfigMap, for nodes where that file cannot be authored or must differ from the kubelet's; mutually exclusive with the host path |
