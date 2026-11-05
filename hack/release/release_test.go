@@ -92,16 +92,17 @@ func TestPublishCharts(t *testing.T) {
 			if tc.wantErr {
 				return
 			}
-			if strings.Count(got, "push ") != 3 || strings.Count(got, "package ") != 3 {
+			charts := []string{"substrate-crds", "substrate", "substrate-podcert", "substrate-atelet"}
+			if strings.Count(got, "push ") != len(charts) || strings.Count(got, "package ") != len(charts) {
 				t.Fatalf("incomplete chart set:\n%s", got)
 			}
-			for _, chart := range []string{"substrate-crds", "substrate", "substrate-podcert"} {
+			for _, chart := range charts {
 				want := chart + "-" + strings.TrimPrefix(tc.version, "v") + ".tgz oci://ghcr.io/kagent-dev/substrate/helm"
 				if !strings.Contains(got, want) {
 					t.Errorf("missing %s in:\n%s", want, got)
 				}
 			}
-			if strings.Count(got, "--app-version "+tc.version) != 3 {
+			if strings.Count(got, "--app-version "+tc.version) != len(charts) {
 				t.Errorf("charts do not select the release images:\n%s", got)
 			}
 		})

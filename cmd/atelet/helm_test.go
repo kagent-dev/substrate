@@ -15,6 +15,9 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"reflect"
@@ -22,10 +25,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 )
 
@@ -228,5 +234,95 @@ func TestHelmGVisorSandboxConfigMatchesManifest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Spec, want.Spec) {
 		t.Errorf("Helm sandbox config must match the runtime assets in the upstream manifest: got %+v, want %+v", got.Spec, want.Spec)
+	}
+}
+
+// helmTemplate returns the objects helm template renders. Comparing objects
+// rather than text ignores the whitespace that differs between Helm versions.
+func helmTemplate(t *testing.T, args ...string) []unstructured.Unstructured {
+	t.Helper()
+	var stderr strings.Builder
+	cmd := exec.CommandContext(t.Context(), "helm", append([]string{"template"}, args...)...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("helm template %v: %v\n%s", args, err, stderr.String())
+	}
+	var objs []unstructured.Unstructured
+	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	for {
+		var obj map[string]any
+		if err := decoder.Decode(&obj); errors.Is(err, io.EOF) {
+			return objs
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if obj != nil {
+			objs = append(objs, unstructured.Unstructured{Object: obj})
+		}
+	}
+}
+
+func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
+	// substrate-atelet configures object storage under objectStore. The
+	// substrate chart gets the same env through objectStorePlugin.extraEnv.
+	noRustFS := []string{"--set", "rustfs.enabled=false", "--set", "ateApi.snapshotLocation=gs://snapshots/"}
+	for _, tc := range []struct {
+		name, release, namespace  string
+		shared, substrate, atelet []string
+	}{
+		{name: "defaults", release: "substrate", namespace: "ate-system", substrate: noRustFS},
+		{
+			name:      "gcs",
+			release:   "substrate",
+			namespace: "ate-system",
+			substrate: append([]string{"--set", "atelet.storageBackend=gcs"}, noRustFS...),
+			atelet:    []string{"--set", "objectStore.backend=gcs"},
+		},
+		{
+			name:      "custom values",
+			release:   "team",
+			namespace: "custom",
+			shared: []string{
+				"--set", "preview[0]=ALL",
+				"--set", "otel.endpoint=http://collector:4317",
+				"--set", "atelet.nodeSelector.pool=agents",
+				"--set", "image.tag=test",
+			},
+			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[
+				{"name": "AWS_REGION", "value": "us-east-1"},
+				{"name": "AWS_ENDPOINT_URL", "value": "http://store:9000"},
+				{"name": "AWS_S3_USE_PATH_STYLE", "value": "true"},
+				{"name": "AWS_ACCESS_KEY_ID", "valueFrom": {"secretKeyRef": {"name": "store", "key": "AWS_ACCESS_KEY_ID"}}},
+				{"name": "AWS_SECRET_ACCESS_KEY", "valueFrom": {"secretKeyRef": {"name": "store", "key": "AWS_SECRET_ACCESS_KEY"}}}]`},
+				noRustFS...),
+			atelet: []string{
+				"--set", "objectStore.region=us-east-1",
+				"--set", "objectStore.endpoint=http://store:9000",
+				"--set", "objectStore.pathStyle=true",
+				"--set", "objectStore.credentialsSecret=store",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := helmTemplate(t, slices.Concat([]string{tc.release, "../../charts/substrate", "-n", tc.namespace,
+				"--show-only", "templates/atelet.yaml"}, tc.shared, tc.substrate)...)
+			got := helmTemplate(t, slices.Concat([]string{"atelet", "../../charts/substrate-atelet", "-n", tc.namespace,
+				"--set", "substrateReleaseName=" + tc.release}, tc.shared, tc.atelet)...)
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("substrate-atelet renders a different atelet than the substrate chart (-substrate +substrate-atelet):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestHelmAteletOptOut(t *testing.T) {
+	for _, obj := range helmTemplate(t, "substrate", "../../charts/substrate", "--set", "atelet.enabled=false") {
+		kind, name := obj.GetKind(), obj.GetName()
+		// The NetworkPolicy still guards an atelet installed by substrate-atelet.
+		if kind == "DaemonSet" || kind == "PriorityClass" ||
+			(kind != "NetworkPolicy" && strings.HasPrefix(name, "atelet")) {
+			t.Errorf("atelet.enabled=false still renders %s %s", kind, name)
+		}
 	}
 }

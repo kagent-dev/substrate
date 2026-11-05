@@ -73,6 +73,11 @@ rustfs:
 # extraArgs / extraEnv are appended verbatim for installer-specific knobs
 # (e.g. registry replacement for kind).
 atelet:
+  # Deprecated, and to be removed before 1.0: one upgrade of this release moves
+  # atelet and ate-api-server together, which the version skew policy does not
+  # allow. New installs should set false and install the substrate-atelet
+  # chart. See charts/substrate-atelet/README.md.
+  enabled: true
   # Host paths for the node's kubelet credential provider. Set both to enable
   # private registry authentication (GKE: /etc/srv/kubernetes/cri_auth_config.yaml
   # and /home/kubernetes/bin). Leave empty on nodes without a provider, like Kind.

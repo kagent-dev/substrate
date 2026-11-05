@@ -88,6 +88,28 @@ jobs:
           --set image.registry=localhost:5001 \
           --set image.tag=helm-e2e \
           --wait --timeout=5m
+    - name: Install atelet as a separate release
+      # Before substrate, the order the version skew policy upgrades them in.
+      # TestHelmAteletChartMatchesSubstrateChart checks that this release
+      # renders the same atelet as the substrate chart.
+      run: |
+        kubectl create secret generic rustfs-credentials -n ate-system \
+          --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
+          --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
+        helm upgrade --install substrate-atelet charts/substrate-atelet \
+          --namespace ate-system \
+          --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
+          --set objectStore.region=us-east-1 \
+          --set objectStore.pathStyle=true \
+          --set objectStore.credentialsSecret=rustfs-credentials \
+          --set image.registry=localhost:5001 \
+          --set image.tag=helm-e2e \
+          --set 'preview[0]=ALL' \
+          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
+          --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
+          --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
+          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
+          --wait --timeout=10m
     - name: Provision PostgreSQL and connection Secrets
       run: hack/install-postgres.sh --kind
     - name: Install Agent Substrate with Helm
@@ -104,9 +126,7 @@ jobs:
           --set 'preview[0]=ALL' \
           --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
           --set atenetEgress.agentgateway.logLevel=debug \
-          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
-          --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
-          --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
+          --set atelet.enabled=false \
           --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
           --wait --timeout=10m
     - name: Enable NFS
