@@ -16,8 +16,8 @@
 // Envoy → ext_proc → ateapi → worker path: a deliberately 1-worker pool is
 // oversubscribed by two actors, so a request for the suspended actor parks
 // until the worker frees (ParkThenServed) or the park budget elapses
-// (BudgetExhaustion). It runs with the router's default parking configuration
-// (budget 5s); flag-dependent behavior (lot-full shed, parking disabled,
+// (BudgetExhaustion). It requires a 5s parking budget. Flag-dependent behavior
+// (lot-full shed, parking disabled,
 // custom budgets) is covered by unit tests instead, because the shared router
 // cannot be reconfigured per test.
 package parking
@@ -39,7 +39,7 @@ import (
 // k8s namespace holding its pool.
 var parkingAtespace = e2e.FixtureName("ate-e2e") + "-parking"
 
-// The park budget the deployed router runs with (its flag default). The
+// The park budget the deployed test router runs with. The
 // timing assertions below are windows around it, wide enough for scheduling
 // jitter but narrow enough to prove parking happened and that the router —
 // not an Envoy timeout — produced the verdict.
