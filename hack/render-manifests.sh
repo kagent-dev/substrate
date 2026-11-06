@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2026 Google LLC
+# Copyright 2026 The Agent Substrate Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ for src, docs in docs_by_source.items():
         src = "ate-system-namespace.yaml"
     chart = "substrate-podcert" if src == "pod-certificate-controller.yaml" else "substrate"
     header = (
-        "#  Copyright 2026 Google LLC\n"
+        "#  Copyright 2026 The Agent Substrate Authors\n"
         "#\n"
         "#  Licensed under the Apache License, Version 2.0 (the \"License\");\n"
         "#  you may not use this file except in compliance with the License.\n"
