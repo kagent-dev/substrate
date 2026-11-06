@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2026 Google LLC
+# Copyright 2026 The Agent Substrate Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,8 +36,12 @@ ASLV2_HEADER = [
     "limitations under the License."
 ]
 
-def match_copyright(line):
-    match = re.search(r"Copyright\s+(\d{4})\s+(?:Google LLC|The Agent Substrate Authors)", line)
+def match_copyright(line, filepath):
+    owner = "The Agent Substrate Authors"
+    # The initial migration is immutable and retains its original copyright.
+    if filepath == "cmd/ateapi/internal/store/atepg/migrations/000001_initial.sql":
+        owner = "Google LLC"
+    match = re.search(rf"Copyright\s+(\d{{4}})\s+{owner}", line)
     if not match:
         return False
     year = int(match.group(1))
@@ -72,7 +76,7 @@ def verify_file(filepath):
     header_idx = 0
     for line in cleaned_lines:
         if not found_copyright:
-            if match_copyright(line):
+            if match_copyright(line, filepath):
                 found_copyright = True
             continue
 
