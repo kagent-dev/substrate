@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2026 Google LLC
+# Copyright 2026 The Agent Substrate Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 #   hack/site.sh serve          live-reloading dev server
 #   hack/site.sh build          production build into site/public, as CI runs it
 #   hack/site.sh content        generate site/content/ stubs from docs/ and demos/,
-#                               and the API reference from ateapi.proto
+#                               and the API reference
 #   hack/site.sh release-data   write site/data/release.json (serve and build
 #                               run this first)
 #   hack/site.sh test           build against site/testdata and check the

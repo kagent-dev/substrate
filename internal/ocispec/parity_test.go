@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2026 The Agent Substrate Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -227,6 +227,9 @@ func TestShapeGVisor_Sandbox(t *testing.T) {
 	}
 	if got, want := spec.Annotations["dev.gvisor.spec.mount.data.source"], "/node/actors/a/durable-dir/data"; got != want {
 		t.Errorf("durable-dir mount source annotation = %q, want %q", got, want)
+	}
+	if got, want := spec.Annotations["dev.gvisor.spec.mount.data.options"], "mode=0777"; got != want {
+		t.Errorf("durable-dir mount options annotation = %q, want %q", got, want)
 	}
 }
 

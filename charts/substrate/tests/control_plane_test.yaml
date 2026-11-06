@@ -1,4 +1,4 @@
-# Copyright 2026 Google LLC
+# Copyright 2026 The Agent Substrate Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -124,6 +124,37 @@ tests:
   asserts:
   - notExists:
       path: spec.template.spec.nodeSelector
+- it: keeps atelet running under node pressure
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - equal:
+      path: spec.template.spec.priorityClassName
+      value: system-cluster-critical
+- it: admits critical atelet pods in the release namespace
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: ResourceQuota
+  asserts:
+  - equal:
+      path: metadata.namespace
+      value: custom-system
+  - equal:
+      path: metadata.name
+      value: custom-atelet-critical-pods
+  - equal:
+      path: spec
+      value:
+        hard:
+          pods: 1G
+        scopeSelector:
+          matchExpressions:
+          - scopeName: PriorityClass
+            operator: In
+            values: [system-node-critical, system-cluster-critical]
 - it: restricts atelet to nodes matching atelet.nodeSelector
   template: atelet.yaml
   documentSelector:
