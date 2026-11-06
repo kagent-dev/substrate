@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2026 The Agent Substrate Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -331,5 +331,49 @@ func TestSystemRootsTrustServiceDNSIssuer(t *testing.T) {
 	var certErr *tls.CertificateVerificationError
 	if err := keys(x509.SystemCertPool); !errors.As(err, &certErr) {
 		t.Fatalf("Keys() with the system roots alone error = %v, want a CertificateVerificationError", err)
+	}
+}
+
+// TestRootsTransportCloseIdleConnections checks that the client's
+// CloseIdleConnections reaches the connections the current transport keeps.
+func TestRootsTransportCloseIdleConnections(t *testing.T) {
+	var opened, closed atomic.Int32
+	closedCh := make(chan struct{}, 8)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			opened.Add(1)
+		case http.StateClosed:
+			closed.Add(1)
+			closedCh <- struct{}{}
+		}
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	client, err := NewHTTPClientWithRoots(func() (*x509.CertPool, error) { return roots, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	client.CloseIdleConnections()
+	want := opened.Load()
+	if want == 0 {
+		t.Fatal("the request opened no connection")
+	}
+	for closed.Load() < want {
+		select {
+		case <-closedCh:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%d of %d connections closed after CloseIdleConnections", closed.Load(), want)
+		}
 	}
 }

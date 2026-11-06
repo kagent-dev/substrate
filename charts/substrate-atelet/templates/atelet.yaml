@@ -1,5 +1,5 @@
 {{/*
-Copyright 2026 Google LLC
+Copyright 2026 The Agent Substrate Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -103,13 +103,20 @@ roleRef:
   name: {{ include "substrate.fullname" (list "atelet-endpointslices" .) }}
   apiGroup: rbac.authorization.k8s.io
 ---
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
+# Admit critical atelet pods on clusters that restrict critical priorities.
+apiVersion: v1
+kind: ResourceQuota
 metadata:
-  name: {{ include "substrate.fullname" (list "ate-node-critical" .) }}
-value: 1000000000
-globalDefault: false
-description: "Node-local ate components that every actor activation depends on."
+  name: {{ include "substrate.fullname" (list "atelet-critical-pods" .) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  hard:
+    pods: 1G
+  scopeSelector:
+    matchExpressions:
+    - scopeName: PriorityClass
+      operator: In
+      values: ["system-node-critical", "system-cluster-critical"]
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -131,7 +138,7 @@ spec:
         prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "atelet" .) }}
-      priorityClassName: {{ include "substrate.fullname" (list "ate-node-critical" .) }}
+      priorityClassName: system-cluster-critical
       {{- with .Values.atelet.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -305,10 +312,9 @@ spec:
       volumes:
       - name: objectstore-plugin
         emptyDir: {}
-      # Capacity plus 1Gi for filesystem overhead; only the plugin mounts it.
+      # --asset-staging-capacity bounds this volume.
       - name: asset-staging
-        emptyDir:
-          sizeLimit: 9Gi
+        emptyDir: {}
       - name: ate-base
         hostPath:
           path: /var/lib/ate

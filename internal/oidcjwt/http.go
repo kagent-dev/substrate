@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2026 The Agent Substrate Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -110,6 +110,14 @@ func (t *rootsTransport) current(ctx context.Context) *http.Transport {
 	}
 	t.use(roots)
 	return t.transport
+}
+
+// CloseIdleConnections closes the idle connections of the current transport.
+// http.Client.CloseIdleConnections calls it.
+func (t *rootsTransport) CloseIdleConnections() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.transport.CloseIdleConnections()
 }
 
 // use switches to a transport that trusts roots, unless it already does.
