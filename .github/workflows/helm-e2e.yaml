@@ -22,6 +22,7 @@ permissions:
 jobs:
   e2e-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       VERSION: helm-e2e
       E2E_ATENET_DATAPLANE: agentgateway
@@ -141,31 +142,41 @@ jobs:
       run: go run ./cmd/ate-setup --kind deploy demo counter-microvm
     - name: Deploy gVisor counter demo
       run: go run ./cmd/ate-setup --kind deploy demo counter
-    - name: Deploy egress demo
-      run: go run ./cmd/ate-setup --kind deploy demo egress
+    - name: Deploy egress demos
+      run: |
+        go run ./cmd/ate-setup --kind deploy demo egress
+        go run ./cmd/ate-setup --kind deploy demo egress-microvm
     - name: Trust local E2E TLS origins
       run: hack/setup-e2e-egress-tls-kind.sh
+    # The egress credential suite reapplies the provider policy from the
+    # manifests when it ends, which drops the grants the credentials suite
+    # checks. Run it after both runtimes' main lanes.
+    - name: Focus the node on gVisor
+      run: hack/e2e-focus-sandbox-class.sh gvisor
     - name: Run E2E tests (gVisor)
-      # The egress credential suite replaces the shared provider policy.
-      # Run it separately after the Helm suite has checked the chart's grants.
-      # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
-      # tests keep a stable trust bundle and gateway signing certificate.
       env:
+        E2E_PARALLELISM: 8
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-gvisor.xml
-      run: hack/run-e2e-kind.sh -v -skip '^(TestActorIdentity_|TestActorEgressCredentialInjection$)' -args --no-color --preview="${ATE_PREVIEW}"
+      run: hack/run-e2e-kind.sh -v -skip '^TestActorEgressCredentialInjection$' -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Focus the node on micro-VM
+      run: hack/e2e-focus-sandbox-class.sh microvm
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
+        E2E_PARALLELISM: 8
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-microvm.xml
-      run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color --preview="${ATE_PREVIEW}"
-    - name: Run E2E tests (egress credential injection)
+      run: hack/run-e2e-kind.sh -v -skip '^TestActorEgressCredentialInjection$' -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Run E2E tests (egress credential injection, micro-VM)
+      env:
+        E2E_SANDBOX_CLASS: microvm
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials-microvm.xml
+      run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Focus the node on gVisor
+      run: hack/e2e-focus-sandbox-class.sh gvisor
+    - name: Run E2E tests (egress credential injection, gVisor)
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color --preview="${ATE_PREVIEW}"
-    - name: Run E2E tests (identity and trust rotation)
-      env:
-        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-identity.xml
-      run: hack/run-e2e-kind.sh ./internal/e2e/suites/identity -v -args --no-color --preview="${ATE_PREVIEW}"
     - name: Require every lane to have run tests
       if: always()
       run: |
