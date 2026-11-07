@@ -15,18 +15,27 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/term"
 
 	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
 )
 
 var (
-	installOpts = install.Options{Postgres: install.PostgresBundled, ObjectStore: install.ObjectStoreRustFS}
-	upgradeOpts install.Options
+	installOpts   = install.Options{Postgres: install.PostgresBundled, ObjectStore: install.ObjectStoreRustFS}
+	upgradeOpts   install.Options
+	uninstallOpts install.Options
+	uninstallYes  bool
 )
 
 var installCmd = &cobra.Command{
@@ -76,6 +85,63 @@ and CRD changes that would strand stored objects.
 	},
 }
 
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Uninstall Agent Substrate",
+	Long: `Uninstall Agent Substrate from the current cluster.
+
+Deletes every WorkerPool first, so ate-controller can finalize them, then
+uninstalls the releases in the reverse of install order and removes the
+bundled PostgreSQL.
+
+CRDs, CA keys, secrets, the database volume and the RustFS volume stay unless
+--include-crds or --purge are set, so a later install keeps its identities and
+data.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		opts := uninstallOpts
+		if !uninstallYes {
+			opts.Confirm = confirmFunc(cmd)
+		}
+		return runInstaller(cmd, opts, (*install.Installer).Uninstall)
+	},
+}
+
+// confirmFunc asks on the terminal. Without one it refuses, so scripts must
+// pass --yes. Ctrl+C cancels ctx, which ends the wait for an answer.
+func confirmFunc(cmd *cobra.Command) func(context.Context, string) (bool, error) {
+	return func(ctx context.Context, summary string) (bool, error) {
+		w := cmd.ErrOrStderr()
+		fmt.Fprint(w, summary)
+		f, ok := cmd.InOrStdin().(*os.File)
+		if !ok || !isTerminal(f) {
+			return false, errors.New("stdin isn't a terminal; pass --yes to uninstall")
+		}
+		fmt.Fprint(w, "Uninstall? [y/N] ")
+		type line struct {
+			s   string
+			err error
+		}
+		read := make(chan line, 1)
+		go func() {
+			s, err := bufio.NewReader(f).ReadString('\n')
+			read <- line{s, err}
+		}()
+		var l line
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(w)
+			return false, ctx.Err()
+		case l = <-read:
+		}
+		if l.err != nil && !errors.Is(l.err, io.EOF) {
+			return false, l.err
+		}
+		answer := strings.ToLower(strings.TrimSpace(l.s))
+		return answer == "y" || answer == "yes", nil
+	}
+}
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the installed Agent Substrate releases and workloads",
@@ -109,6 +175,11 @@ func runInstaller(cmd *cobra.Command, opts install.Options, fn func(*install.Ins
 	return fn(in, cmd.Context())
 }
 
+func isTerminal(v any) bool {
+	f, ok := v.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
 // addChartFlags adds the flags install and upgrade share.
 func addChartFlags(f *pflag.FlagSet, opts *install.Options) {
 	f.StringVar(&opts.ChartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")
@@ -125,5 +196,10 @@ func init() {
 	installCmd.Flags().StringVar(&installOpts.MicroVMAssetBucket, "microvm-asset-bucket", "", "Bucket for microVM assets with --object-store s3 or gcs; atelet must be able to read it")
 	addChartFlags(upgradeCmd.Flags(), &upgradeOpts)
 	upgradeCmd.Flags().BoolVar(&upgradeOpts.DryRun, "dry-run", false, "Print each release's manifest diff without upgrading")
-	rootCmd.AddCommand(installCmd, upgradeCmd, statusCmd)
+	f := uninstallCmd.Flags()
+	f.BoolVar(&uninstallOpts.IncludeCRDs, "include-crds", false, "Also delete the CRDs, with every WorkerPool, SandboxConfig and CSIDriverConfig")
+	f.BoolVar(&uninstallOpts.Purge, "purge", false, "Also delete the namespaces, CA keys, secrets, database volume and trust bundles")
+	f.BoolVarP(&uninstallYes, "yes", "y", false, "Don't ask for confirmation")
+	f.DurationVar(&uninstallOpts.Timeout, "timeout", 10*time.Minute, "How long to wait for each step")
+	rootCmd.AddCommand(installCmd, upgradeCmd, uninstallCmd, statusCmd)
 }

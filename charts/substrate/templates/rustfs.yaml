@@ -26,6 +26,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "substrate.fullname" (list "rustfs-data" .) }}
   namespace: {{ .Release.Namespace }}
+  annotations:
+    # helm uninstall keeps the database that refers to these snapshots.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
   - ReadWriteOnce
