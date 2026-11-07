@@ -14,7 +14,7 @@
 
 # Cluster-wide SandboxConfig for the microVM (kata + cloud-hypervisor) sandbox
 # class. `go run ./cmd/ate-setup deploy ate-system` (and `deploy sandboxconfig`)
-# or `kubectl ate install --microvm` assembles the asset set, stages it to the
+# or `kubectl ate install` with `microvm.enabled` assembles the asset set, stages it to the
 # cluster's object store, and applies this manifest alongside
 # sandboxconfig-gvisor.yaml. A microvm WorkerPool
 # resolves it as its class default (or names it via configRef: microvm), so a

@@ -65,7 +65,7 @@ func (in *Installer) applyPostgres(ctx context.Context, progress func(string)) (
 		return "", err
 	}
 	progress("waiting for statefulset/" + postgresStatefulSet)
-	if err := waitStatefulSetReady(ctx, in.kube, SystemNamespace, postgresStatefulSet, in.opts.Timeout); err != nil {
+	if err := waitStatefulSetReady(ctx, in.kube, SystemNamespace, postgresStatefulSet, in.opts.Timeout.Duration); err != nil {
 		return "", err
 	}
 	return "statefulset/" + postgresStatefulSet + " ready", nil

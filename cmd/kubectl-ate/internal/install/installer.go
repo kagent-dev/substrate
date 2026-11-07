@@ -17,14 +17,12 @@ package install
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"time"
 
-	"helm.sh/helm/v4/pkg/cli/values"
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -67,24 +65,11 @@ const (
 
 // Options configures an Installer.
 type Options struct {
+	Config
 	Kubeconfig string
 	Context    string
 	// ChartDir loads charts from a directory instead of the embedded copies.
 	ChartDir string
-	// ValuesFiles and Values follow helm's -f and --set. They apply to every
-	// release except substrate-crds.
-	ValuesFiles []string
-	Values      []string
-	Postgres    PostgresMode
-	ObjectStore ObjectStore
-	// MicroVM stages the microVM guest assets and applies the microvm
-	// SandboxConfig.
-	MicroVM bool
-	// MicroVMAssetBucket is the bucket for microVM assets with an s3 or gcs
-	// object store. RustFS uses its snapshot bucket.
-	MicroVMAssetBucket string
-	// Timeout bounds each wait for workloads to become ready.
-	Timeout time.Duration
 	// HelmLog receives Helm's debug log. Nil discards it.
 	HelmLog io.Writer
 	// DryRun makes Upgrade write manifest diffs to Out instead of applying.
@@ -110,7 +95,7 @@ type Installer struct {
 	helm   *helmClient
 	charts fs.FS
 	report Reporter
-	// user holds the merged ValuesFiles and Values.
+	// user holds the merged Config.ValuesFiles and Config.Values.
 	user map[string]any
 	// upgrading lets releases move to a new chart version.
 	upgrading bool
@@ -138,10 +123,9 @@ func New(opts Options, r Reporter) (*Installer, error) {
 	if opts.ChartDir != "" {
 		charts = os.DirFS(opts.ChartDir)
 	}
-	valueOpts := values.Options{ValueFiles: opts.ValuesFiles, Values: opts.Values}
-	user, err := valueOpts.MergeValues(nil)
+	user, err := opts.userValues()
 	if err != nil {
-		return nil, fmt.Errorf("while reading values: %w", err)
+		return nil, err
 	}
 	return &Installer{
 		opts:   opts,
@@ -189,21 +173,11 @@ func (in *Installer) run(ctx context.Context, steps []step) error {
 // failed install: existing secrets are kept and existing releases are
 // upgraded in place when their chart version matches.
 func (in *Installer) Install(ctx context.Context) error {
-	switch in.opts.Postgres {
-	case PostgresBundled, PostgresExternal:
-	default:
-		return fmt.Errorf("invalid postgres mode %q: must be %s or %s", in.opts.Postgres, PostgresBundled, PostgresExternal)
-	}
-	switch in.opts.ObjectStore {
-	case ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS:
-	default:
-		return fmt.Errorf("invalid object store %q: must be %s, %s or %s", in.opts.ObjectStore, ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS)
-	}
-	if in.opts.MicroVM && in.opts.ObjectStore != ObjectStoreRustFS && in.opts.MicroVMAssetBucket == "" {
-		return errors.New("--microvm with an s3 or gcs object store needs --microvm-asset-bucket")
+	if err := in.opts.validate(); err != nil {
+		return err
 	}
 	if in.opts.Postgres == PostgresBundled {
-		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Use --postgres external with a managed database for anything else."})
+		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres: external with a managed database for anything else."})
 	}
 	steps := []step{
 		{"Check cluster", in.preflight},
@@ -224,7 +198,7 @@ func (in *Installer) Install(ctx context.Context) error {
 		steps = append(steps, step{"Check database secrets", in.checkDatabaseSecrets})
 	}
 	steps = append(steps, step{"Install Substrate", in.helmStep(substrateRelease, in.substrateValues)})
-	if in.opts.MicroVM {
+	if in.opts.MicroVM.Enabled {
 		steps = append(steps,
 			step{"Stage microVM assets", in.stageMicroVMAssets},
 			step{"Apply microVM SandboxConfig", in.applyMicroVMSandboxConfig},

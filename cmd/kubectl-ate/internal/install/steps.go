@@ -127,13 +127,13 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 		}
 		progress(fmt.Sprintf("%s %s: applying and waiting for workloads", r.name, ch.Metadata.Version))
 		if cur == nil {
-			rel, err := in.helm.install(ctx, r, ch, vals, in.opts.Timeout)
+			rel, err := in.helm.install(ctx, r, ch, vals, in.opts.Timeout.Duration)
 			if err != nil {
 				return "", err
 			}
 			return fmt.Sprintf("%s %s installed", r.name, rel.Chart.Metadata.Version), nil
 		}
-		rel, err := in.helm.upgrade(ctx, r, ch, vals, in.opts.Timeout)
+		rel, err := in.helm.upgrade(ctx, r, ch, vals, in.opts.Timeout.Duration)
 		if err != nil {
 			return "", err
 		}
@@ -216,7 +216,7 @@ func (in *Installer) waitTrustBundles(ctx context.Context, progress func(string)
 		return "", err
 	}
 	var missing []string
-	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, in.opts.Timeout, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, in.opts.Timeout.Duration, true, func(ctx context.Context) (bool, error) {
 		missing = missing[:0]
 		for _, name := range trustBundles {
 			_, err := ctbs.Get(ctx, name, metav1.GetOptions{})
