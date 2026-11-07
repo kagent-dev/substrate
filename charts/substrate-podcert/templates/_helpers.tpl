@@ -46,3 +46,17 @@ imagePullSecrets:
 {{- toYaml $merged | nindent 0 }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The podLabels entries for the controller's pod template, as YAML map entries.
+Renders nothing when podLabels is empty. `app` is the Deployment's selector
+label, so a podLabels entry cannot replace it.
+*/}}
+{{- define "podcert.podLabels" -}}
+{{- with .Values.podLabels -}}
+{{- if hasKey . "app" -}}
+{{- fail "podLabels must not set app: it is the selector label of the controller Deployment" -}}
+{{- end -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
