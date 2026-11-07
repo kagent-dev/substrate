@@ -65,6 +65,9 @@ func newHelmClient(kubeconfig, kubeContext string, log io.Writer) *helmClient {
 	if log == nil {
 		log = io.Discard
 	}
+	// Helm names its server-side apply manager after the binary by default,
+	// so a renamed or go run binary would conflict with an earlier install.
+	kube.ManagedFieldsManager = fieldManager
 	return &helmClient{
 		kubeconfig: kubeconfig,
 		context:    kubeContext,
