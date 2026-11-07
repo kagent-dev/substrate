@@ -135,6 +135,20 @@ func (h *helmClient) upgrade(ctx context.Context, r release, ch *chart.Chart, va
 	return asV1(up.RunWithContext(ctx, r.name, ch, vals))
 }
 
+// render returns the manifest an upgrade of r would apply, without applying it.
+func (h *helmClient) render(ctx context.Context, r release, ch *chart.Chart, vals map[string]any) (string, error) {
+	up, err := h.newUpgrade(r)
+	if err != nil {
+		return "", err
+	}
+	up.DryRunStrategy = action.DryRunServer
+	rel, err := asV1(up.RunWithContext(ctx, r.name, ch, vals))
+	if err != nil {
+		return "", err
+	}
+	return rel.Manifest, nil
+}
+
 func (h *helmClient) newUpgrade(r release) (*action.Upgrade, error) {
 	cfg, err := h.config(r.namespace)
 	if err != nil {
