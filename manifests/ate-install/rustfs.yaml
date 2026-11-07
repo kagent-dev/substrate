@@ -53,6 +53,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: rustfs-data
   namespace: ate-system
+  annotations:
+    # helm uninstall keeps the database that refers to these snapshots.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
   - ReadWriteOnce
