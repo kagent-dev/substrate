@@ -107,6 +107,9 @@ global:
 # Pull secrets for every pod this chart renders. Merged with global.imagePullSecrets.
 imagePullSecrets: []
 
+# Labels added to the atelet pod alongside its reserved app selector label.
+podLabels: {}
+
 image:
   # Registry host for the component images, and nothing else. A path inside
   # `registry` fails the render.
