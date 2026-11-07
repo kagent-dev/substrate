@@ -18,6 +18,7 @@ templates:
 - ate-api-config.yaml
 - ate-controller.yaml
 - atenet-router.yaml
+- atenet-egress.yaml
 - role.yaml
 - atelet.yaml
 - k8s-credential-provider.yaml
@@ -473,3 +474,40 @@ tests:
   - matchRegex:
       path: data["config.yaml"]
       pattern: 'policies:\n\s+http:\n\s+requestTimeout: "60s"'
+- it: defaults the egress proxy log filter to info
+  template: atenet-egress.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: info
+- it: configures the egress proxy log filter
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.agentgateway.logLevel: debug
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: debug
+- it: preserves module filters in the egress proxy log filter
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.agentgateway.logLevel: "info,agentgateway=debug"
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: RUST_LOG
+        value: "info,agentgateway=debug"

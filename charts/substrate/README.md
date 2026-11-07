@@ -86,6 +86,7 @@ See `values.yaml` for the full set; the important keys:
 | `<component>.resources` | see `values.yaml` | Requests and limits for each container, e.g. `ateApi.resources` and `atenetRouter.agentgateway.resources` |
 | `atenetRouter.requestParking.budget` | `60s` | Total budget for actor resolution and resume retries |
 | `atenetRouter.requestTimeout` | `60s` | Timeout for each Substrate ingress API call, including actor resolution |
+| `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.enabled` | `true` | Deprecated. Set to `false` and install atelet with the [substrate-atelet](../substrate-atelet/README.md) chart |

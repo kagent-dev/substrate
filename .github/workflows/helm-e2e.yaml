@@ -22,6 +22,7 @@ permissions:
 jobs:
   e2e-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       VERSION: helm-e2e
       E2E_ATENET_DATAPLANE: agentgateway
@@ -36,13 +37,24 @@ jobs:
       uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version-file: go.mod
+        cache: false
+    # Reuse the cache that pr-workflow's e2e job saves on main. It builds the
+    # same images with ko.
+    - name: Restore Go build cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: e2e-go-${{ runner.os }}-${{ github.sha }}
+        restore-keys: e2e-go-${{ runner.os }}-
     - name: Setup Helm
       uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
     - name: Cache micro-VM assets
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        path: bin/microvm-assets
-        key: microvm-assets-${{ hashFiles('manifests/ate-install/sandboxconfig-microvm.yaml.tmpl') }}
+        path: ~/.cache/kubectl-ate/microvm-assets
+        key: kubectl-ate-microvm-assets-${{ hashFiles('manifests/ate-install/sandboxconfig-microvm.yaml.tmpl') }}
     - name: Enable KVM
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -70,100 +82,53 @@ jobs:
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
         done
-    - name: Install Substrate CRDs
-      run: helm upgrade --install substrate-crds charts/substrate-crds
-    - name: Bootstrap mTLS authorities
-      run: |
-        go run ./cmd/ate-setup --kind create podcertificate-controller-cas
-        go run ./cmd/ate-setup --kind create jwt-authority-pool
-        go run ./cmd/ate-setup --kind create actor-id-ca-pool
-        go run ./cmd/ate-setup --kind create actor-id-ca-certs
-        go run ./cmd/ate-setup --kind create api-authentication-config
-        go run ./cmd/ate-setup --kind create egress-mitm-ca-pool
-    - name: Install certificate controller
-      run: |
-        helm upgrade --install substrate-podcert charts/substrate-podcert \
-          --namespace podcertificate-controller-system \
-          --create-namespace \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --wait --timeout=5m
-    - name: Install atelet as a separate release
-      # Before substrate, the order the version skew policy upgrades them in.
-      # TestHelmAteletChartMatchesSubstrateChart checks that this release
-      # renders the same atelet as the substrate chart.
-      run: |
-        kubectl create secret generic rustfs-credentials -n ate-system \
-          --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
-          --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
-        helm upgrade --install substrate-atelet charts/substrate-atelet \
-          --namespace ate-system \
-          --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
-          --set objectStore.region=us-east-1 \
-          --set objectStore.pathStyle=true \
-          --set objectStore.credentialsSecret=rustfs-credentials \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --set 'preview[0]=ALL' \
-          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
-          --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
-          --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
-          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
-          --wait --timeout=10m
-    - name: Provision PostgreSQL and connection Secrets
-      run: hack/install-postgres.sh --kind
-    - name: Install Agent Substrate with Helm
-      run: |
-        helm upgrade --install substrate charts/substrate \
-          --namespace ate-system \
-          --create-namespace \
-          -f internal/e2e/suites/credentials/values.yaml \
-          -f internal/e2e/suites/parking/values.yaml \
-          --set postgres.clientCertificates.enabled=true \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --set 'preview[0]=ALL' \
-          --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
-          --set atelet.enabled=false \
-          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
-          --wait --timeout=10m
+    - name: Install Agent Substrate with kubectl ate
+      run: .github/scripts/helm-e2e/install.sh
     - name: Enable NFS
       run: |
         sudo modprobe nfs || true
         sudo modprobe nfsd || true
     - name: Install CSI NFS driver
       run: go run ./cmd/ate-setup --kind setup csi nfs
-    - name: Install microVM SandboxConfig and assets
-      run: go run ./cmd/ate-setup --kind deploy sandboxconfig --sandbox-classes=microvm
     - name: Deploy microVM counter demo
       run: go run ./cmd/ate-setup --kind deploy demo counter-microvm
     - name: Deploy gVisor counter demo
       run: go run ./cmd/ate-setup --kind deploy demo counter
-    - name: Deploy egress demo
-      run: go run ./cmd/ate-setup --kind deploy demo egress
+    - name: Deploy egress demos
+      run: |
+        go run ./cmd/ate-setup --kind deploy demo egress
+        go run ./cmd/ate-setup --kind deploy demo egress-microvm
     - name: Trust local E2E TLS origins
       run: hack/setup-e2e-egress-tls-kind.sh
+    # The egress credential suite reapplies the provider policy from the
+    # manifests when it ends, which drops the grants the credentials suite
+    # checks. Run it after both runtimes' main lanes.
+    - name: Focus the node on gVisor
+      run: hack/e2e-focus-sandbox-class.sh gvisor
     - name: Run E2E tests (gVisor)
-      # The egress credential suite replaces the shared provider policy.
-      # Run it separately after the Helm suite has checked the chart's grants.
-      # Identity rotates the cluster-wide egress CA. Run it last so HTTPS
-      # tests keep a stable trust bundle and gateway signing certificate.
       env:
+        E2E_PARALLELISM: 8
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-gvisor.xml
-      run: hack/run-e2e-kind.sh -v -skip '^(TestActorIdentity_|TestActorEgressCredentialInjection$)' -args --no-color --preview="${ATE_PREVIEW}"
+      run: hack/run-e2e-kind.sh -v -skip '^TestActorEgressCredentialInjection$' -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Focus the node on micro-VM
+      run: hack/e2e-focus-sandbox-class.sh microvm
     - name: Run E2E tests (micro-VM)
       env:
         E2E_SANDBOX_CLASS: microvm
+        E2E_PARALLELISM: 8
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-microvm.xml
-      run: hack/run-e2e-kind.sh ./internal/e2e/suites/demo -v -args --no-color --preview="${ATE_PREVIEW}"
-    - name: Run E2E tests (egress credential injection)
+      run: hack/run-e2e-kind.sh -v -skip '^TestActorEgressCredentialInjection$' -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Run E2E tests (egress credential injection, micro-VM)
+      env:
+        E2E_SANDBOX_CLASS: microvm
+        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials-microvm.xml
+      run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color --preview="${ATE_PREVIEW}"
+    - name: Focus the node on gVisor
+      run: hack/e2e-focus-sandbox-class.sh gvisor
+    - name: Run E2E tests (egress credential injection, gVisor)
       env:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-egress-credentials.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/egresscredinject -v -args --no-color --preview="${ATE_PREVIEW}"
-    - name: Run E2E tests (identity and trust rotation)
-      env:
-        E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/helm-identity.xml
-      run: hack/run-e2e-kind.sh ./internal/e2e/suites/identity -v -args --no-color --preview="${ATE_PREVIEW}"
     - name: Require every lane to have run tests
       if: always()
       run: |
@@ -177,4 +142,9 @@ jobs:
         if-no-files-found: error
     - name: Dump diagnostics on failure
       if: failure()
-      run: hack/dump-e2e-diagnostics-kind.sh
+      run: |
+        kubectl --context kind-kind get workerpool,pods -A -o wide || true
+        for p in $(kubectl --context kind-kind get pods -n ate-system -o name 2>/dev/null); do
+          echo "=== logs: ate-system/${p} ==="
+          kubectl --context kind-kind logs -n ate-system "$p" --all-containers --tail=300 || true
+        done

@@ -98,7 +98,7 @@ func checkSwallowedFlags(cmd *cobra.Command) error {
 			return
 		}
 		val := f.Value.String()
-		if val == "-" && (f.Name == "filename" || f.Name == "token-file") {
+		if val == "-" && (f.Name == "filename" || f.Name == "token-file" || f.Name == "config") {
 			return
 		}
 		if strings.HasPrefix(val, "-") {

@@ -69,6 +69,10 @@ func executeRoot(root *cobra.Command) error {
 			executedCmd = root
 		}
 		errOut := executedCmd.ErrOrStderr()
+		var rerr reportedError
+		if errors.As(err, &rerr) {
+			return err
+		}
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		var uerr *usageError
 		if errors.As(err, &uerr) {
@@ -78,6 +82,11 @@ func executeRoot(root *cobra.Command) error {
 	}
 	return nil
 }
+
+// reportedError is an error the command already showed the user.
+type reportedError struct{ error }
+
+func (e reportedError) Unwrap() error { return e.error }
 
 func Execute() {
 	if err := executeRoot(rootCmd); err != nil {
