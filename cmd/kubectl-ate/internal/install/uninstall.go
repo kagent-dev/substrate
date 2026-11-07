@@ -191,7 +191,7 @@ func (in *Installer) releaseSandboxConfigs(ctx context.Context) (int, error) {
 
 func (in *Installer) uninstallStep(r release) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, _ func(string)) (string, error) {
-		ok, err := in.helm.uninstall(ctx, r, in.opts.Timeout)
+		ok, err := in.helm.uninstall(ctx, r, in.opts.Timeout.Duration)
 		if err != nil {
 			return "", err
 		}
@@ -330,5 +330,5 @@ func (in *Installer) deleteNamespaces(ctx context.Context, progress func(string)
 // poll calls cond every 2 seconds until it returns true or Options.Timeout
 // passes.
 func (in *Installer) poll(ctx context.Context, cond wait.ConditionWithContextFunc) error {
-	return wait.PollUntilContextTimeout(ctx, 2*time.Second, in.opts.Timeout, true, cond)
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, in.opts.Timeout.Duration, true, cond)
 }

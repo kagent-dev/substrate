@@ -20,11 +20,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
 )
 
 func TestView(t *testing.T) {
-	r := New(&bytes.Buffer{}, "install", func() {})
+	r := New(&bytes.Buffer{}, &bytes.Buffer{}, "install", func() {})
 	m := r.model
 	for _, e := range []install.Event{
 		{Kind: install.Note, Msg: "evaluation only"},
@@ -61,28 +63,31 @@ func TestView(t *testing.T) {
 	}
 }
 
-func TestCommand(t *testing.T) {
-	for _, tc := range []struct {
-		opts install.Options
-		file string
-		want string
-	}{
-		{
-			opts: install.Options{Postgres: install.PostgresBundled, ObjectStore: install.ObjectStoreRustFS},
-			want: "kubectl ate install",
-		},
-		{
-			opts: install.Options{Postgres: install.PostgresBundled, ObjectStore: install.ObjectStoreRustFS, MicroVM: true},
-			want: "kubectl ate install --microvm",
-		},
-		{
-			opts: install.Options{Postgres: install.PostgresExternal, ObjectStore: install.ObjectStoreGCS, MicroVM: true, MicroVMAssetBucket: "assets"},
-			file: "gke.yaml",
-			want: "kubectl ate install --postgres external --object-store gcs -f gke.yaml --microvm --microvm-asset-bucket assets",
-		},
+func TestHint(t *testing.T) {
+	for _, cfg := range []install.Config{
+		install.DefaultConfig(),
+		func() install.Config {
+			c := install.DefaultConfig()
+			c.Postgres, c.ObjectStore = install.PostgresExternal, install.ObjectStoreGCS
+			c.MicroVM = install.MicroVM{Enabled: true, AssetBucket: "assets"}
+			c.Releases.All.ValuesFiles = []string{"/etc/gke.yaml"}
+			return c
+		}(),
 	} {
-		if got := Command(&tc.opts, tc.file); got != tc.want {
-			t.Errorf("Command() = %q, want %q", got, tc.want)
+		hint, err := Hint(&cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, doc, ok := strings.Cut(hint, ":\n\n")
+		if !ok {
+			t.Fatalf("Hint() has no config:\n%s", hint)
+		}
+		got, err := install.ReadConfig(strings.NewReader(doc), "")
+		if err != nil {
+			t.Fatalf("ReadConfig(Hint()): %v\n%s", err, doc)
+		}
+		if diff := cmp.Diff(cfg, got); diff != "" {
+			t.Errorf("ReadConfig(Hint()) mismatch (-want +got):\n%s", diff)
 		}
 	}
 }
