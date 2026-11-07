@@ -35,9 +35,22 @@ type Config struct {
 	MicroVM     MicroVM      `json:"microvm,omitzero"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
-	// ValuesFiles and Values apply to every release except substrate-crds.
-	// Values wins over ValuesFiles. Relative paths are relative to the
-	// config file.
+	// Releases holds Helm values for the releases.
+	Releases Releases `json:"releases,omitzero"`
+}
+
+// Releases holds Helm values. All applies to every release except
+// substrate-crds, and each release's own values win over All.
+type Releases struct {
+	All       ReleaseValues `json:"all,omitzero"`
+	PodCert   ReleaseValues `json:"podcert,omitzero"`
+	Atelet    ReleaseValues `json:"atelet,omitzero"`
+	Substrate ReleaseValues `json:"substrate,omitzero"`
+}
+
+// ReleaseValues follow helm's -f and --set: Values wins over ValuesFiles.
+// Relative paths are relative to the config file.
+type ReleaseValues struct {
 	ValuesFiles []string       `json:"valuesFiles,omitempty"`
 	Values      map[string]any `json:"values,omitempty"`
 }
@@ -75,9 +88,11 @@ func ReadConfig(r io.Reader, dir string) (Config, error) {
 	if err := yaml.UnmarshalStrict(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("while decoding config: %w", err)
 	}
-	for i, f := range cfg.ValuesFiles {
-		if !filepath.IsAbs(f) {
-			cfg.ValuesFiles[i] = filepath.Join(dir, f)
+	for _, rv := range cfg.Releases.all() {
+		for i, f := range rv.ValuesFiles {
+			if !filepath.IsAbs(f) {
+				rv.ValuesFiles[i] = filepath.Join(dir, f)
+			}
 		}
 	}
 	return cfg, cfg.validate()
@@ -103,12 +118,37 @@ func (c Config) validate() error {
 	return nil
 }
 
-// userValues reads ValuesFiles and merges Values on top.
-func (c Config) userValues() (map[string]any, error) {
-	vo := values.Options{ValueFiles: c.ValuesFiles}
+func (r *Releases) all() []*ReleaseValues {
+	return []*ReleaseValues{&r.All, &r.PodCert, &r.Atelet, &r.Substrate}
+}
+
+// userValues returns each release's values, keyed by release name: All's
+// files and values, then the release's own.
+func (c Config) userValues() (map[string]map[string]any, error) {
+	all, err := c.Releases.All.read()
+	if err != nil {
+		return nil, err
+	}
+	user := map[string]map[string]any{}
+	for r, rv := range map[release]ReleaseValues{
+		podCertRelease:   c.Releases.PodCert,
+		ateletRelease:    c.Releases.Atelet,
+		substrateRelease: c.Releases.Substrate,
+	} {
+		own, err := rv.read()
+		if err != nil {
+			return nil, err
+		}
+		user[r.name] = mergeValues(all, own)
+	}
+	return user, nil
+}
+
+func (rv ReleaseValues) read() (map[string]any, error) {
+	vo := values.Options{ValueFiles: rv.ValuesFiles}
 	files, err := vo.MergeValues(nil)
 	if err != nil {
 		return nil, fmt.Errorf("while reading values: %w", err)
 	}
-	return mergeValues(files, c.Values), nil
+	return mergeValues(files, rv.Values), nil
 }

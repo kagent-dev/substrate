@@ -32,8 +32,8 @@ import (
 // quits.
 func Wizard(w io.Writer, cfg *install.Config) error {
 	var valuesFile string
-	if len(cfg.ValuesFiles) > 0 {
-		valuesFile = cfg.ValuesFiles[0]
+	if len(cfg.Releases.All.ValuesFiles) > 0 {
+		valuesFile = cfg.Releases.All.ValuesFiles[0]
 	}
 	external := func() bool { return cfg.ObjectStore != install.ObjectStoreRustFS }
 	confirmed := true
@@ -91,9 +91,9 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 		return install.ErrAborted
 	}
 	if external() {
-		cfg.ValuesFiles = []string{valuesFile}
+		cfg.Releases.All.ValuesFiles = []string{valuesFile}
 	} else {
-		cfg.ValuesFiles = nil
+		cfg.Releases.All.ValuesFiles = nil
 	}
 	if !external() || !cfg.MicroVM.Enabled {
 		cfg.MicroVM.AssetBucket = ""

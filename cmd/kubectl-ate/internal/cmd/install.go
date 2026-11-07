@@ -49,13 +49,21 @@ const configHelp = `--config takes a YAML file, or - for stdin:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
   timeout: 10m             # each wait for workloads
-  valuesFiles:             # relative to the config file
-  - gke.yaml
-  values:                  # wins over valuesFiles
-    image:
-      tag: v1.0.0
+  releases:                # Helm values
+    all:                   # every release except substrate-crds
+      valuesFiles:         # relative to the config file
+      - gke.yaml
+      values:              # wins over valuesFiles
+        image:
+          tag: v1.0.0
+    podcert: {}            # substrate-podcert
+    atelet: {}             # substrate-atelet
+    substrate:             # substrate
+      values:
+        otel:
+          endpoint: http://otel-collector:4317
 
-valuesFiles and values apply to every release except substrate-crds.`
+A release's own valuesFiles and values win over the ones in all.`
 
 var installCmd = &cobra.Command{
 	Use:   "install",
@@ -112,7 +120,7 @@ release. It doesn't roll WorkerPool worker images, which
 docs/reference/version-skew-policy.md upgrades after atelet.
 
 Each release keeps the values it was installed with. The config's
-valuesFiles and values are layered on top. Upgrade also reads timeout and
+releases values are layered on top. Upgrade also reads timeout and
 microvm.assetBucket from the config. It refuses downgrades, skipped minor
 releases, and CRD changes that would strand stored objects.
 

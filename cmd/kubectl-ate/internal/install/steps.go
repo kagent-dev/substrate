@@ -155,11 +155,7 @@ func (in *Installer) releaseValues(ctx context.Context, r release, vf valuesFunc
 	if !first {
 		defaults = nil
 	}
-	user := in.user
-	if r == crdsRelease {
-		user = nil
-	}
-	return mergeValues(defaults, user, forced), nil
+	return mergeValues(defaults, in.user[r.name], forced), nil
 }
 
 // ateletValues point atelet at the substrate release's RustFS, or at the

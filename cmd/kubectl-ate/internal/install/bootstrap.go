@@ -347,13 +347,13 @@ func (in *Installer) configureObjectStore(ctx context.Context, _ func(string)) (
 	}
 	if in.opts.ObjectStore != ObjectStoreRustFS {
 		// A resumed install keeps the values the release already has.
-		vals := in.user
+		vals := in.user[substrateRelease.name]
 		rel, err := in.helm.get(substrateRelease)
 		if err != nil {
 			return "", err
 		}
 		if rel != nil {
-			vals = mergeValues(rel.Config, in.user)
+			vals = mergeValues(rel.Config, in.user[substrateRelease.name])
 		}
 		return in.checkExternalObjectStore(ctx, vals)
 	}

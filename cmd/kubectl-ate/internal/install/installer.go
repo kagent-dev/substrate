@@ -95,8 +95,8 @@ type Installer struct {
 	helm   *helmClient
 	charts fs.FS
 	report Reporter
-	// user holds the merged Config.ValuesFiles and Config.Values.
-	user map[string]any
+	// user holds each release's values from Config.Releases, by release name.
+	user map[string]map[string]any
 	// upgrading lets releases move to a new chart version.
 	upgrading bool
 }

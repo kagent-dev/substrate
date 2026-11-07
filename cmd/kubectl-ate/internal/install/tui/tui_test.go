@@ -70,7 +70,7 @@ func TestHint(t *testing.T) {
 			c := install.DefaultConfig()
 			c.Postgres, c.ObjectStore = install.PostgresExternal, install.ObjectStoreGCS
 			c.MicroVM = install.MicroVM{Enabled: true, AssetBucket: "assets"}
-			c.ValuesFiles = []string{"/etc/gke.yaml"}
+			c.Releases.All.ValuesFiles = []string{"/etc/gke.yaml"}
 			return c
 		}(),
 	} {

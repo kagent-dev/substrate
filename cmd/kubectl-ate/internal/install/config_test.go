@@ -44,19 +44,24 @@ func TestReadConfig(t *testing.T) {
 objectStore: gcs
 microvm: {enabled: true, assetBucket: assets}
 timeout: 5m
-valuesFiles: [gke.yaml, /abs.yaml]
-values: {image: {tag: v1}}
+releases:
+  all: {valuesFiles: [gke.yaml, /abs.yaml], values: {image: {tag: v1}}}
+  substrate: {valuesFiles: [db.yaml]}
 `,
 			want: withDefaults(func(c *Config) {
 				c.Postgres, c.ObjectStore = PostgresExternal, ObjectStoreGCS
 				c.MicroVM = MicroVM{Enabled: true, AssetBucket: "assets"}
 				c.Timeout = metav1.Duration{Duration: 5 * time.Minute}
-				c.ValuesFiles = []string{"/cfg/gke.yaml", "/abs.yaml"}
-				c.Values = map[string]any{"image": map[string]any{"tag": "v1"}}
+				c.Releases.All = ReleaseValues{
+					ValuesFiles: []string{"/cfg/gke.yaml", "/abs.yaml"},
+					Values:      map[string]any{"image": map[string]any{"tag": "v1"}},
+				}
+				c.Releases.Substrate.ValuesFiles = []string{"/cfg/db.yaml"}
 			}),
 		},
 		{name: "empty", in: "", wantErr: "config is empty"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
+		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
 		{name: "bad object store", in: "objectStore: nfs\n", wantErr: "invalid objectStore"},
 		{name: "microvm needs bucket", in: "objectStore: s3\nmicrovm: {enabled: true}\n", wantErr: "microvm.assetBucket"},
@@ -83,16 +88,36 @@ values: {image: {tag: v1}}
 
 func TestConfigUserValues(t *testing.T) {
 	dir := t.TempDir()
-	f := filepath.Join(dir, "v.yaml")
-	if err := os.WriteFile(f, []byte("image: {registry: r, tag: file}\n"), 0o600); err != nil {
-		t.Fatal(err)
+	write := func(name, data string) string {
+		f := filepath.Join(dir, name)
+		if err := os.WriteFile(f, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
 	}
-	c := Config{ValuesFiles: []string{f}, Values: map[string]any{"image": map[string]any{"tag": "inline"}}}
+	img := func(registry, tag string) map[string]any {
+		return map[string]any{"image": map[string]any{"registry": registry, "tag": tag}}
+	}
+	c := Config{Releases: Releases{
+		All: ReleaseValues{
+			ValuesFiles: []string{write("all.yaml", "image: {registry: r, tag: all-file}\n")},
+			Values:      map[string]any{"image": map[string]any{"tag": "all"}},
+		},
+		Atelet: ReleaseValues{ValuesFiles: []string{write("atelet.yaml", "image: {tag: atelet-file}\n")}},
+		Substrate: ReleaseValues{
+			ValuesFiles: []string{write("substrate.yaml", "image: {registry: s, tag: substrate-file}\n")},
+			Values:      map[string]any{"image": map[string]any{"tag": "substrate"}},
+		},
+	}}
 	got, err := c.userValues()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"image": map[string]any{"registry": "r", "tag": "inline"}}
+	want := map[string]map[string]any{
+		"substrate-podcert": img("r", "all"),
+		"substrate-atelet":  img("r", "atelet-file"),
+		"substrate":         img("s", "substrate"),
+	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
 	}

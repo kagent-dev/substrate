@@ -28,28 +28,30 @@ bin/kubectl-ate install --chart-dir ./charts -c - <<EOF
 timeout: 10m
 microvm:
   enabled: true
-valuesFiles:
-- internal/e2e/suites/credentials/values.yaml
-- internal/e2e/suites/parking/values.yaml
-values:
-  image:
-    registry: localhost:5001
-    tag: "${VERSION}"
-  preview: [ALL]
-  atenetRouter:
-    ingressAllowedSPIFFEIDs:
-    - spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client
-  atenetEgress:
-    # Networking tests assert the debug-level CONNECT tunnel log.
-    agentgateway:
-      logLevel: debug
-  atelet:
-    extraArgs:
-    - --localhost-registry-replacement=kind-registry:5000
-    - --snapshot-upload-delay=2s
-    - --snapshot-detach-delay=30s
-  otel:
-    endpoint: http://opentelemetry-collector.otel-system.svc:4317
+releases:
+  all:
+    valuesFiles:
+    - internal/e2e/suites/credentials/values.yaml
+    - internal/e2e/suites/parking/values.yaml
+    values:
+      image:
+        registry: localhost:5001
+        tag: "${VERSION}"
+      preview: [ALL]
+      atenetRouter:
+        ingressAllowedSPIFFEIDs:
+        - spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client
+      atenetEgress:
+        # Networking tests assert the debug-level CONNECT tunnel log.
+        agentgateway:
+          logLevel: debug
+      atelet:
+        extraArgs:
+        - --localhost-registry-replacement=kind-registry:5000
+        - --snapshot-upload-delay=2s
+        - --snapshot-detach-delay=30s
+      otel:
+        endpoint: http://opentelemetry-collector.otel-system.svc:4317
 EOF
 
 bin/kubectl-ate status
