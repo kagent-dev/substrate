@@ -91,8 +91,9 @@ type valuesFunc func(ctx context.Context) (defaults, forced map[string]any, err 
 
 func noValues(context.Context) (map[string]any, map[string]any, error) { return nil, nil, nil }
 
-// helmStep installs r, or upgrades it if it exists. It refuses an existing
-// release on another chart version.
+// helmStep installs r, or upgrades it if it exists. Install refuses an
+// existing release on another chart version, since resuming it would hide a
+// real upgrade.
 func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, progress func(string)) (string, error) {
 		ch, err := loadChart(in.charts, r.chart)
@@ -103,7 +104,7 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 		if err != nil {
 			return "", err
 		}
-		if cur != nil && cur.Info.Status == common.StatusPendingInstall {
+		if cur != nil && cur.Info.Status == common.StatusPendingInstall && !in.upgrading {
 			// An interrupted install leaves this status, and Helm refuses to
 			// touch the release until it changes.
 			progress(fmt.Sprintf("%s: resuming an interrupted install", r.name))
@@ -116,8 +117,8 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 			if st := cur.Info.Status; st.IsPending() {
 				return "", fmt.Errorf("release %s is %s; run helm rollback or helm uninstall on it, then retry", r.name, st)
 			}
-			if got, want := cur.Chart.Metadata.Version, ch.Metadata.Version; got != want {
-				return "", fmt.Errorf("release %s has chart version %s, want %s", r.name, got, want)
+			if got, want := cur.Chart.Metadata.Version, ch.Metadata.Version; !in.upgrading && got != want {
+				return "", fmt.Errorf("release %s has chart version %s, want %s; use kubectl ate upgrade", r.name, got, want)
 			}
 		}
 		vals, err := in.releaseValues(ctx, r, vf, cur == nil)
@@ -135,6 +136,9 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 		rel, err := in.helm.upgrade(ctx, r, ch, vals, in.opts.Timeout)
 		if err != nil {
 			return "", err
+		}
+		if from := cur.Chart.Metadata.Version; from != rel.Chart.Metadata.Version {
+			return fmt.Sprintf("%s %s → %s, revision %d", r.name, from, rel.Chart.Metadata.Version, rel.Version), nil
 		}
 		return fmt.Sprintf("%s %s, revision %d", r.name, rel.Chart.Metadata.Version, rel.Version), nil
 	}
@@ -162,6 +166,10 @@ func (in *Installer) releaseValues(ctx context.Context, r release, vf valuesFunc
 // backend of an external store.
 func (in *Installer) ateletValues(context.Context) (map[string]any, map[string]any, error) {
 	forced := map[string]any{"substrateReleaseName": substrateRelease.name}
+	if in.upgrading {
+		// The release keeps its storage values.
+		return nil, forced, nil
+	}
 	if in.opts.ObjectStore != ObjectStoreRustFS {
 		forced["objectStore"] = map[string]any{"backend": string(in.opts.ObjectStore)}
 		return nil, forced, nil
@@ -182,6 +190,10 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 	forced := map[string]any{
 		// atelet is its own release so it can upgrade first.
 		"atelet": map[string]any{"enabled": false},
+	}
+	if in.upgrading {
+		// The release keeps its storage and database values.
+		return nil, forced, nil
 	}
 	if in.opts.ObjectStore == ObjectStoreRustFS {
 		access, secret, err := in.rustfsCredentials(ctx)
