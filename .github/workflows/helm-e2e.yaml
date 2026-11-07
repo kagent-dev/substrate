@@ -41,8 +41,8 @@ jobs:
     - name: Cache micro-VM assets
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
-        path: bin/microvm-assets
-        key: microvm-assets-${{ hashFiles('manifests/ate-install/sandboxconfig-microvm.yaml.tmpl') }}
+        path: ~/.cache/kubectl-ate/microvm-assets
+        key: kubectl-ate-microvm-assets-${{ hashFiles('manifests/ate-install/sandboxconfig-microvm.yaml.tmpl') }}
     - name: Enable KVM
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -70,73 +70,14 @@ jobs:
             ./hack/run-tool.sh ko build --bare --tags helm-e2e \
               --platform linux/amd64 "./cmd/${component}"
         done
-    - name: Install Substrate CRDs
-      run: helm upgrade --install substrate-crds charts/substrate-crds
-    - name: Bootstrap mTLS authorities
-      run: |
-        go run ./cmd/ate-setup --kind create podcertificate-controller-cas
-        go run ./cmd/ate-setup --kind create jwt-authority-pool
-        go run ./cmd/ate-setup --kind create actor-id-ca-pool
-        go run ./cmd/ate-setup --kind create actor-id-ca-certs
-        go run ./cmd/ate-setup --kind create api-authentication-config
-        go run ./cmd/ate-setup --kind create egress-mitm-ca-pool
-    - name: Install certificate controller
-      run: |
-        helm upgrade --install substrate-podcert charts/substrate-podcert \
-          --namespace podcertificate-controller-system \
-          --create-namespace \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --wait --timeout=5m
-    - name: Install atelet as a separate release
-      # Before substrate, the order the version skew policy upgrades them in.
-      # TestHelmAteletChartMatchesSubstrateChart checks that this release
-      # renders the same atelet as the substrate chart.
-      run: |
-        kubectl create secret generic rustfs-credentials -n ate-system \
-          --from-literal=AWS_ACCESS_KEY_ID=rustfsadmin \
-          --from-literal=AWS_SECRET_ACCESS_KEY=rustfsadmin
-        helm upgrade --install substrate-atelet charts/substrate-atelet \
-          --namespace ate-system \
-          --set objectStore.endpoint=http://rustfs.ate-system.svc:9000 \
-          --set objectStore.region=us-east-1 \
-          --set objectStore.pathStyle=true \
-          --set objectStore.credentialsSecret=rustfs-credentials \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --set 'preview[0]=ALL' \
-          --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
-          --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
-          --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
-          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
-          --wait --timeout=10m
-    - name: Provision PostgreSQL and connection Secrets
-      run: hack/install-postgres.sh --kind
-    - name: Install Agent Substrate with Helm
-      # Networking tests assert the debug-level CONNECT tunnel log.
-      run: |
-        helm upgrade --install substrate charts/substrate \
-          --namespace ate-system \
-          --create-namespace \
-          -f internal/e2e/suites/credentials/values.yaml \
-          -f internal/e2e/suites/parking/values.yaml \
-          --set postgres.clientCertificates.enabled=true \
-          --set image.registry=localhost:5001 \
-          --set image.tag=helm-e2e \
-          --set 'preview[0]=ALL' \
-          --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
-          --set atenetEgress.agentgateway.logLevel=debug \
-          --set atelet.enabled=false \
-          --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317 \
-          --wait --timeout=10m
+    - name: Install Agent Substrate with kubectl ate
+      run: .github/scripts/helm-e2e/install.sh
     - name: Enable NFS
       run: |
         sudo modprobe nfs || true
         sudo modprobe nfsd || true
     - name: Install CSI NFS driver
       run: go run ./cmd/ate-setup --kind setup csi nfs
-    - name: Install microVM SandboxConfig and assets
-      run: go run ./cmd/ate-setup --kind deploy sandboxconfig --sandbox-classes=microvm
     - name: Deploy microVM counter demo
       run: go run ./cmd/ate-setup --kind deploy demo counter-microvm
     - name: Deploy gVisor counter demo
@@ -179,4 +120,9 @@ jobs:
         if-no-files-found: error
     - name: Dump diagnostics on failure
       if: failure()
-      run: hack/dump-e2e-diagnostics-kind.sh
+      run: |
+        kubectl --context kind-kind get workerpool,pods -A -o wide || true
+        for p in $(kubectl --context kind-kind get pods -n ate-system -o name 2>/dev/null); do
+          echo "=== logs: ate-system/${p} ==="
+          kubectl --context kind-kind logs -n ate-system "$p" --all-containers --tail=300 || true
+        done
