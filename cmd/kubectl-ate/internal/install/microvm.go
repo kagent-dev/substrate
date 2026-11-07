@@ -63,7 +63,7 @@ type assetTarget struct {
 }
 
 // microVMTarget reads the object store from the installed releases. The
-// bucket is the RustFS snapshot bucket, Options.MicroVMAssetBucket, or the one
+// bucket is the RustFS snapshot bucket, Config.MicroVM.AssetBucket, or the one
 // the microvm SandboxConfig already uses.
 func (in *Installer) microVMTarget(ctx context.Context) (assetTarget, error) {
 	sub, err := in.installedValues(substrateRelease)
@@ -81,7 +81,7 @@ func (in *Installer) microVMTarget(ctx context.Context) (assetTarget, error) {
 	if err != nil {
 		return assetTarget{}, err
 	}
-	t := assetTarget{bucket: in.opts.MicroVMAssetBucket}
+	t := assetTarget{bucket: in.opts.MicroVM.AssetBucket}
 	switch backend, _ := lookupString(atelet, "objectStore", "backend"); backend {
 	case "s3":
 		t.store, t.scheme = ObjectStoreS3, "s3"
@@ -100,7 +100,7 @@ func (in *Installer) microVMTarget(ctx context.Context) (assetTarget, error) {
 		}
 	}
 	if t.bucket == "" {
-		return assetTarget{}, errors.New("set --microvm-asset-bucket to a bucket atelet can read; it must not hold snapshots")
+		return assetTarget{}, errors.New("set microvm.assetBucket to a bucket atelet can read; it must not hold snapshots")
 	}
 	return t, nil
 }

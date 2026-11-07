@@ -23,21 +23,40 @@ cd "${ROOT}"
 
 go build -o bin/kubectl-ate ./cmd/kubectl-ate
 
-# Networking tests assert the debug-level CONNECT tunnel log.
-bin/kubectl-ate install \
-  --chart-dir ./charts \
-  --timeout 10m \
-  --microvm \
-  -f internal/e2e/suites/credentials/values.yaml \
-  -f internal/e2e/suites/parking/values.yaml \
-  --set image.registry=localhost:5001 \
-  --set image.tag="${VERSION}" \
-  --set 'preview[0]=ALL' \
-  --set 'atenetRouter.ingressAllowedSPIFFEIDs[0]=spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client' \
-  --set atenetEgress.agentgateway.logLevel=debug \
-  --set 'atelet.extraArgs[0]=--localhost-registry-replacement=kind-registry:5000' \
-  --set 'atelet.extraArgs[1]=--snapshot-upload-delay=2s' \
-  --set 'atelet.extraArgs[2]=--snapshot-detach-delay=30s' \
-  --set otel.endpoint=http://opentelemetry-collector.otel-system.svc:4317
+# valuesFiles resolve against the current directory for a config on stdin.
+bin/kubectl-ate install --chart-dir ./charts -c - <<EOF
+timeout: 10m
+microvm:
+  enabled: true
+releases:
+  all:
+    values:
+      image:
+        registry: localhost:5001
+        tag: "${VERSION}"
+      # atelet's preview gates must match substrate's.
+      preview: [ALL]
+      otel:
+        endpoint: http://opentelemetry-collector.otel-system.svc:4317
+  atelet:
+    values:
+      atelet:
+        extraArgs:
+        - --localhost-registry-replacement=kind-registry:5000
+        - --snapshot-upload-delay=2s
+        - --snapshot-detach-delay=30s
+  substrate:
+    valuesFiles:
+    - internal/e2e/suites/credentials/values.yaml
+    - internal/e2e/suites/parking/values.yaml
+    values:
+      atenetRouter:
+        ingressAllowedSPIFFEIDs:
+        - spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client
+      atenetEgress:
+        # Networking tests assert the debug-level CONNECT tunnel log.
+        agentgateway:
+          logLevel: debug
+EOF
 
 bin/kubectl-ate status

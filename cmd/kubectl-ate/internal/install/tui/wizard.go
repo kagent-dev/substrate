@@ -22,19 +22,20 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"sigs.k8s.io/yaml"
 
 	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
 )
 
-// Wizard asks for the install choices, stores them in opts, and prints the
-// matching command to w. It returns install.ErrAborted if the user declines
-// or quits.
-func Wizard(w io.Writer, opts *install.Options) error {
+// Wizard asks for the install choices, stores them in cfg, and prints the
+// matching config to w. It returns install.ErrAborted if the user declines or
+// quits.
+func Wizard(w io.Writer, cfg *install.Config) error {
 	var valuesFile string
-	if len(opts.ValuesFiles) > 0 {
-		valuesFile = opts.ValuesFiles[0]
+	if len(cfg.Releases.All.ValuesFiles) > 0 {
+		valuesFile = cfg.Releases.All.ValuesFiles[0]
 	}
-	external := func() bool { return opts.ObjectStore != install.ObjectStoreRustFS }
+	external := func() bool { return cfg.ObjectStore != install.ObjectStoreRustFS }
 	confirmed := true
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -44,7 +45,7 @@ func Wizard(w io.Writer, opts *install.Options) error {
 					huh.NewOption("Bundled: single replica, for evaluation only", install.PostgresBundled),
 					huh.NewOption("External: I created the connection Secrets", install.PostgresExternal),
 				).
-				Value(&opts.Postgres),
+				Value(&cfg.Postgres),
 			huh.NewSelect[install.ObjectStore]().
 				Title("Snapshot storage").
 				Options(
@@ -52,11 +53,11 @@ func Wizard(w io.Writer, opts *install.Options) error {
 					huh.NewOption("Amazon S3 or compatible", install.ObjectStoreS3),
 					huh.NewOption("Google Cloud Storage", install.ObjectStoreGCS),
 				).
-				Value(&opts.ObjectStore),
+				Value(&cfg.ObjectStore),
 			huh.NewConfirm().
 				Title("Install the microVM sandbox class?").
 				Description("Downloads the Kata and Cloud Hypervisor guest assets and stages them in the object store.").
-				Value(&opts.MicroVM),
+				Value(&cfg.MicroVM.Enabled),
 		),
 		huh.NewGroup(
 			huh.NewInput().
@@ -69,9 +70,9 @@ func Wizard(w io.Writer, opts *install.Options) error {
 			huh.NewInput().
 				Title("MicroVM asset bucket").
 				Description("atelet must be able to read it.").
-				Value(&opts.MicroVMAssetBucket).
+				Value(&cfg.MicroVM.AssetBucket).
 				Validate(notEmpty),
-		).WithHideFunc(func() bool { return !external() || !opts.MicroVM }),
+		).WithHideFunc(func() bool { return !external() || !cfg.MicroVM.Enabled }),
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Install Agent Substrate?").
@@ -90,33 +91,28 @@ func Wizard(w io.Writer, opts *install.Options) error {
 		return install.ErrAborted
 	}
 	if external() {
-		opts.ValuesFiles = []string{valuesFile}
+		cfg.Releases.All.ValuesFiles = []string{valuesFile}
 	} else {
-		opts.ValuesFiles = nil
+		cfg.Releases.All.ValuesFiles = nil
 	}
-	if !external() || !opts.MicroVM {
-		opts.MicroVMAssetBucket = ""
+	if !external() || !cfg.MicroVM.Enabled {
+		cfg.MicroVM.AssetBucket = ""
 	}
-	fmt.Fprintln(w, dimSt.Render("To skip these questions next time, run: "+Command(opts, valuesFile)))
+	hint, err := Hint(cfg)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(w, dimSt.Render(hint))
 	return nil
 }
 
-// Command returns the install command line for the wizard's choices.
-func Command(opts *install.Options, valuesFile string) string {
-	args := []string{"kubectl ate install"}
-	if opts.Postgres != install.PostgresBundled {
-		args = append(args, "--postgres "+string(opts.Postgres))
+// Hint tells the user how to rerun install with cfg and no questions.
+func Hint(cfg *install.Config) (string, error) {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", err
 	}
-	if opts.ObjectStore != install.ObjectStoreRustFS {
-		args = append(args, "--object-store "+string(opts.ObjectStore), "-f "+valuesFile)
-	}
-	if opts.MicroVM {
-		args = append(args, "--microvm")
-		if opts.ObjectStore != install.ObjectStoreRustFS {
-			args = append(args, "--microvm-asset-bucket "+opts.MicroVMAssetBucket)
-		}
-	}
-	return strings.Join(args, " ")
+	return "To skip these questions next time, save this as install.yaml and run kubectl ate install -c install.yaml:\n\n" + string(data) + "\n", nil
 }
 
 func fileExists(p string) error {

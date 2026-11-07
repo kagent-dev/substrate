@@ -22,11 +22,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"golang.org/x/term"
 
 	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
@@ -34,12 +33,37 @@ import (
 )
 
 var (
-	installOpts   = install.Options{Postgres: install.PostgresBundled, ObjectStore: install.ObjectStoreRustFS}
-	upgradeOpts   install.Options
+	configPath    string
+	chartDir      string
+	noTUI         bool
+	upgradeDryRun bool
 	uninstallOpts install.Options
 	uninstallYes  bool
-	noTUI         bool
 )
+
+const configHelp = `--config takes a YAML file, or - for stdin:
+
+  postgres: bundled        # or external
+  objectStore: rustfs      # or s3, gcs
+  microvm:
+    enabled: true
+    assetBucket: my-assets # for s3 or gcs
+  timeout: 10m             # each wait for workloads
+  releases:                # Helm values
+    all:                   # every release except substrate-crds
+      valuesFiles:         # relative to the config file
+      - gke.yaml
+      values:              # wins over valuesFiles
+        image:
+          tag: v1.0.0
+    podcert: {}            # substrate-podcert
+    atelet: {}             # substrate-atelet
+    substrate:             # substrate
+      values:
+        otel:
+          endpoint: http://otel-collector:4317
+
+A release's own valuesFiles and values win over the ones in all.`
 
 var installCmd = &cobra.Command{
 	Use:   "install",
@@ -50,28 +74,39 @@ Installs the substrate-crds, substrate-podcert, substrate-atelet and substrate
 Helm releases in order, and creates the CA pools and secrets they need.
 Existing secrets are kept. Rerunning install resumes a failed install.
 
-By default it also installs a single-replica PostgreSQL for evaluation. For
-anything else, create the database connection Secrets described in
-charts/substrate/README.md and pass --postgres external.
+Without --config, install uses a single-replica PostgreSQL for evaluation and
+a RustFS for snapshots. On a terminal it asks for these choices first and
+prints the matching config.
 
-Snapshots go to a RustFS the substrate release runs. To use a bucket instead,
-pass --object-store s3 or gcs with a values file that sets objectStore.*,
-ateApi.snapshotLocation and, for GCS, objectStorePlugin.transferServiceAccount.
+For anything but evaluation, create the database connection Secrets
+described in charts/substrate/README.md and set postgres: external. To store
+snapshots in a bucket, set objectStore to s3 or gcs and set the charts'
+objectStore.*, ateApi.snapshotLocation and, for GCS,
+objectStorePlugin.transferServiceAccount values.
 
---microvm downloads the Kata and Cloud Hypervisor guest assets for each node
-architecture, caches them under the user cache directory, uploads them to the
-object store, and applies the microvm SandboxConfig. Upgrade restages them.
+microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
+node architecture, caches them under the user cache directory, uploads them to
+the object store, and applies the microvm SandboxConfig. Upgrade restages them.
 
-On a terminal with no flags set, install asks for these choices first.`,
+` + configHelp,
+	Example: `  kubectl ate install -c install.yaml
+  kubectl ate install -c - <<EOF
+  microvm:
+    enabled: true
+  EOF`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		opts := installOpts
-		if wizardWanted(cmd) {
-			if err := tui.Wizard(cmd.ErrOrStderr(), &opts); err != nil {
+		opts, tty, err := options(cmd)
+		if err != nil {
+			return err
+		}
+		defer closeTerminal(tty)
+		if useTUI(cmd, tty) && configPath == "" {
+			if err := tui.Wizard(cmd.ErrOrStderr(), &opts.Config); err != nil {
 				return err
 			}
 		}
-		return runInstaller(cmd, opts, "install", (*install.Installer).Install,
+		return runInstaller(cmd, opts, tty, "install", (*install.Installer).Install,
 			"Agent Substrate is installed.\nCheck it with: kubectl ate status")
 	},
 }
@@ -84,16 +119,21 @@ kubectl ate: the certificate controller, atelet, the CRDs, then the substrate
 release. It doesn't roll WorkerPool worker images, which
 docs/reference/version-skew-policy.md upgrades after atelet.
 
-Each release keeps the values it was installed with. Values passed with -f and
---set are layered on top. Upgrade refuses downgrades, skipped minor releases,
-and CRD changes that would strand stored objects.
+Each release keeps the values it was installed with. The config's
+releases values are layered on top. Upgrade also reads timeout and
+microvm.assetBucket from the config. It refuses downgrades, skipped minor
+releases, and CRD changes that would strand stored objects.
 
 --dry-run prints each release's manifest diff and changes nothing.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		opts := upgradeOpts
-		opts.Out = cmd.OutOrStdout()
-		return runInstaller(cmd, opts, "upgrade", (*install.Installer).Upgrade,
+		opts, tty, err := options(cmd)
+		if err != nil {
+			return err
+		}
+		defer closeTerminal(tty)
+		opts.DryRun, opts.Out = upgradeDryRun, cmd.OutOrStdout()
+		return runInstaller(cmd, opts, tty, "upgrade", (*install.Installer).Upgrade,
 			"Agent Substrate is upgraded.")
 	},
 }
@@ -105,31 +145,88 @@ var uninstallCmd = &cobra.Command{
 
 Deletes every WorkerPool first, so ate-controller can finalize them, then
 uninstalls the releases in the reverse of install order and removes the
-bundled PostgreSQL.
+bundled PostgreSQL. It reads only timeout from the config.
 
 CRDs, CA keys, secrets, the database volume and the RustFS volume stay unless
 --include-crds or --purge are set, so a later install keeps its identities and
 data.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		opts := uninstallOpts
-		if !uninstallYes {
-			opts.Confirm = confirmFunc(cmd)
+		opts, tty, err := options(cmd)
+		if err != nil {
+			return err
 		}
-		return runInstaller(cmd, opts, "uninstall", (*install.Installer).Uninstall,
+		defer closeTerminal(tty)
+		opts.IncludeCRDs, opts.Purge = uninstallOpts.IncludeCRDs, uninstallOpts.Purge
+		if !uninstallYes {
+			opts.Confirm = confirmFunc(cmd, tty)
+		}
+		return runInstaller(cmd, opts, tty, "uninstall", (*install.Installer).Uninstall,
 			"Agent Substrate is uninstalled.")
 	},
 }
 
-// confirmFunc asks on the terminal. Without one it refuses, so scripts must
-// pass --yes. Ctrl+C cancels ctx, which ends the wait for an answer.
-func confirmFunc(cmd *cobra.Command) func(context.Context, string) (bool, error) {
+// options reads the config and finds the terminal to read keys and answers
+// from. Without --config the config is install.DefaultConfig. The terminal is
+// nil when there is none. Close it with closeTerminal.
+func options(cmd *cobra.Command) (install.Options, *os.File, error) {
+	opts := install.Options{ChartDir: chartDir}
+	var err error
+	switch configPath {
+	case "":
+		opts.Config = install.DefaultConfig()
+	case "-":
+		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".")
+	default:
+		var f *os.File
+		if f, err = os.Open(configPath); err == nil {
+			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath))
+			f.Close()
+		}
+	}
+	if err != nil {
+		return opts, nil, fmt.Errorf("while reading %s: %w", configName(), err)
+	}
+	return opts, terminal(cmd), nil
+}
+
+func configName() string {
+	if configPath == "-" {
+		return "config from stdin"
+	}
+	return configPath
+}
+
+// terminal returns stdin if it's a terminal. When the config came from stdin
+// it opens the controlling terminal instead. It returns nil if neither works.
+func terminal(cmd *cobra.Command) *os.File {
+	if configPath == "-" {
+		f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		if err != nil {
+			return nil
+		}
+		return f
+	}
+	if f, ok := cmd.InOrStdin().(*os.File); ok && isTerminal(f) {
+		return f
+	}
+	return nil
+}
+
+func closeTerminal(tty *os.File) {
+	if tty != nil && configPath == "-" {
+		tty.Close()
+	}
+}
+
+// confirmFunc asks on tty. Without one it refuses, so scripts must pass
+// --yes. Ctrl+C cancels ctx, which ends the wait for an answer.
+func confirmFunc(cmd *cobra.Command, tty *os.File) func(context.Context, string) (bool, error) {
 	return func(ctx context.Context, summary string) (bool, error) {
 		w := cmd.ErrOrStderr()
 		fmt.Fprint(w, summary)
-		f, ok := cmd.InOrStdin().(*os.File)
-		if !ok || !isTerminal(f) {
-			return false, errors.New("stdin isn't a terminal; pass --yes to uninstall")
+		if tty == nil {
+			return false, errors.New("no terminal to ask on; pass --yes to uninstall")
 		}
 		fmt.Fprint(w, "Uninstall? [y/N] ")
 		type line struct {
@@ -138,7 +235,7 @@ func confirmFunc(cmd *cobra.Command) func(context.Context, string) (bool, error)
 		}
 		read := make(chan line, 1)
 		go func() {
-			s, err := bufio.NewReader(f).ReadString('\n')
+			s, err := bufio.NewReader(tty).ReadString('\n')
 			read <- line{s, err}
 		}()
 		var l line
@@ -181,11 +278,11 @@ func newInstallerWith(cmd *cobra.Command, opts install.Options, r install.Report
 	return install.New(opts, r)
 }
 
-// runInstaller runs fn with the TUI when stderr is a terminal, and with plain
+// runInstaller runs fn with the TUI when useTUI allows it, and with plain
 // lines otherwise. The TUI shows the error itself, so the returned error is
 // marked as reported.
-func runInstaller(cmd *cobra.Command, opts install.Options, title string, fn func(*install.Installer, context.Context) error, summary string) error {
-	if !useTUI(cmd) || opts.DryRun {
+func runInstaller(cmd *cobra.Command, opts install.Options, tty *os.File, title string, fn func(*install.Installer, context.Context) error, summary string) error {
+	if !useTUI(cmd, tty) || opts.DryRun {
 		in, err := newInstaller(cmd, opts)
 		if err != nil {
 			return err
@@ -194,7 +291,7 @@ func runInstaller(cmd *cobra.Command, opts install.Options, title string, fn fun
 	}
 	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer cancel()
-	r := tui.New(cmd.ErrOrStderr(), title, cancel)
+	r := tui.New(tty, cmd.ErrOrStderr(), title, cancel)
 	in, err := newInstallerWith(cmd, opts, r)
 	if err != nil {
 		return err
@@ -206,24 +303,11 @@ func runInstaller(cmd *cobra.Command, opts install.Options, title string, fn fun
 	return err
 }
 
-// useTUI reports whether stdin and stderr are terminals and nothing asked for
-// plain output. Helm logs at -v would interleave with the TUI.
-func useTUI(cmd *cobra.Command) bool {
-	return !noTUI && verbosity == 0 && isTerminal(cmd.ErrOrStderr()) && isTerminal(cmd.InOrStdin())
-}
-
-// wizardWanted reports whether install should ask for its options: on a
-// terminal with no install flags set.
-func wizardWanted(cmd *cobra.Command) bool {
-	return useTUI(cmd) && !localFlagSet(cmd)
-}
-
-// localFlagSet reports whether any of cmd's own flags was set. The FlagSet
-// LocalNonPersistentFlags returns doesn't count set flags, so check each one.
-func localFlagSet(cmd *cobra.Command) bool {
-	set := false
-	cmd.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) { set = set || f.Changed })
-	return set
+// useTUI reports whether there is a terminal for keys, stderr is a terminal,
+// and nothing asked for plain output. Helm logs at -v would interleave with
+// the TUI.
+func useTUI(cmd *cobra.Command, tty *os.File) bool {
+	return !noTUI && verbosity == 0 && tty != nil && isTerminal(cmd.ErrOrStderr())
 }
 
 func isTerminal(v any) bool {
@@ -231,29 +315,18 @@ func isTerminal(v any) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-// addChartFlags adds the flags install and upgrade share.
-func addChartFlags(f *pflag.FlagSet, opts *install.Options) {
-	f.StringVar(&opts.ChartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")
-	f.StringArrayVarP(&opts.ValuesFiles, "values", "f", nil, "Values file for every release except substrate-crds (repeatable)")
-	f.StringArrayVar(&opts.Values, "set", nil, "Set a value for every release except substrate-crds, as key=value (repeatable)")
-	f.DurationVar(&opts.Timeout, "timeout", 10*time.Minute, "How long to wait for each release's workloads")
-}
-
 func init() {
-	addChartFlags(installCmd.Flags(), &installOpts)
-	installCmd.Flags().StringVar((*string)(&installOpts.Postgres), "postgres", string(install.PostgresBundled), "PostgreSQL to use: bundled (evaluation only) or external")
-	installCmd.Flags().StringVar((*string)(&installOpts.ObjectStore), "object-store", string(install.ObjectStoreRustFS), "Snapshot storage: rustfs (in cluster), s3 or gcs")
-	installCmd.Flags().BoolVar(&installOpts.MicroVM, "microvm", false, "Also install the microvm sandbox class: download its guest assets, stage them in the object store and apply the microvm SandboxConfig")
-	installCmd.Flags().StringVar(&installOpts.MicroVMAssetBucket, "microvm-asset-bucket", "", "Bucket for microVM assets with --object-store s3 or gcs; atelet must be able to read it")
-	addChartFlags(upgradeCmd.Flags(), &upgradeOpts)
-	upgradeCmd.Flags().BoolVar(&upgradeOpts.DryRun, "dry-run", false, "Print each release's manifest diff without upgrading")
+	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
+		c.Flags().StringVarP(&configPath, "config", "c", "", "Install config file, or - for stdin")
+		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
+	}
+	for _, c := range []*cobra.Command{installCmd, upgradeCmd} {
+		c.Flags().StringVar(&chartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")
+	}
+	upgradeCmd.Flags().BoolVar(&upgradeDryRun, "dry-run", false, "Print each release's manifest diff without upgrading")
 	f := uninstallCmd.Flags()
 	f.BoolVar(&uninstallOpts.IncludeCRDs, "include-crds", false, "Also delete the CRDs, with every WorkerPool, SandboxConfig and CSIDriverConfig")
 	f.BoolVar(&uninstallOpts.Purge, "purge", false, "Also delete the namespaces, CA keys, secrets, database volume and trust bundles")
 	f.BoolVarP(&uninstallYes, "yes", "y", false, "Don't ask for confirmation")
-	f.DurationVar(&uninstallOpts.Timeout, "timeout", 10*time.Minute, "How long to wait for each step")
-	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
-		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
-	}
 	rootCmd.AddCommand(installCmd, upgradeCmd, uninstallCmd, statusCmd)
 }

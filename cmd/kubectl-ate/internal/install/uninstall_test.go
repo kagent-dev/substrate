@@ -62,7 +62,7 @@ func TestDeleteWorkerPools(t *testing.T) {
 		object(workerPoolsGVR.GroupVersion().WithKind("WorkerPool"), "team-a", "pool", ""),
 		sc,
 	)
-	in := &Installer{dyn: dc, opts: Options{Timeout: 10 * time.Second}}
+	in := &Installer{dyn: dc, opts: Options{Config: Config{Timeout: metav1.Duration{Duration: 10 * time.Second}}}}
 	msg, err := in.deleteWorkerPools(ctx, func(string) {})
 	if err != nil {
 		t.Fatal(err)

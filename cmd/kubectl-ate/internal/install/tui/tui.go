@@ -193,16 +193,19 @@ func elapsed(d time.Duration) string {
 // Reporter renders events. It starts drawing at the Plan event, so a prompt
 // that runs before the first step still owns the terminal.
 type Reporter struct {
+	in     io.Reader
 	w      io.Writer
 	model  *model
 	prog   *tea.Program
 	exited chan struct{}
 }
 
-// New returns a Reporter that draws to w. cancel is called on Ctrl+C.
-func New(w io.Writer, title string, cancel func()) *Reporter {
+// New returns a Reporter that reads keys from in and draws to w. cancel is
+// called on Ctrl+C.
+func New(in io.Reader, w io.Writer, title string, cancel func()) *Reporter {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
 	return &Reporter{
+		in:    in,
 		w:     w,
 		model: &model{title: title, byName: map[string]*stepView{}, spin: sp, cancel: cancel},
 	}
@@ -219,7 +222,7 @@ func (r *Reporter) Report(e install.Event) {
 			r.model.apply(install.Event{Step: name, Kind: install.Plan})
 		}
 		// The caller handles SIGINT; Ctrl+C on the terminal arrives as a key.
-		r.prog = tea.NewProgram(r.model, tea.WithOutput(r.w), tea.WithoutSignalHandler())
+		r.prog = tea.NewProgram(r.model, tea.WithInput(r.in), tea.WithOutput(r.w), tea.WithoutSignalHandler())
 		r.exited = make(chan struct{})
 		go func() {
 			defer close(r.exited)
