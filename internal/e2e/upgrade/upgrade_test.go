@@ -279,6 +279,11 @@ func runStep(ctx context.Context, t *testing.T, api *api, h *harness, actors []*
 			api.reconnect(ctx, t)
 		}
 		for i, d := range deployments {
+			// A Deployment that runs only third-party images, like the
+			// fork's agentgateway, has nothing for the build to move.
+			if before[i] == "" {
+				continue
+			}
 			if got := deploymentImages(ctx, t, h.k8s, d); got == before[i] {
 				t.Errorf("Deployment %s still runs %s after %s", d, got, step)
 			}
@@ -718,16 +723,23 @@ func stepDeployments(step string) []types.NamespacedName {
 	return nil
 }
 
-// deploymentImages lists the images in a Deployment's pod template.
+// deploymentImages lists the images in a Deployment's pod template that ko
+// built into KO_DOCKER_REPO.
 func deploymentImages(ctx context.Context, t *testing.T, k8s kubernetes.Interface, d types.NamespacedName) string {
 	t.Helper()
+	env, err := e2e.CheckEnv("KO_DOCKER_REPO")
+	if err != nil {
+		t.Fatalf("CheckEnv failed: %v", err)
+	}
 	dep, err := k8s.AppsV1().Deployments(d.Namespace).Get(ctx, d.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get Deployment %s: %v", d, err)
 	}
 	var images []string
 	for _, c := range dep.Spec.Template.Spec.Containers {
-		images = append(images, c.Image)
+		if strings.HasPrefix(c.Image, env["KO_DOCKER_REPO"]+"/") {
+			images = append(images, c.Image)
+		}
 	}
 	return strings.Join(images, ",")
 }
