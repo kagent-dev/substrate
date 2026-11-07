@@ -45,7 +45,7 @@ func (in *Installer) Status(ctx context.Context, w io.Writer) error {
 			rel.Info.Status, rel.Info.LastDeployed.Format(time.RFC3339))
 	}
 	if a, s := apps[ateletRelease], apps[substrateRelease]; a != "" && s != "" && a != s {
-		fmt.Fprintf(tw, "\natelet runs %s and the control plane %s\n", a, s)
+		fmt.Fprintf(tw, "\natelet runs %s and the control plane %s; finish the upgrade with kubectl ate upgrade\n", a, s)
 	}
 
 	fmt.Fprintln(tw)

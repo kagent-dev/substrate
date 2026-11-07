@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"helm.sh/helm/v4/pkg/cli/values"
+	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -86,6 +87,9 @@ type Options struct {
 	Timeout time.Duration
 	// HelmLog receives Helm's debug log. Nil discards it.
 	HelmLog io.Writer
+	// DryRun makes Upgrade write manifest diffs to Out instead of applying.
+	DryRun bool
+	Out    io.Writer
 }
 
 // Installer runs install steps against one cluster.
@@ -93,12 +97,15 @@ type Installer struct {
 	opts   Options
 	rest   *rest.Config
 	kube   kubernetes.Interface
+	apiext apiextclient.Interface
 	dyn    dynamic.Interface
 	helm   *helmClient
 	charts fs.FS
 	report Reporter
 	// user holds the merged ValuesFiles and Values.
 	user map[string]any
+	// upgrading lets releases move to a new chart version.
+	upgrading bool
 }
 
 // New connects to the cluster that opts select.
@@ -108,6 +115,10 @@ func New(opts Options, r Reporter) (*Installer, error) {
 		return nil, err
 	}
 	kc, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("while creating Kubernetes client: %w", err)
+	}
+	ac, err := apiextclient.NewForConfig(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("while creating Kubernetes client: %w", err)
 	}
@@ -128,6 +139,7 @@ func New(opts Options, r Reporter) (*Installer, error) {
 		opts:   opts,
 		rest:   restCfg,
 		kube:   kc,
+		apiext: ac,
 		dyn:    dc,
 		helm:   newHelmClient(opts.Kubeconfig, opts.Context, opts.HelmLog),
 		charts: charts,
