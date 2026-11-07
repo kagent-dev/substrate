@@ -128,10 +128,8 @@ func SetupSandboxNetwork(ctx context.Context, cfg SandboxNetworkConfig) (_ *Sand
 	}, nil
 }
 
-// prepareNamespace pins sandboxSysctls and brings up lo. It must run before
-// the namespace has any link but lo: a link copies conf/default when it is
-// created, and a later write to conf/default does not reach links whose
-// settings the node had set explicitly.
+// prepareNamespace pins sandboxSysctls and brings up lo before sandbox links
+// are created. Those links copy conf/default at creation time.
 func prepareNamespace(context.Context) error {
 	if err := netns.SetSysctls(sandboxSysctls...); err != nil {
 		return err

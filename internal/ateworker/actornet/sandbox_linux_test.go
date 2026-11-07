@@ -240,14 +240,16 @@ func TestSetupSandboxNetworkWithoutVeth(t *testing.T) {
 		t.Errorf("got a second namespace (%v vs %v); this shape needs one", n.GatewayNetNS, n.RuntimeNetNS)
 	}
 
-	// No veth was built, so nothing but lo is here until the tap arrives.
+	// Kernel tunnel modules can add dormant interfaces to a new namespace.
+	// No veth was built, and only lo should be up until the tap arrives.
 	if err := netns.Do(ctx, n.RuntimeNetNS, func(context.Context) error {
 		links, err := netlink.LinkList()
 		if err != nil {
 			return err
 		}
 		for _, l := range links {
-			if l.Attrs().Name != "lo" {
+			_, isVeth := l.(*netlink.Veth)
+			if isVeth || (l.Attrs().Name != "lo" && l.Attrs().Flags&net.FlagUp != 0) {
 				t.Errorf("unexpected interface %q in the actor namespace", l.Attrs().Name)
 			}
 		}
@@ -552,8 +554,9 @@ func TestSandboxNamespacesDoNotInheritNodeSettings(t *testing.T) {
 					}
 					for _, l := range links {
 						name := l.Attrs().Name
-						// lo predates the sysctls.
-						if l.Attrs().Flags&net.FlagLoopback != 0 {
+						// Loopback and kernel tunnel devices predate the sysctls.
+						// Check the veths added during and after setup.
+						if _, ok := l.(*netlink.Veth); !ok {
 							continue
 						}
 						for key, value := range perLink {
