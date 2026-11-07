@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"golang.org/x/term"
 
 	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
+	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install/tui"
 )
 
 var (
@@ -36,6 +38,7 @@ var (
 	upgradeOpts   install.Options
 	uninstallOpts install.Options
 	uninstallYes  bool
+	noTUI         bool
 )
 
 var installCmd = &cobra.Command{
@@ -57,10 +60,19 @@ ateApi.snapshotLocation and, for GCS, objectStorePlugin.transferServiceAccount.
 
 --microvm downloads the Kata and Cloud Hypervisor guest assets for each node
 architecture, caches them under the user cache directory, uploads them to the
-object store, and applies the microvm SandboxConfig. Upgrade restages them.`,
+object store, and applies the microvm SandboxConfig. Upgrade restages them.
+
+On a terminal with no flags set, install asks for these choices first.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return runInstaller(cmd, installOpts, (*install.Installer).Install)
+		opts := installOpts
+		if wizardWanted(cmd) {
+			if err := tui.Wizard(cmd.ErrOrStderr(), &opts); err != nil {
+				return err
+			}
+		}
+		return runInstaller(cmd, opts, "install", (*install.Installer).Install,
+			"Agent Substrate is installed.\nCheck it with: kubectl ate status")
 	},
 }
 
@@ -81,7 +93,8 @@ and CRD changes that would strand stored objects.
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		opts := upgradeOpts
 		opts.Out = cmd.OutOrStdout()
-		return runInstaller(cmd, opts, (*install.Installer).Upgrade)
+		return runInstaller(cmd, opts, "upgrade", (*install.Installer).Upgrade,
+			"Agent Substrate is upgraded.")
 	},
 }
 
@@ -103,7 +116,8 @@ data.`,
 		if !uninstallYes {
 			opts.Confirm = confirmFunc(cmd)
 		}
-		return runInstaller(cmd, opts, (*install.Installer).Uninstall)
+		return runInstaller(cmd, opts, "uninstall", (*install.Installer).Uninstall,
+			"Agent Substrate is uninstalled.")
 	},
 }
 
@@ -167,12 +181,49 @@ func newInstallerWith(cmd *cobra.Command, opts install.Options, r install.Report
 	return install.New(opts, r)
 }
 
-func runInstaller(cmd *cobra.Command, opts install.Options, fn func(*install.Installer, context.Context) error) error {
-	in, err := newInstaller(cmd, opts)
+// runInstaller runs fn with the TUI when stderr is a terminal, and with plain
+// lines otherwise. The TUI shows the error itself, so the returned error is
+// marked as reported.
+func runInstaller(cmd *cobra.Command, opts install.Options, title string, fn func(*install.Installer, context.Context) error, summary string) error {
+	if !useTUI(cmd) || opts.DryRun {
+		in, err := newInstaller(cmd, opts)
+		if err != nil {
+			return err
+		}
+		return fn(in, cmd.Context())
+	}
+	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
+	defer cancel()
+	r := tui.New(cmd.ErrOrStderr(), title, cancel)
+	in, err := newInstallerWith(cmd, opts, r)
 	if err != nil {
 		return err
 	}
-	return fn(in, cmd.Context())
+	err = fn(in, ctx)
+	if r.Close(err, summary) && err != nil {
+		return reportedError{err}
+	}
+	return err
+}
+
+// useTUI reports whether stdin and stderr are terminals and nothing asked for
+// plain output. Helm logs at -v would interleave with the TUI.
+func useTUI(cmd *cobra.Command) bool {
+	return !noTUI && verbosity == 0 && isTerminal(cmd.ErrOrStderr()) && isTerminal(cmd.InOrStdin())
+}
+
+// wizardWanted reports whether install should ask for its options: on a
+// terminal with no install flags set.
+func wizardWanted(cmd *cobra.Command) bool {
+	return useTUI(cmd) && !localFlagSet(cmd)
+}
+
+// localFlagSet reports whether any of cmd's own flags was set. The FlagSet
+// LocalNonPersistentFlags returns doesn't count set flags, so check each one.
+func localFlagSet(cmd *cobra.Command) bool {
+	set := false
+	cmd.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) { set = set || f.Changed })
+	return set
 }
 
 func isTerminal(v any) bool {
@@ -201,5 +252,8 @@ func init() {
 	f.BoolVar(&uninstallOpts.Purge, "purge", false, "Also delete the namespaces, CA keys, secrets, database volume and trust bundles")
 	f.BoolVarP(&uninstallYes, "yes", "y", false, "Don't ask for confirmation")
 	f.DurationVar(&uninstallOpts.Timeout, "timeout", 10*time.Minute, "How long to wait for each step")
+	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
+		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
+	}
 	rootCmd.AddCommand(installCmd, upgradeCmd, uninstallCmd, statusCmd)
 }
