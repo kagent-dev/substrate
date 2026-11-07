@@ -14,8 +14,9 @@
 
 # Cluster-wide SandboxConfig for the microVM (kata + cloud-hypervisor) sandbox
 # class. `go run ./cmd/ate-setup deploy ate-system` (and `deploy sandboxconfig`)
-# assembles the asset set, stages it to the cluster's object store, and applies
-# this manifest alongside sandboxconfig-gvisor.yaml. A microvm WorkerPool
+# or `kubectl ate install --microvm` assembles the asset set, stages it to the
+# cluster's object store, and applies this manifest alongside
+# sandboxconfig-gvisor.yaml. A microvm WorkerPool
 # resolves it as its class default (or names it via configRef: microvm), so a
 # missing/stale config shows on the pool's status.
 #
@@ -30,7 +31,8 @@
 # boots cloud-hypervisor itself and gives the actor an overlay rootfs
 # (virtio-fs RO lower + guest-tmpfs upper), so it fetches virtiofsd too.
 #
-# cmd/ate-setup/internal/steps/microvm.go reads the per-arch sha256 values
+# cmd/ate-setup/internal/steps/microvm.go and
+# cmd/kubectl-ate/internal/microvmassets read the per-arch sha256 values
 # below to verify the assembled binaries and stages them at these digest-keyed
 # paths so newer releases do not overwrite kept versions.
 
