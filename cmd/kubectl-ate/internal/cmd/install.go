@@ -215,7 +215,15 @@ func useTUI(cmd *cobra.Command) bool {
 // wizardWanted reports whether install should ask for its options: on a
 // terminal with no install flags set.
 func wizardWanted(cmd *cobra.Command) bool {
-	return useTUI(cmd) && cmd.LocalNonPersistentFlags().NFlag() == 0
+	return useTUI(cmd) && !localFlagSet(cmd)
+}
+
+// localFlagSet reports whether any of cmd's own flags was set. The FlagSet
+// LocalNonPersistentFlags returns doesn't count set flags, so check each one.
+func localFlagSet(cmd *cobra.Command) bool {
+	set := false
+	cmd.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) { set = set || f.Changed })
+	return set
 }
 
 func isTerminal(v any) bool {
