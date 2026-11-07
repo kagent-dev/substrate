@@ -51,6 +51,18 @@ jobs:
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: 'go.mod'
+        # setup-go keys its cache on go.sum with no fallback, so a PR that
+        # changes go.sum starts cold. Restore the latest main build instead.
+        cache: false
+    - name: Restore Go build cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/.cache/golangci-lint
+          ~/go/pkg/mod
+        key: unit-go-${{ runner.os }}-${{ github.sha }}
+        restore-keys: unit-go-${{ runner.os }}-
     # we only test on amd64, make sure everything still builds for arm64
     - name: build for arm64
       run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./...
@@ -125,6 +137,17 @@ jobs:
         if-no-files-found: error
     - name: verify
       run: hack/verify-all.sh
+    - name: Save Go build cache
+      # Main only, so PRs restore the latest main build rather than each
+      # storing its own copy.
+      if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/.cache/golangci-lint
+          ~/go/pkg/mod
+        key: unit-go-${{ runner.os }}-${{ github.sha }}
   verify-migrations:
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
