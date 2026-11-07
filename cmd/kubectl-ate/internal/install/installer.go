@@ -90,6 +90,14 @@ type Options struct {
 	// DryRun makes Upgrade write manifest diffs to Out instead of applying.
 	DryRun bool
 	Out    io.Writer
+	// IncludeCRDs makes Uninstall delete the CRDs and every custom resource.
+	IncludeCRDs bool
+	// Purge makes Uninstall delete the namespaces, with their CA keys,
+	// secrets and database volume, and the published trust bundles.
+	Purge bool
+	// Confirm is shown what Uninstall will delete and returns whether to go
+	// on. Nil means go on.
+	Confirm func(ctx context.Context, summary string) (bool, error)
 }
 
 // Installer runs install steps against one cluster.

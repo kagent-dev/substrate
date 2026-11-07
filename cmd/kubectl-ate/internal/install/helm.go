@@ -174,6 +174,36 @@ func (h *helmClient) forget(r release, version int) error {
 	return nil
 }
 
+// uninstall removes r and waits for its resources to go. It reports false if
+// r wasn't installed. Helm's uninstall takes no context, so on cancel it
+// returns and leaves Helm running until the process exits.
+func (h *helmClient) uninstall(ctx context.Context, r release, timeout time.Duration) (bool, error) {
+	cfg, err := h.config(r.namespace)
+	if err != nil {
+		return false, err
+	}
+	un := action.NewUninstall(cfg)
+	un.WaitStrategy = kube.StatusWatcherStrategy
+	un.Timeout = timeout
+	done := make(chan error, 1)
+	go func() {
+		_, err := un.Run(r.name)
+		done <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case err = <-done:
+	}
+	if errors.Is(err, driver.ErrReleaseNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("while uninstalling %s: %w", r.name, err)
+	}
+	return true, nil
+}
+
 func asV1(rel any, err error) (*releasev1.Release, error) {
 	if err != nil {
 		return nil, err
