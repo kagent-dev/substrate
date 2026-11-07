@@ -30,14 +30,26 @@ microvm:
   enabled: true
 releases:
   all:
-    valuesFiles:
-    - internal/e2e/suites/credentials/values.yaml
-    - internal/e2e/suites/parking/values.yaml
     values:
       image:
         registry: localhost:5001
         tag: "${VERSION}"
+      # atelet's preview gates must match substrate's.
       preview: [ALL]
+      otel:
+        endpoint: http://opentelemetry-collector.otel-system.svc:4317
+  atelet:
+    values:
+      atelet:
+        extraArgs:
+        - --localhost-registry-replacement=kind-registry:5000
+        - --snapshot-upload-delay=2s
+        - --snapshot-detach-delay=30s
+  substrate:
+    valuesFiles:
+    - internal/e2e/suites/credentials/values.yaml
+    - internal/e2e/suites/parking/values.yaml
+    values:
       atenetRouter:
         ingressAllowedSPIFFEIDs:
         - spiffe://cluster.local/ns/ate-e2e-router-client/sa/router-client
@@ -45,13 +57,6 @@ releases:
         # Networking tests assert the debug-level CONNECT tunnel log.
         agentgateway:
           logLevel: debug
-      atelet:
-        extraArgs:
-        - --localhost-registry-replacement=kind-registry:5000
-        - --snapshot-upload-delay=2s
-        - --snapshot-detach-delay=30s
-      otel:
-        endpoint: http://opentelemetry-collector.otel-system.svc:4317
 EOF
 
 bin/kubectl-ate status
