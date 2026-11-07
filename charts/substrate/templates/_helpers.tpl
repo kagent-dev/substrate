@@ -259,3 +259,44 @@ definition so the fallback cannot drift between pods.
 {{ toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/*
+The egress gateway's credential providers: the bundled k8s.io one and
+credentialProvider.additionalProviders, each dialed with the gateway's pod
+identity and verified against the servicedns.podcert.ate.dev trust bundle.
+*/}}
+{{- define "substrate.egressCredentialProviders" -}}
+{{- $providers := list (dict "uriAuthority" "k8s.io" "host" (printf "%s.%s.svc:50051" (include "substrate.fullname" (list "k8s-credential-provider" .)) .Release.Namespace)) -}}
+{{- range .Values.credentialProvider.additionalProviders -}}
+{{- if or (not .uriAuthority) (not .host) -}}
+{{- fail "credentialProvider.additionalProviders entries need uriAuthority and host" -}}
+{{- end -}}
+{{- $authority := toString .uriAuthority -}}
+{{- $host := toString .host -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $authority) -}}
+{{- fail (printf "credentialProvider.additionalProviders: uriAuthority %q must be a lowercase DNS name" $authority) -}}
+{{- end -}}
+{{- if eq $authority "k8s.io" -}}
+{{- fail "credentialProvider.additionalProviders cannot replace the bundled k8s.io provider" -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.svc:[0-9]{1,5}$" $host) -}}
+{{- fail (printf "credentialProvider.additionalProviders: host %q must be <service>.<namespace>.svc:<port>" $host) -}}
+{{- end -}}
+{{- $providers = append $providers (dict "uriAuthority" $authority "host" $host) -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range $providers }}
+{{- if hasKey $seen .uriAuthority -}}
+{{- fail (printf "credentialProvider.additionalProviders names %s twice" .uriAuthority) -}}
+{{- end -}}
+{{- $_ := set $seen .uriAuthority true }}
+- uriAuthority: {{ .uriAuthority }}
+  target:
+    host: {{ .host }}
+    policies:
+      backendTLS:
+        cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+        key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+        root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- end }}
+{{- end -}}
