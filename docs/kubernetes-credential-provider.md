@@ -93,13 +93,13 @@ forwarded unchanged. No ext_proc injector is needed.
 ## Tests
 
 The Helm PR workflow installs the provider and MITM gateway from the start and
-runs `internal/e2e/suites/credentials` alongside the standard suites with real actors,
+runs `internal/e2e/suites/kagentcredentials` alongside the standard suites with real actors,
 Secrets, chart-managed RBAC, AGW, and the deployed provider. It checks
 the exact injected token, unauthenticated and missing-placeholder controls, namespace-policy
 denial and cache isolation between atespaces. The local origin serves HTTP;
 the suite uses the installed gateway configuration without modifying ConfigMaps.
 
-Include `-f internal/e2e/suites/credentials/values.yaml` in the initial Helm
+Include `-f internal/e2e/suites/kagentcredentials/values.yaml` in the initial Helm
 installation to grant the test atespace access. After deploying the standard
 MITM egress fixtures, run the suites together:
 
