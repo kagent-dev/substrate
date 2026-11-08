@@ -52,7 +52,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
       region: us-east-1
       endpoint: https://s3.example.com
       pathStyle: true
-      credentialsSecret: s3-creds # in ate-system
+      credentialsSecret: s3-creds # in the system namespace
     gcs:
       transferServiceAccount: transfer@my-project.iam.gserviceaccount.com
   microvm:
