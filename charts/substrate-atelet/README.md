@@ -41,7 +41,7 @@ Use the credentials from the substrate release's `rustfs.accessKey` and
 
 This chart reads the same value paths as the substrate chart for `atelet`,
 `objectStorePlugin.node`, `objectStorePlugin.extraEnv`, `preview`, `otel`,
-`image`, `imagePullSecrets` and `global`, so the substrate release's values
+`podMonitors`, `image`, `imagePullSecrets` and `global`, so the substrate release's values
 file can configure both releases.
 
 Object storage is set under `objectStore` instead of `rustfs` and

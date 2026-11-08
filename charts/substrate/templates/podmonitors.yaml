@@ -1,0 +1,39 @@
+{{/*
+Copyright 2026 The Agent Substrate Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- /* atelet's PodMonitor is in atelet.yaml, so substrate-atelet renders it too. */}}
+{{- if .Values.podMonitors.enabled }}
+{{- $targets := list (list "ate-api-server" "prometheus") (list "atenet-router" "gw-metrics") (list "atenet-egress" "stats") }}
+{{- /* ate-controller closes its metrics port when OTEL_METRICS_EXPORTER is none. */}}
+{{- if .Values.otel.metrics.enabled }}
+{{- $targets = append $targets (list "ate-controller" "metrics") }}
+{{- end }}
+{{- range $targets }}
+---
+apiVersion: {{ $.Values.podMonitors.apiVersion }}
+kind: PodMonitor
+metadata:
+  name: {{ include "substrate.fullname" (list (index . 0) $) }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ index . 0 }}
+  podMetricsEndpoints:
+  - port: {{ index . 1 }}
+    path: /metrics
+{{- end }}
+{{- end }}

@@ -114,6 +114,8 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateworkers, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+| `podMonitors.enabled` | `false` | Render PodMonitors that scrape `/metrics` on atelet, ate-api-server, ate-controller, atenet-router and atenet-egress; ate-controller's only while `otel.metrics.enabled`, since it serves no `/metrics` otherwise |
+| `podMonitors.apiVersion` | `monitoring.coreos.com/v1` | PodMonitor API version; `azmonitoring.coreos.com/v1` for Azure Managed Prometheus |
 
 ## Router timeouts
 

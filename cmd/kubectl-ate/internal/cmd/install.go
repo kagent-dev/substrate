@@ -49,6 +49,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
     acr: my.azurecr.io     # pull the images from it
     nodePool: agents       # run atelet only in this pool
     acrCredentialProvider: true # pull actor images from ACR
+    managedPrometheus: true # scrape metrics with Azure Managed Prometheus
   postgres:
     type: bundled          # or external
   objectStore:
@@ -130,6 +131,10 @@ a cluster that uses a service principal instead of a managed identity, that
 file holds the service principal's secret, so atelet holds it too. With
 profile aks and the option off, install and upgrade reset atelet's
 imageCredentialProvider values, unless the config's releases set them.
+
+aks.managedPrometheus creates PodMonitors so Azure Managed Prometheus scrapes
+the metrics of atelet and the control plane. Enable it on the cluster first
+with az aks update --enable-azure-monitor-metrics.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to

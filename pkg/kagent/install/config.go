@@ -205,6 +205,9 @@ type AKS struct {
 	// /etc/kubernetes/azure.json and holds the kubelet identity's registry
 	// credentials, or a service principal's secret on clusters that use one.
 	ACRCredentialProvider bool `json:"acrCredentialProvider,omitempty"`
+	// ManagedPrometheus has Azure Managed Prometheus scrape atelet and the
+	// control plane, through PodMonitors.
+	ManagedPrometheus bool `json:"managedPrometheus,omitempty"`
 }
 
 // MicroVM configures the microvm sandbox class.
@@ -397,6 +400,9 @@ func (c Config) profileValues(r release) map[string]any {
 	vals := map[string]any{}
 	if reg := c.imageRegistry(); reg != "" {
 		vals["global"] = map[string]any{"imageRegistry": reg}
+	}
+	if c.Profile == ProfileAKS && c.AKS.ManagedPrometheus && (r == ateletRelease || r == substrateRelease) {
+		vals["podMonitors"] = map[string]any{"enabled": true, "apiVersion": managedPrometheusAPI}
 	}
 	if r == ateletRelease {
 		atelet := map[string]any{}

@@ -60,6 +60,10 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				Title("Pull actor images from ACR?").
 				Description("Runs the node's acr-credential-provider in atelet. atelet reads the node's\n/etc/kubernetes/azure.json and gets every registry the kubelet identity can pull from.\nOn a service principal cluster, that file holds the service principal's secret.").
 				Value(&cfg.AKS.ACRCredentialProvider),
+			huh.NewConfirm().
+				Title("Scrape metrics with Azure Managed Prometheus?").
+				Description("Creates PodMonitors for atelet and the control plane.\nNeeds az aks update --enable-azure-monitor-metrics.").
+				Value(&cfg.AKS.ManagedPrometheus),
 		).WithHideFunc(func() bool { return !aks() }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().

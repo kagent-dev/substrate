@@ -316,6 +316,8 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "atelet.imageCredentialProviderConfig=/var/lib/kubelet/credential-provider-config.yaml",
 				"--set", "atelet.imageCredentialProviderBinDir=/var/lib/kubelet/credential-provider",
 				"--set", "atelet.imageCredentialProviderHostFiles[0]=/etc/kubernetes/azure.json",
+				"--set", "podMonitors.enabled=true",
+				"--set", "podMonitors.apiVersion=azmonitoring.coreos.com/v1",
 				"--set", "image.tag=test",
 			},
 			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[

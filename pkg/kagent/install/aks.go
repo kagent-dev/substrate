@@ -54,6 +54,12 @@ func (in *Installer) checkAKS(ctx context.Context, progress func(string)) (strin
 		}
 		summary += fmt.Sprintf(", node pool %s with %d nodes", pool, n)
 	}
+	if in.opts.AKS.ManagedPrometheus {
+		if err := in.checkManagedPrometheus(); err != nil {
+			return "", err
+		}
+		summary += ", Managed Prometheus"
+	}
 	return summary, nil
 }
 
@@ -71,6 +77,27 @@ func (in *Installer) checkNetworkPolicy(ctx context.Context) (string, error) {
 		}
 	}
 	return "", errors.New("nothing in the cluster enforces NetworkPolicy; enable it with az aks update --network-policy, or set profile: generic to skip this check")
+}
+
+// managedPrometheusAPI is the PodMonitor API version of Azure Managed
+// Prometheus.
+const managedPrometheusAPI = "azmonitoring.coreos.com/v1"
+
+// checkManagedPrometheus checks that the cluster serves the PodMonitors that
+// aks.managedPrometheus creates.
+func (in *Installer) checkManagedPrometheus() error {
+	res, err := in.kube.Discovery().ServerResourcesForGroupVersion(managedPrometheusAPI)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("while discovering %s: %w", managedPrometheusAPI, err)
+	}
+	if err == nil {
+		for _, r := range res.APIResources {
+			if r.Name == "podmonitors" {
+				return nil
+			}
+		}
+	}
+	return errors.New("aks.managedPrometheus needs Azure Managed Prometheus; enable it with az aks update --enable-azure-monitor-metrics")
 }
 
 // checkNodePool returns how many nodes aks.nodePool has.

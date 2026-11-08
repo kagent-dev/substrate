@@ -65,6 +65,32 @@ func TestCheckNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestCheckManagedPrometheus(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		resources []*metav1.APIResourceList
+		wantErr   bool
+	}{
+		{name: "not enabled", wantErr: true},
+		{name: "no podmonitors", resources: []*metav1.APIResourceList{{GroupVersion: managedPrometheusAPI, APIResources: []metav1.APIResource{{Name: "servicemonitors"}}}}, wantErr: true},
+		{name: "upstream podmonitors", resources: []*metav1.APIResourceList{{GroupVersion: "monitoring.coreos.com/v1", APIResources: []metav1.APIResource{{Name: "podmonitors"}}}}, wantErr: true},
+		{name: "enabled", resources: []*metav1.APIResourceList{{GroupVersion: managedPrometheusAPI, APIResources: []metav1.APIResource{{Name: "podmonitors"}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kc := fake.NewClientset()
+			kc.Resources = tc.resources
+			err := (&Installer{kube: kc}).checkManagedPrometheus()
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "--enable-azure-monitor-metrics") {
+					t.Errorf("checkManagedPrometheus() = %v, want an error naming --enable-azure-monitor-metrics", err)
+				}
+			} else if err != nil {
+				t.Errorf("checkManagedPrometheus() = %v", err)
+			}
+		})
+	}
+}
+
 func node(name, pool string, kvm bool) runtime.Object {
 	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{aksNodePoolLabel: pool}}}
 	if kvm {

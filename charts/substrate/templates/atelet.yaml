@@ -383,4 +383,19 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+{{- if .Values.podMonitors.enabled }}
+---
+apiVersion: {{ .Values.podMonitors.apiVersion }}
+kind: PodMonitor
+metadata:
+  name: {{ include "substrate.fullname" (list "atelet" .) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: atelet
+  podMetricsEndpoints:
+  - port: prometheus
+    path: /metrics
+{{- end }}
 {{- end }}

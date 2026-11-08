@@ -97,6 +97,13 @@ otel:
     enabled: true
     endpoint: ""
 
+# A PodMonitor that scrapes atelet's /metrics endpoint. It needs the
+# Prometheus Operator CRDs, or apiVersion azmonitoring.coreos.com/v1 for Azure
+# Managed Prometheus.
+podMonitors:
+  enabled: false
+  apiVersion: monitoring.coreos.com/v1
+
 # Values under `global` are visible to this chart and to every subchart.
 global:
   # -- Mirror registry that overrides where every image is pulled from. It wins
