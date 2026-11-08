@@ -28,8 +28,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install/tui"
+	"go.ate.dev/substrate/pkg/kagent/install"
+	"go.ate.dev/substrate/pkg/kagent/install/tui"
 )
 
 var (
