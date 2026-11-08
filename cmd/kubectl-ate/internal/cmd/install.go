@@ -65,6 +65,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
   storageClass: fast       # bundled volumes; empty for the default
+  otelEndpoint: http://otel-collector:4317 # your OTLP collector
   timeout: 10m             # each wait for workloads
   releases:                # Helm values
     all:                   # every release except substrate-crds
@@ -78,7 +79,8 @@ const configHelp = `--config takes a YAML file, or - for stdin:
     substrate:             # substrate
       values:
         otel:
-          endpoint: http://otel-collector:4317
+          traces:
+            samplingRatio: 0.1
 
 A release's own valuesFiles and values win over the ones in all.`
 
@@ -103,6 +105,9 @@ objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
 storageClass sets the StorageClass of the bundled PostgreSQL and RustFS
 volumes when they are created. On AKS, managed-csi-premium uses Premium SSDs.
+
+otelEndpoint points atelet and the control plane at an OTLP collector you
+already run, for traces, metrics and logs. Install doesn't deploy one.
 
 profile selects the kind of cluster, and --profile sets it from the command
 line. generic makes no assumptions. aks is for Azure Kubernetes Service. It

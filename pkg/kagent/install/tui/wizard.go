@@ -126,6 +126,13 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				Validate(notEmpty),
 		).WithHideFunc(func() bool { return !external() || !cfg.MicroVM.Enabled }),
 		huh.NewGroup(
+			huh.NewInput().
+				Title("OTLP endpoint").
+				Description("An OTLP collector you already run, for traces, metrics and logs, like\nhttp://otel-collector.observability:4317. Install doesn't deploy one. Leave empty for none.").
+				Value(&cfg.OTelEndpoint).
+				Validate(install.ValidateOTelEndpoint),
+		),
+		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Install Agent Substrate?").
 				Affirmative("Install").

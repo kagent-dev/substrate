@@ -96,6 +96,8 @@ releases:
 		{name: "acr without domain", in: "profile: aks\naks: {acr: myregistry}\n", wantErr: "invalid ACR"},
 		{name: "node pool", in: "profile: aks\naks: {nodePool: agents}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.NodePool = ProfileAKS, "agents" })},
 		{name: "acr credential provider", in: "profile: aks\naks: {acrCredentialProvider: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ACRCredentialProvider = ProfileAKS, true })},
+		{name: "otel endpoint", in: "otelEndpoint: http://collector:4317\n", want: withDefaults(func(c *Config) { c.OTelEndpoint = "http://collector:4317" })},
+		{name: "otel endpoint without scheme", in: "otelEndpoint: collector:4317\n", wantErr: "invalid OTLP endpoint"},
 		{name: "bad node pool", in: "profile: aks\naks: {nodePool: 'agents pool'}\n", wantErr: "invalid node pool"},
 		{name: "acr with space", in: "profile: aks\naks: {acr: 'r.azurecr.io '}\n", wantErr: "invalid ACR"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
@@ -192,21 +194,28 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	registry := func(r string) map[string]any {
 		return map[string]any{"global": map[string]any{"imageRegistry": r}}
 	}
+	otel := func(endpoint string) map[string]any {
+		return map[string]any{"endpoint": endpoint}
+	}
+	substrateValues := registry("mirror.example.com")
+	substrateValues["otel"] = otel("http://other:4317")
 	c := Config{
-		Profile: ProfileAKS,
-		AKS:     AKS{ACR: "r.azurecr.io", NodePool: "agents", ACRCredentialProvider: true},
+		Profile:      ProfileAKS,
+		AKS:          AKS{ACR: "r.azurecr.io", NodePool: "agents", ACRCredentialProvider: true},
+		OTelEndpoint: "http://collector:4317",
 		Releases: Releases{
 			Atelet:    ReleaseValues{Values: map[string]any{"atelet": map[string]any{"nodeSelector": map[string]any{"disk": "ssd"}}}},
-			Substrate: ReleaseValues{Values: registry("mirror.example.com")},
+			Substrate: ReleaseValues{Values: substrateValues},
 		},
 	}
 	got, err := c.userValues()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The release's own values win over the profile's, and only atelet gets
-	// the node pool.
+	// The release's own values win over the profile's and otelEndpoint's.
+	// Only atelet gets the node pool, and podcert gets no otel.
 	atelet := registry("r.azurecr.io")
+	atelet["otel"] = otel("http://collector:4317")
 	atelet["atelet"] = map[string]any{
 		"nodeSelector": map[string]any{
 			"kubernetes.azure.com/agentpool": "agents",
@@ -217,10 +226,12 @@ func TestConfigUserValuesProfile(t *testing.T) {
 		"imageCredentialProviderBinDir":     "/var/lib/kubelet/credential-provider",
 		"imageCredentialProviderHostFiles":  []any{"/etc/kubernetes/azure.json"},
 	}
+	substrate := registry("mirror.example.com")
+	substrate["otel"] = otel("http://other:4317")
 	want := map[string]map[string]any{
 		"substrate-podcert": registry("r.azurecr.io"),
 		"substrate-atelet":  atelet,
-		"substrate":         registry("mirror.example.com"),
+		"substrate":         substrate,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)

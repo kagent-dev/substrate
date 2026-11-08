@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -45,6 +46,10 @@ type Config struct {
 	// StorageClass is the StorageClass of the bundled PostgreSQL and RustFS
 	// volumes. Empty uses the cluster's default.
 	StorageClass string `json:"storageClass,omitempty"`
+	// OTelEndpoint is an existing OTLP collector that atelet and the control
+	// plane export traces, metrics and logs to. Empty leaves the charts' otel
+	// values as they are.
+	OTelEndpoint string `json:"otelEndpoint,omitempty"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 	// Releases holds Helm values for the releases.
@@ -298,6 +303,18 @@ func ValidateStorageClass(s string) error {
 	return nil
 }
 
+// ValidateOTelEndpoint checks that s is empty or an http or https URL.
+func ValidateOTelEndpoint(s string) error {
+	if s == "" {
+		return nil
+	}
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid OTLP endpoint %q: must be a URL like http://otel-collector:4317", s)
+	}
+	return nil
+}
+
 func (c Config) validate() error {
 	if err := validateProfile(c.Profile); err != nil {
 		return err
@@ -326,6 +343,9 @@ func (c Config) validate() error {
 		if c.Postgres.Type != PostgresBundled && c.ObjectStore.Type != ObjectStoreBundled {
 			return fmt.Errorf("storageClass needs postgres.type: %s or objectStore.type: %s", PostgresBundled, ObjectStoreBundled)
 		}
+	}
+	if err := ValidateOTelEndpoint(c.OTelEndpoint); err != nil {
+		return fmt.Errorf("otelEndpoint: %w", err)
 	}
 	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreBundled && c.MicroVM.AssetBucket == "" {
 		return errors.New("microvm with an s3 or gcs objectStore needs microvm.assetBucket")
@@ -410,8 +430,17 @@ func (r *Releases) all() []*ReleaseValues {
 	return []*ReleaseValues{&r.All, &r.PodCert, &r.Atelet, &r.Substrate}
 }
 
+// otelValues returns the Helm values that point r at OTelEndpoint.
+func (c Config) otelValues(r release) map[string]any {
+	if c.OTelEndpoint == "" || (r != ateletRelease && r != substrateRelease) {
+		return nil
+	}
+	return map[string]any{"otel": map[string]any{"endpoint": c.OTelEndpoint}}
+}
+
 // userValues returns each release's values, keyed by release name: the
-// profile's, All's files and values, then the release's own.
+// profile's and OTelEndpoint's, All's files and values, then the release's
+// own.
 func (c Config) userValues() (map[string]map[string]any, error) {
 	all, err := c.Releases.All.read()
 	if err != nil {
@@ -427,7 +456,7 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		user[r.name] = mergeValues(c.profileValues(r), all, own)
+		user[r.name] = mergeValues(c.profileValues(r), c.otelValues(r), all, own)
 	}
 	return user, nil
 }
