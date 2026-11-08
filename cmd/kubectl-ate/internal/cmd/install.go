@@ -43,8 +43,18 @@ var (
 
 const configHelp = `--config takes a YAML file, or - for stdin:
 
-  postgres: bundled        # or external
-  objectStore: rustfs      # or s3, gcs
+  postgres:
+    type: bundled          # or external
+  objectStore:
+    type: bundled          # or s3, gcs
+    bucket: my-snapshots   # for s3 or gcs
+    s3:                    # all optional
+      region: us-east-1
+      endpoint: https://s3.example.com
+      pathStyle: true
+      credentialsSecret: s3-creds # in the system namespace
+    gcs:
+      transferServiceAccount: transfer@my-project.iam.gserviceaccount.com
   microvm:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
@@ -79,10 +89,9 @@ a RustFS for snapshots. On a terminal it asks for these choices first and
 prints the matching config.
 
 For anything but evaluation, create the database connection Secrets
-described in charts/substrate/README.md and set postgres: external. To store
-snapshots in a bucket, set objectStore to s3 or gcs and set the charts'
-objectStore.*, ateApi.snapshotLocation and, for GCS,
-objectStorePlugin.transferServiceAccount values.
+described in charts/substrate/README.md and set postgres.type to external.
+To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
+objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
