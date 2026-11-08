@@ -34,6 +34,7 @@ func TestReadConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
+		profile Profile
 		want    Config
 		wantErr string
 	}{
@@ -67,7 +68,30 @@ releases:
 				c.Releases.Substrate.ValuesFiles = []string{"/cfg/db.yaml"}
 			}),
 		},
+		{
+			name: "aks",
+			in:   "profile: aks\naks: {acr: r.azurecr.io}\n",
+			want: withDefaults(func(c *Config) {
+				c.Profile, c.AKS.ACR = ProfileAKS, "r.azurecr.io"
+			}),
+		},
+		{
+			name:    "profile argument sets profile",
+			in:      "aks: {acr: r.azurecr.io}\n",
+			profile: ProfileAKS,
+			want: withDefaults(func(c *Config) {
+				c.Profile, c.AKS.ACR = ProfileAKS, "r.azurecr.io"
+			}),
+		},
+		{name: "profile argument matches", in: "profile: aks\n", profile: ProfileAKS, want: withDefaults(func(c *Config) { c.Profile = ProfileAKS })},
 		{name: "empty", in: "", wantErr: "config is empty"},
+		{name: "bad profile", in: "profile: eks\n", wantErr: "invalid profile"},
+		{name: "bad profile argument", in: "{}", profile: "eks", wantErr: "invalid profile"},
+		{name: "profile argument conflicts", in: "profile: aks\n", profile: ProfileGeneric, wantErr: "conflicts"},
+		{name: "aks needs profile", in: "aks: {acr: r.azurecr.io}\n", wantErr: "aks needs profile: aks"},
+		{name: "acr with path", in: "profile: aks\naks: {acr: r.azurecr.io/substrate}\n", wantErr: "invalid ACR"},
+		{name: "acr without domain", in: "profile: aks\naks: {acr: myregistry}\n", wantErr: "invalid ACR"},
+		{name: "acr with space", in: "profile: aks\naks: {acr: 'r.azurecr.io '}\n", wantErr: "invalid ACR"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
@@ -104,7 +128,7 @@ releases:
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ReadConfig(strings.NewReader(tc.in), "/cfg")
+			got, err := ReadConfig(strings.NewReader(tc.in), "/cfg", tc.profile)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("ReadConfig() error = %v, want it to contain %q", err, tc.wantErr)
@@ -152,6 +176,32 @@ func TestConfigUserValues(t *testing.T) {
 		"substrate-podcert": img("r", "all"),
 		"substrate-atelet":  img("r", "atelet-file"),
 		"substrate":         img("s", "substrate"),
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestConfigUserValuesProfile(t *testing.T) {
+	registry := func(r string) map[string]any {
+		return map[string]any{"global": map[string]any{"imageRegistry": r}}
+	}
+	c := Config{
+		Profile: ProfileAKS,
+		AKS:     AKS{ACR: "r.azurecr.io"},
+		Releases: Releases{
+			Substrate: ReleaseValues{Values: registry("mirror.example.com")},
+		},
+	}
+	got, err := c.userValues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The release's own values win over the profile's.
+	want := map[string]map[string]any{
+		"substrate-podcert": registry("r.azurecr.io"),
+		"substrate-atelet":  registry("r.azurecr.io"),
+		"substrate":         registry("mirror.example.com"),
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)

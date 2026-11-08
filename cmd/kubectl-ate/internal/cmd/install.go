@@ -34,6 +34,7 @@ import (
 
 var (
 	configPath    string
+	profile       string
 	chartDir      string
 	noTUI         bool
 	upgradeDryRun bool
@@ -43,6 +44,9 @@ var (
 
 const configHelp = `--config takes a YAML file, or - for stdin:
 
+  profile: aks             # or generic
+  aks:                     # for profile: aks
+    acr: my.azurecr.io     # pull the images from it
   postgres:
     type: bundled          # or external
   objectStore:
@@ -94,9 +98,19 @@ described in charts/substrate/README.md and set postgres.type to external.
 To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
 objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
+profile selects the kind of cluster, and --profile sets it from the command
+line. generic makes no assumptions. aks is for Azure Kubernetes Service:
+with aks.acr set, install pulls every image it installs, including the
+bundled PostgreSQL's, from that Azure Container Registry. Import the images
+under their usual paths with az acr import and attach the registry with
+az aks update --attach-acr first.
+
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
 the object store, and applies the microvm SandboxConfig. Upgrade restages them.
+
+Each release keeps the values an earlier install set, so turning an option off
+doesn't undo it. To undo it, set the chart values under releases.
 
 ` + configHelp,
 	Example: `  kubectl ate install -c install.yaml
@@ -112,7 +126,7 @@ the object store, and applies the microvm SandboxConfig. Upgrade restages them.
 		}
 		defer closeTerminal(tty)
 		if useTUI(cmd, tty) && configPath == "" {
-			if err := tui.Wizard(cmd.ErrOrStderr(), &opts.Config); err != nil {
+			if err := tui.Wizard(cmd.ErrOrStderr(), &opts.Config, profile == ""); err != nil {
 				return err
 			}
 		}
@@ -183,24 +197,29 @@ data.`,
 	},
 }
 
-// options reads the config and finds the terminal to read keys and answers
-// from. Without --config the config is install.DefaultConfig. The terminal is
-// nil when there is none. Close it with closeTerminal.
+// options reads the config, applies --profile, and finds the terminal to read
+// keys and answers from. Without --config the config is
+// install.DefaultConfig. The terminal is nil when there is none. Close it
+// with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
 	var opts install.Options
 	if chartDir != "" {
 		opts.Charts = os.DirFS(chartDir)
 	}
+	p := install.Profile(profile)
 	var err error
 	switch configPath {
 	case "":
 		opts.Config = install.DefaultConfig()
+		if err := opts.Config.SetProfile(p); err != nil {
+			return opts, nil, err
+		}
 	case "-":
-		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".")
+		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".", p)
 	default:
 		var f *os.File
 		if f, err = os.Open(configPath); err == nil {
-			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath))
+			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath), p)
 			f.Close()
 		}
 	}
@@ -339,6 +358,7 @@ func init() {
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
 		c.Flags().StringVarP(&configPath, "config", "c", "", "Install config file, or - for stdin")
 		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
+		c.Flags().StringVar(&profile, "profile", "", fmt.Sprintf("Kind of cluster, one of %v; the same as profile in the config", install.Profiles))
 	}
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd} {
 		c.Flags().StringVar(&chartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")

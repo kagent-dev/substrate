@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/kustomize/api/krusty"
 	kusttypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/yaml"
 
 	ateinstall "go.ate.dev/substrate/manifests/ate-install"
 	"go.ate.dev/substrate/pkg/postgressetup"
@@ -57,7 +58,7 @@ const (
 // applyPostgres applies manifests/ate-install/kind/postgres and waits for it.
 // That overlay sizes the database for evaluation rather than production.
 func (in *Installer) applyPostgres(ctx context.Context, progress func(string)) (string, error) {
-	manifest, err := postgresManifest()
+	manifest, err := postgresManifest(in.opts.imageRegistry())
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +72,9 @@ func (in *Installer) applyPostgres(ctx context.Context, progress func(string)) (
 	return "statefulset/" + postgresStatefulSet + " ready", nil
 }
 
-func postgresManifest() ([]byte, error) {
+// postgresManifest builds the bundled PostgreSQL manifest. A non-empty
+// registry replaces the image's, the way the charts' global.imageRegistry does.
+func postgresManifest(registry string) ([]byte, error) {
 	mem := filesys.MakeFsInMemory()
 	err := fs.WalkDir(ateinstall.Postgres, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -86,10 +89,25 @@ func postgresManifest() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	dir := "/kind/postgres"
+	if registry != "" {
+		k, err := yaml.Marshal(kusttypes.Kustomization{
+			TypeMeta:  kusttypes.TypeMeta{APIVersion: kusttypes.KustomizationVersion, Kind: kusttypes.KustomizationKind},
+			Resources: []string{"../kind/postgres"},
+			Images:    []kusttypes.Image{{Name: "postgres", NewName: registry + "/postgres"}},
+		})
+		if err != nil {
+			return nil, err
+		}
+		dir = "/registry"
+		if err := mem.WriteFile(dir+"/kustomization.yaml", k); err != nil {
+			return nil, err
+		}
+	}
 	opts := krusty.MakeDefaultOptions()
 	// The overlay references its base outside its own directory.
 	opts.LoadRestrictions = kusttypes.LoadRestrictionsNone
-	res, err := krusty.MakeKustomizer(opts).Run(mem, "/kind/postgres")
+	res, err := krusty.MakeKustomizer(opts).Run(mem, dir)
 	if err != nil {
 		return nil, fmt.Errorf("while building the PostgreSQL manifest: %w", err)
 	}

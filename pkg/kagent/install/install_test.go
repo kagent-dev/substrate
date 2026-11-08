@@ -185,7 +185,7 @@ func secretData(t *testing.T, kc *fake.Clientset) map[string]any {
 
 func TestApplyPostgresManifest(t *testing.T) {
 	ctx := context.Background()
-	manifest, err := postgresManifest()
+	manifest, err := postgresManifest("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +206,40 @@ func TestApplyPostgresManifest(t *testing.T) {
 	}
 	if _, err := kc.CoreV1().Services(SystemNamespace).Get(ctx, "postgres", metav1.GetOptions{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPostgresManifestRegistry(t *testing.T) {
+	ctx := context.Background()
+	images := func(registry string) []string {
+		t.Helper()
+		manifest, err := postgresManifest(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kc := fake.NewClientset()
+		if err := applyManifest(ctx, kc, manifest); err != nil {
+			t.Fatal(err)
+		}
+		ss, err := kc.AppsV1().StatefulSets(SystemNamespace).Get(ctx, postgresStatefulSet, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, c := range append(ss.Spec.Template.Spec.InitContainers, ss.Spec.Template.Spec.Containers...) {
+			out = append(out, c.Image)
+		}
+		return out
+	}
+	base, mirrored := images(""), images("r.azurecr.io")
+	if len(base) == 0 || len(base) != len(mirrored) {
+		t.Fatalf("got images %v and %v, want the same nonzero count", base, mirrored)
+	}
+	// The digest stays, so the mirror must hold the same image.
+	for i := range base {
+		if want := "r.azurecr.io/" + base[i]; mirrored[i] != want {
+			t.Errorf("image %d = %s, want %s", i, mirrored[i], want)
+		}
 	}
 }
 

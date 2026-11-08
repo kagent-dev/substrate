@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"helm.sh/helm/v4/pkg/cli/values"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +34,10 @@ import (
 // Config describes an installation. Install, upgrade and uninstall read it
 // from the file passed to --config.
 type Config struct {
+	// Profile selects the kind of cluster. Each profile but generic has its
+	// own section of options.
+	Profile     Profile     `json:"profile,omitempty"`
+	AKS         AKS         `json:"aks,omitzero"`
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
@@ -162,6 +168,28 @@ func (o ObjectStore) validate() error {
 	return nil
 }
 
+// Profile selects the kind of cluster to install on.
+type Profile string
+
+const (
+	// ProfileGeneric makes no assumptions about the cluster.
+	ProfileGeneric Profile = "generic"
+	// ProfileAKS installs on Azure Kubernetes Service.
+	ProfileAKS Profile = "aks"
+)
+
+// Profiles lists the valid profiles.
+var Profiles = []Profile{ProfileGeneric, ProfileAKS}
+
+// AKS configures the aks profile.
+type AKS struct {
+	// ACR is the login server of an Azure Container Registry to pull every
+	// image kubectl ate installs from, like myregistry.azurecr.io. The
+	// registry must hold the images under their usual paths, and the cluster
+	// must be attached to it.
+	ACR string `json:"acr,omitempty"`
+}
+
 // MicroVM configures the microvm sandbox class.
 type MicroVM struct {
 	// Enabled stages the microVM guest assets and applies the microvm
@@ -175,6 +203,7 @@ type MicroVM struct {
 // DefaultConfig is an evaluation install: bundled PostgreSQL and RustFS.
 func DefaultConfig() Config {
 	return Config{
+		Profile:     ProfileGeneric,
 		Postgres:    Postgres{Type: PostgresBundled},
 		ObjectStore: ObjectStore{Type: ObjectStoreBundled},
 		Timeout:     metav1.Duration{Duration: 10 * time.Minute},
@@ -182,8 +211,9 @@ func DefaultConfig() Config {
 }
 
 // ReadConfig decodes a config from r and fills unset fields from
-// DefaultConfig. dir resolves relative ValuesFiles.
-func ReadConfig(r io.Reader, dir string) (Config, error) {
+// DefaultConfig. dir resolves relative ValuesFiles. A non-empty profile is
+// applied with SetProfile.
+func ReadConfig(r io.Reader, dir string, profile Profile) (Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
@@ -202,10 +232,51 @@ func ReadConfig(r io.Reader, dir string) (Config, error) {
 			}
 		}
 	}
+	if err := cfg.SetProfile(profile); err != nil {
+		return Config{}, err
+	}
 	return cfg, cfg.validate()
 }
 
+// SetProfile sets the profile unless p is empty. A profile already set to
+// anything but generic must equal p.
+func (c *Config) SetProfile(p Profile) error {
+	if p == "" {
+		return nil
+	}
+	if err := validateProfile(p); err != nil {
+		return err
+	}
+	if c.Profile != ProfileGeneric && c.Profile != p {
+		return fmt.Errorf("profile %s conflicts with profile: %s in the config", p, c.Profile)
+	}
+	c.Profile = p
+	return nil
+}
+
+// ValidateACR checks that s is empty or an Azure Container Registry login
+// server.
+func ValidateACR(s string) error {
+	if s == "" {
+		return nil
+	}
+	// Without a dot, image references read the name as a Docker Hub namespace.
+	if !strings.Contains(s, ".") || strings.ContainsFunc(s, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
+		return fmt.Errorf("invalid ACR %q: must be a login server like myregistry.azurecr.io", s)
+	}
+	return nil
+}
+
 func (c Config) validate() error {
+	if err := validateProfile(c.Profile); err != nil {
+		return err
+	}
+	if c.AKS != (AKS{}) && c.Profile != ProfileAKS {
+		return fmt.Errorf("aks needs profile: %s", ProfileAKS)
+	}
+	if err := ValidateACR(c.AKS.ACR); err != nil {
+		return fmt.Errorf("aks.acr: %w", err)
+	}
 	switch c.Postgres.Type {
 	case PostgresBundled, PostgresExternal:
 	default:
@@ -223,17 +294,42 @@ func (c Config) validate() error {
 	return nil
 }
 
+func validateProfile(p Profile) error {
+	if !slices.Contains(Profiles, p) {
+		return fmt.Errorf("invalid profile %q: must be one of %v", p, Profiles)
+	}
+	return nil
+}
+
+// imageRegistry returns the registry to pull every image kubectl ate installs
+// from, or "" to keep each image's own.
+func (c Config) imageRegistry() string {
+	if c.Profile == ProfileAKS {
+		return c.AKS.ACR
+	}
+	return ""
+}
+
+// profileValues returns Helm values for every release except substrate-crds.
+func (c Config) profileValues() map[string]any {
+	if r := c.imageRegistry(); r != "" {
+		return map[string]any{"global": map[string]any{"imageRegistry": r}}
+	}
+	return nil
+}
+
 func (r *Releases) all() []*ReleaseValues {
 	return []*ReleaseValues{&r.All, &r.PodCert, &r.Atelet, &r.Substrate}
 }
 
-// userValues returns each release's values, keyed by release name: All's
-// files and values, then the release's own.
+// userValues returns each release's values, keyed by release name: the
+// profile's, All's files and values, then the release's own.
 func (c Config) userValues() (map[string]map[string]any, error) {
 	all, err := c.Releases.All.read()
 	if err != nil {
 		return nil, err
 	}
+	all = mergeValues(c.profileValues(), all)
 	user := map[string]map[string]any{}
 	for r, rv := range map[release]ReleaseValues{
 		podCertRelease:   c.Releases.PodCert,

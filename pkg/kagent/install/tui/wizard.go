@@ -27,13 +27,30 @@ import (
 )
 
 // Wizard asks for the install choices, stores them in cfg, and prints the
-// matching config to w. It returns install.ErrAborted if the user declines or
-// quits.
-func Wizard(w io.Writer, cfg *install.Config) error {
+// matching config to w. askProfile asks for the profile, otherwise cfg's is
+// kept. It returns install.ErrAborted if the user declines or quits.
+func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	store := &cfg.ObjectStore
 	external := func() bool { return store.Type != install.ObjectStoreBundled }
+	aks := func() bool { return cfg.Profile == install.ProfileAKS }
 	confirmed := true
 	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[install.Profile]().
+				Title("Cluster").
+				Options(
+					huh.NewOption("Any Kubernetes cluster", install.ProfileGeneric),
+					huh.NewOption("Azure Kubernetes Service (AKS)", install.ProfileAKS),
+				).
+				Value(&cfg.Profile),
+		).WithHideFunc(func() bool { return !askProfile }),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Azure Container Registry").
+				Description("Login server to pull Agent Substrate's images from, like myregistry.azurecr.io. It must hold\nthe images under their usual paths, and the cluster must be attached to it. Leave empty for the public registries.").
+				Value(&cfg.AKS.ACR).
+				Validate(install.ValidateACR),
+		).WithHideFunc(func() bool { return !aks() }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().
 				Title("PostgreSQL").
@@ -118,6 +135,9 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 	}
 	if !external() || !cfg.MicroVM.Enabled {
 		cfg.MicroVM.AssetBucket = ""
+	}
+	if !aks() {
+		cfg.AKS = install.AKS{}
 	}
 	hint, err := Hint(cfg)
 	if err != nil {
