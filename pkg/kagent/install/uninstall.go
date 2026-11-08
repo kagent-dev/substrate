@@ -53,11 +53,10 @@ type UninstallOptions struct {
 	Confirm func(ctx context.Context, summary string) (bool, error)
 }
 
-// Uninstall removes the releases in the reverse of install order. It keeps
-// CRDs, secrets, the database volume and the namespaces unless
-// opts.IncludeCRDs or opts.Purge say otherwise.
+// Uninstall shows UninstallSummary to opts.Confirm, then runs
+// UninstallSteps.
 func (in *Installer) Uninstall(ctx context.Context, opts UninstallOptions) error {
-	summary, err := in.inventory(ctx, opts)
+	summary, err := in.UninstallSummary(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -70,6 +69,14 @@ func (in *Installer) Uninstall(ctx context.Context, opts UninstallOptions) error
 			return ErrAborted
 		}
 	}
+	return in.Run(ctx, in.UninstallSteps(opts))
+}
+
+// UninstallSteps returns the steps that remove the releases in the reverse of
+// install order. They keep CRDs, secrets, the database volume and the
+// namespaces unless opts.IncludeCRDs or opts.Purge say otherwise. They don't
+// call opts.Confirm.
+func (in *Installer) UninstallSteps(opts UninstallOptions) []Step {
 	steps := []Step{
 		{"Delete worker pools", in.deleteWorkerPools},
 		{"Uninstall Substrate", in.uninstallStep(substrateRelease)},
@@ -86,11 +93,11 @@ func (in *Installer) Uninstall(ctx context.Context, opts UninstallOptions) error
 			Step{"Delete namespaces", in.deleteNamespaces},
 		)
 	}
-	return in.Run(ctx, steps)
+	return steps
 }
 
-// inventory describes what Uninstall will remove, for opts.Confirm.
-func (in *Installer) inventory(ctx context.Context, opts UninstallOptions) (string, error) {
+// UninstallSummary describes what UninstallSteps will remove.
+func (in *Installer) UninstallSummary(ctx context.Context, opts UninstallOptions) (string, error) {
 	var installed []string
 	for _, r := range allReleases {
 		rel, err := in.helm.get(r)
