@@ -262,7 +262,7 @@ definition so the fallback cannot drift between pods.
 
 {{/*
 The egress gateway's credentialProviders: the bundled k8s.io provider when
-credentialProvider.enabled, then credentialProvider.extraProviders. Renders
+credentialProvider.enabled, then atenetEgress.extraCredentialProviders. Renders
 nothing when there are none, so every injection fails closed.
 */}}
 {{- define "substrate.credentialProviders" -}}
@@ -271,18 +271,18 @@ nothing when there are none, so every injection fails closed.
 {{- $providers = append $providers (dict "name" "k8s.io" "address" (printf "%s.%s.svc:50051" (include "substrate.fullname" (list "k8s-credential-provider" .)) .Release.Namespace)) -}}
 {{- end -}}
 {{- $seen := dict -}}
-{{- range .Values.credentialProvider.extraProviders -}}
+{{- range .Values.atenetEgress.extraCredentialProviders -}}
 {{- if not .name -}}
-{{- fail "credentialProvider.extraProviders: each provider needs a name" -}}
+{{- fail "atenetEgress.extraCredentialProviders: each provider needs a name" -}}
 {{- end -}}
 {{- if eq .name "k8s.io" -}}
-{{- fail "credentialProvider.extraProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead" -}}
+{{- fail "atenetEgress.extraCredentialProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead" -}}
 {{- end -}}
 {{- if hasKey $seen .name -}}
-{{- fail (printf "credentialProvider.extraProviders: duplicate name %q" .name) -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: duplicate name %q" .name) -}}
 {{- end -}}
 {{- if not (regexMatch "^[^:]+:[0-9]+$" (.address | default "")) -}}
-{{- fail (printf "credentialProvider.extraProviders: %s needs an address as host:port" .name) -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: %s needs an address as host:port" .name) -}}
 {{- end -}}
 {{- $_ := set $seen .name true -}}
 {{- $providers = append $providers (dict "name" .name "address" .address) -}}

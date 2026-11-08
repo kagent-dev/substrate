@@ -550,7 +550,7 @@ tests:
   - k8s-credential-provider.yaml
   set:
     credentialProvider.enabled: false
-    credentialProvider.extraProviders:
+    atenetEgress.extraCredentialProviders:
     - name: vault.example.com
       address: vault-provider.vault.svc:50051
   asserts:
@@ -585,18 +585,18 @@ tests:
 - it: rejects an extra provider named k8s.io
   template: atenet-egress.yaml
   set:
-    credentialProvider.extraProviders:
+    atenetEgress.extraCredentialProviders:
     - name: k8s.io
       address: a.b.svc:50051
   asserts:
   - failedTemplate:
-      errorMessage: "credentialProvider.extraProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead"
+      errorMessage: "atenetEgress.extraCredentialProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead"
 - it: rejects an extra provider without a host:port address
   template: atenet-egress.yaml
   set:
-    credentialProvider.extraProviders:
+    atenetEgress.extraCredentialProviders:
     - name: vault.example.com
       address: vault-provider.vault.svc
   asserts:
   - failedTemplate:
-      errorMessage: "credentialProvider.extraProviders: vault.example.com needs an address as host:port"
+      errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs an address as host:port"
