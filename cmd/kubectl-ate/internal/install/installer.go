@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"time"
 
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -68,8 +67,8 @@ type Options struct {
 	Config
 	Kubeconfig string
 	Context    string
-	// ChartDir loads charts from a directory instead of the embedded copies.
-	ChartDir string
+	// Charts holds a directory per chart. Nil uses the embedded charts.
+	Charts fs.FS
 	// HelmLog receives Helm's debug log. Nil discards it.
 	HelmLog io.Writer
 	// DryRun makes Upgrade write manifest diffs to Out instead of applying.
@@ -119,9 +118,9 @@ func New(opts Options, r Reporter) (*Installer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("while creating Kubernetes client: %w", err)
 	}
-	charts := fs.FS(chartsfs.FS)
-	if opts.ChartDir != "" {
-		charts = os.DirFS(opts.ChartDir)
+	charts := opts.Charts
+	if charts == nil {
+		charts = chartsfs.FS
 	}
 	user, err := opts.userValues()
 	if err != nil {

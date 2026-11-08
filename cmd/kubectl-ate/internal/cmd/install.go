@@ -179,7 +179,10 @@ data.`,
 // from. Without --config the config is install.DefaultConfig. The terminal is
 // nil when there is none. Close it with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
-	opts := install.Options{ChartDir: chartDir}
+	var opts install.Options
+	if chartDir != "" {
+		opts.Charts = os.DirFS(chartDir)
+	}
 	var err error
 	switch configPath {
 	case "":
