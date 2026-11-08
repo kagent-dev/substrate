@@ -32,7 +32,7 @@
 # (virtio-fs RO lower + guest-tmpfs upper), so it fetches virtiofsd too.
 #
 # cmd/ate-setup/internal/steps/microvm.go and
-# cmd/kubectl-ate/internal/microvmassets read the per-arch sha256 values
+# pkg/kagent/microvmassets read the per-arch sha256 values
 # below to verify the assembled binaries and stages them at these digest-keyed
 # paths so newer releases do not overwrite kept versions.
 

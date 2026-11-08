@@ -23,7 +23,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"sigs.k8s.io/yaml"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
+	"go.ate.dev/substrate/pkg/kagent/install"
 )
 
 // Wizard asks for the install choices, stores them in cfg, and prints the

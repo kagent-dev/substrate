@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/yaml"
 
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/microvmassets"
 	"go.ate.dev/substrate/internal/portforward"
 	ateinstall "go.ate.dev/substrate/manifests/ate-install"
+	"go.ate.dev/substrate/pkg/kagent/microvmassets"
 	"go.ate.dev/substrate/pkg/objectstorage"
 )
 

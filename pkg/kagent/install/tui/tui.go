@@ -25,7 +25,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
+	"go.ate.dev/substrate/pkg/kagent/install"
 )
 
 // progressLines is how many of a running step's latest progress lines show.

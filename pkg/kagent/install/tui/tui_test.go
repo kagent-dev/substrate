@@ -22,7 +22,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
+	"go.ate.dev/substrate/pkg/kagent/install"
 )
 
 func TestView(t *testing.T) {
