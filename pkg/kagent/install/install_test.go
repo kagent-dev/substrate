@@ -310,6 +310,28 @@ func TestSubstrateValuesStorageClass(t *testing.T) {
 	}
 }
 
+func TestCheckPodCertificateAPI(t *testing.T) {
+	pcr := []metav1.APIResource{{Name: "podcertificaterequests"}}
+	for _, tc := range []struct {
+		name      string
+		resources []*metav1.APIResourceList
+		wantErr   bool
+	}{
+		{name: "v1", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1", APIResources: pcr}}},
+		{name: "v1beta1", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1beta1", APIResources: pcr}}},
+		{name: "v1 without podcertificaterequests", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1", APIResources: []metav1.APIResource{{Name: "clustertrustbundles"}}}}, wantErr: true},
+		{name: "neither", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kc := fake.NewClientset()
+			kc.Resources = tc.resources
+			if err := checkPodCertificateAPI(&Installer{kube: kc}); (err != nil) != tc.wantErr {
+				t.Errorf("checkPodCertificateAPI() = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestCheckExternalObjectStore(t *testing.T) {
 	s3 := ObjectStore{Type: ObjectStoreS3, Bucket: "b"}
 	gcs := ObjectStore{Type: ObjectStoreGCS, Bucket: "b", GCS: GCSObjectStore{TransferServiceAccount: "sa@p.iam.gserviceaccount.com"}}
