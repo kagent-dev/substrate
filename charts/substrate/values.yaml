@@ -47,6 +47,8 @@ postgres:
 rustfs:
   enabled: true
   storageSize: 1Gi
+  # StorageClass of the data volume. Empty uses the cluster's default.
+  storageClassName: ""
   bucket: ate-snapshots
   accessKey: rustfsadmin
   secretKey: rustfsadmin

@@ -28,6 +28,7 @@ import (
 
 	"helm.sh/helm/v4/pkg/cli/values"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
 
@@ -41,6 +42,9 @@ type Config struct {
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
+	// StorageClass is the StorageClass of the bundled PostgreSQL and RustFS
+	// volumes. Empty uses the cluster's default.
+	StorageClass string `json:"storageClass,omitempty"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 	// Releases holds Helm values for the releases.
@@ -267,6 +271,17 @@ func ValidateACR(s string) error {
 	return nil
 }
 
+// ValidateStorageClass checks that s is empty or a valid StorageClass name.
+func ValidateStorageClass(s string) error {
+	if s == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(s); len(errs) > 0 {
+		return fmt.Errorf("invalid StorageClass name %q: %s", s, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 func (c Config) validate() error {
 	if err := validateProfile(c.Profile); err != nil {
 		return err
@@ -284,6 +299,14 @@ func (c Config) validate() error {
 	}
 	if err := c.ObjectStore.validate(); err != nil {
 		return err
+	}
+	if c.StorageClass != "" {
+		if err := ValidateStorageClass(c.StorageClass); err != nil {
+			return fmt.Errorf("storageClass: %w", err)
+		}
+		if c.Postgres.Type != PostgresBundled && c.ObjectStore.Type != ObjectStoreBundled {
+			return fmt.Errorf("storageClass needs postgres.type: %s or objectStore.type: %s", PostgresBundled, ObjectStoreBundled)
+		}
 	}
 	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreBundled && c.MicroVM.AssetBucket == "" {
 		return errors.New("microvm with an s3 or gcs objectStore needs microvm.assetBucket")

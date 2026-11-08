@@ -25,9 +25,11 @@ import (
 	"testing"
 
 	chart "helm.sh/helm/v4/pkg/chart/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 
 	chartsfs "go.ate.dev/substrate/charts"
 )
@@ -185,7 +187,7 @@ func secretData(t *testing.T, kc *fake.Clientset) map[string]any {
 
 func TestApplyPostgresManifest(t *testing.T) {
 	ctx := context.Background()
-	manifest, err := postgresManifest("")
+	manifest, err := postgresManifest(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,29 +211,35 @@ func TestApplyPostgresManifest(t *testing.T) {
 	}
 }
 
-func TestPostgresManifestRegistry(t *testing.T) {
+func postgresStatefulSetFor(t *testing.T, c Config) *appsv1.StatefulSet {
+	t.Helper()
 	ctx := context.Background()
-	images := func(registry string) []string {
+	manifest, err := postgresManifest(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kc := fake.NewClientset()
+	if err := applyManifest(ctx, kc, manifest); err != nil {
+		t.Fatal(err)
+	}
+	ss, err := kc.AppsV1().StatefulSets(SystemNamespace).Get(ctx, postgresStatefulSet, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ss
+}
+
+func TestPostgresManifestRegistry(t *testing.T) {
+	images := func(c Config) []string {
 		t.Helper()
-		manifest, err := postgresManifest(registry)
-		if err != nil {
-			t.Fatal(err)
-		}
-		kc := fake.NewClientset()
-		if err := applyManifest(ctx, kc, manifest); err != nil {
-			t.Fatal(err)
-		}
-		ss, err := kc.AppsV1().StatefulSets(SystemNamespace).Get(ctx, postgresStatefulSet, metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		ss := postgresStatefulSetFor(t, c)
 		var out []string
 		for _, c := range append(ss.Spec.Template.Spec.InitContainers, ss.Spec.Template.Spec.Containers...) {
 			out = append(out, c.Image)
 		}
 		return out
 	}
-	base, mirrored := images(""), images("r.azurecr.io")
+	base, mirrored := images(Config{}), images(Config{Profile: ProfileAKS, AKS: AKS{ACR: "r.azurecr.io"}})
 	if len(base) == 0 || len(base) != len(mirrored) {
 		t.Fatalf("got images %v and %v, want the same nonzero count", base, mirrored)
 	}
@@ -240,6 +248,65 @@ func TestPostgresManifestRegistry(t *testing.T) {
 		if want := "r.azurecr.io/" + base[i]; mirrored[i] != want {
 			t.Errorf("image %d = %s, want %s", i, mirrored[i], want)
 		}
+	}
+}
+
+func TestPostgresManifestStorageClass(t *testing.T) {
+	for _, sc := range []string{"", "managed-csi-premium"} {
+		ss := postgresStatefulSetFor(t, Config{StorageClass: sc})
+		vct := ss.Spec.VolumeClaimTemplates[0].Spec
+		if got := ptr.Deref(vct.StorageClassName, ""); got != sc {
+			t.Errorf("StorageClass %q: storageClassName = %q", sc, got)
+		}
+		// The overlay keeps the kind overlay's patches.
+		if got := vct.Resources.Requests.Storage().String(); got != "1Gi" {
+			t.Errorf("StorageClass %q: volume size = %s, want 1Gi", sc, got)
+		}
+	}
+}
+
+func TestPostgresStorageClass(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		existing *string
+		want     string
+	}{
+		{name: "new install uses the config's", want: "managed-csi-premium"},
+		{name: "existing keeps the default", existing: ptr.To(""), want: ""},
+		{name: "existing keeps its own", existing: ptr.To("managed-csi"), want: "managed-csi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kc := fake.NewClientset()
+			if tc.existing != nil {
+				ss := postgresStatefulSetFor(t, Config{StorageClass: *tc.existing})
+				if _, err := kc.AppsV1().StatefulSets(SystemNamespace).Create(t.Context(), ss, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := postgresStorageClass(t.Context(), kc, "managed-csi-premium")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("postgresStorageClass() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSubstrateValuesStorageClass(t *testing.T) {
+	kc := fake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: rustfsCredentialsSecret},
+		Data:       map[string][]byte{"AWS_ACCESS_KEY_ID": []byte("a"), "AWS_SECRET_ACCESS_KEY": []byte("s")},
+	})
+	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreBundled}, Postgres: Postgres{Type: PostgresBundled}, StorageClass: "fast"}}}
+	defaults, _, err := in.substrateValues(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"rustfs": map[string]any{"storageClassName": "fast"}}
+	if !reflect.DeepEqual(defaults, want) {
+		t.Errorf("substrate defaults = %v, want %v", defaults, want)
 	}
 }
 

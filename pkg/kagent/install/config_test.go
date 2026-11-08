@@ -83,6 +83,9 @@ releases:
 				c.Profile, c.AKS.ACR = ProfileAKS, "r.azurecr.io"
 			}),
 		},
+		{name: "storage class", in: "storageClass: managed-csi-premium\n", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
+		{name: "bad storage class", in: "storageClass: Premium_SSD\n", wantErr: "invalid StorageClass name"},
+		{name: "storage class without bundled volumes", in: "postgres: external\nobjectStore: s3\nstorageClass: fast\n", wantErr: "storageClass needs"},
 		{name: "profile argument matches", in: "profile: aks\n", profile: ProfileAKS, want: withDefaults(func(c *Config) { c.Profile = ProfileAKS })},
 		{name: "empty", in: "", wantErr: "config is empty"},
 		{name: "bad profile", in: "profile: eks\n", wantErr: "invalid profile"},

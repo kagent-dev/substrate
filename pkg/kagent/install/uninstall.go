@@ -224,7 +224,7 @@ func (in *Installer) uninstallStep(r release) func(context.Context, func(string)
 // removePostgres deletes the bundled PostgreSQL objects that install applied,
 // identified by kubectl ate's field manager. Its volume stays until --purge.
 func (in *Installer) removePostgres(ctx context.Context, _ func(string)) (string, error) {
-	manifest, err := postgresManifest("")
+	manifest, err := postgresManifest(Config{})
 	if err != nil {
 		return "", err
 	}

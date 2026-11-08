@@ -62,6 +62,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
   microvm:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
+  storageClass: fast       # bundled volumes; empty for the default
   timeout: 10m             # each wait for workloads
   releases:                # Helm values
     all:                   # every release except substrate-crds
@@ -97,6 +98,9 @@ For anything but evaluation, create the database connection Secrets
 described in charts/substrate/README.md and set postgres.type to external.
 To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
 objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
+
+storageClass sets the StorageClass of the bundled PostgreSQL and RustFS
+volumes when they are created. On AKS, managed-csi-premium uses Premium SSDs.
 
 profile selects the kind of cluster, and --profile sets it from the command
 line. generic makes no assumptions. aks is for Azure Kubernetes Service. It

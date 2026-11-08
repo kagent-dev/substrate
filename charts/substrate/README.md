@@ -89,6 +89,7 @@ See `values.yaml` for the full set; the important keys:
 | `atenetEgress.extraCredentialProviders` | `[]` | Credential providers you deploy, added after the bundled `k8s.io` provider, each `{name, address}`. `name` is the host of the `ate-secret://` URIs it serves; `address` is the `host:port` the egress gateway dials over mTLS. Its serving certificate must chain to the servicedns CA. See [egress credential injection](../../docs/guides/egress-credential-injection.md#the-plugin-api) |
 | `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
+| `rustfs.storageClassName` | `""` | StorageClass of the RustFS data volume; empty uses the cluster's default |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.enabled` | `true` | Deprecated. Set to `false` and install atelet with the [substrate-atelet](../substrate-atelet/README.md) chart |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |

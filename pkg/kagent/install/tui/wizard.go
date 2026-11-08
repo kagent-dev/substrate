@@ -33,6 +33,7 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	store := &cfg.ObjectStore
 	external := func() bool { return store.Type != install.ObjectStoreBundled }
 	aks := func() bool { return cfg.Profile == install.ProfileAKS }
+	bundledVolumes := func() bool { return cfg.Postgres.Type == install.PostgresBundled || !external() }
 	confirmed := true
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -101,6 +102,15 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 		).WithHideFunc(func() bool { return store.Type != install.ObjectStoreGCS }),
 		huh.NewGroup(
 			huh.NewInput().
+				Title("StorageClass").
+				Description("For the bundled volumes. Leave empty for the cluster's default.").
+				PlaceholderFunc(func() string { return strings.Join(storageClassSuggestions(cfg.Profile), ", ") }, &cfg.Profile).
+				SuggestionsFunc(func() []string { return storageClassSuggestions(cfg.Profile) }, &cfg.Profile).
+				Value(&cfg.StorageClass).
+				Validate(install.ValidateStorageClass),
+		).WithHideFunc(func() bool { return !bundledVolumes() }),
+		huh.NewGroup(
+			huh.NewInput().
 				Title("MicroVM asset bucket").
 				Description("atelet must be able to read it.").
 				Value(&cfg.MicroVM.AssetBucket).
@@ -136,6 +146,9 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	if !external() || !cfg.MicroVM.Enabled {
 		cfg.MicroVM.AssetBucket = ""
 	}
+	if !bundledVolumes() {
+		cfg.StorageClass = ""
+	}
 	if !aks() {
 		cfg.AKS = install.AKS{}
 	}
@@ -154,6 +167,14 @@ func Hint(cfg *install.Config) (string, error) {
 		return "", err
 	}
 	return "To skip these questions next time, save this as install.yaml and run kubectl ate install -c install.yaml:\n\n" + string(data) + "\n", nil
+}
+
+// storageClassSuggestions lists the StorageClasses to suggest on profile p.
+func storageClassSuggestions(p install.Profile) []string {
+	if p == install.ProfileAKS {
+		return []string{"managed-csi-premium"}
+	}
+	return nil
 }
 
 func notEmpty(s string) error {
