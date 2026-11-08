@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -43,10 +44,18 @@ kind: CredentialProviderConfig
 providers: []`
 	for _, tc := range []struct {
 		name, config, configYAML, binDir string
+		hostFiles                        []string
 		wantError                        string
 	}{
 		{name: "public registries"},
 		{name: "node provider", config: "/etc/srv/kubernetes/cri_auth_config.yaml", binDir: "/home/kubernetes/bin"},
+		{
+			name:      "node provider with host files",
+			config:    "/var/lib/kubelet/credential-provider-config.yaml",
+			binDir:    "/var/lib/kubelet/credential-provider",
+			hostFiles: []string{"/etc/kubernetes/azure.json", "/etc/provider/ca.pem"},
+		},
+		{name: "host files without config", hostFiles: []string{"/etc/kubernetes/azure.json"}, wantError: "imageCredentialProviderHostFiles needs"},
 		{name: "chart provided config", configYAML: providerConfig, binDir: "/home/kubernetes/bin"},
 		{name: "missing bin directory", config: "/etc/provider.yaml", wantError: "must be set together"},
 		{name: "chart provided config without bin directory", configYAML: providerConfig, wantError: "must be set together"},
@@ -60,11 +69,16 @@ providers: []`
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			hostFiles, err := json.Marshal(append([]string{}, tc.hostFiles...))
+			if err != nil {
+				t.Fatal(err)
+			}
 			out, err := exec.CommandContext(t.Context(), "helm", "template", "substrate", "../../charts/substrate",
 				"--show-only", "templates/atelet.yaml",
 				"--set-string", "atelet.imageCredentialProviderConfig="+tc.config,
 				"--set-string", "atelet.imageCredentialProviderConfigYAML="+tc.configYAML,
-				"--set-string", "atelet.imageCredentialProviderBinDir="+tc.binDir).CombinedOutput()
+				"--set-string", "atelet.imageCredentialProviderBinDir="+tc.binDir,
+				"--set-json", "atelet.imageCredentialProviderHostFiles="+string(hostFiles)).CombinedOutput()
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(string(out), tc.wantError) {
 					t.Fatalf("render rejected provider config with %q: %v\n%s", tc.wantError, err, out)
@@ -140,6 +154,20 @@ providers: []`
 						t.Errorf("%s must mount the configured host path at the flag's path", binding.name)
 					}
 				}
+			}
+			var gotFiles []string
+			for _, m := range container.VolumeMounts {
+				if !strings.HasPrefix(m.Name, "image-credential-provider-file-") {
+					continue
+				}
+				i := slices.IndexFunc(pod.Volumes, func(v corev1.Volume) bool { return v.Name == m.Name })
+				if i < 0 || pod.Volumes[i].HostPath == nil || pod.Volumes[i].HostPath.Path != m.MountPath || !m.ReadOnly {
+					t.Errorf("%s must mount host file %s read-only at the same path", m.Name, m.MountPath)
+				}
+				gotFiles = append(gotFiles, m.MountPath)
+			}
+			if !slices.Equal(gotFiles, tc.hostFiles) {
+				t.Errorf("atelet mounts host files %v, want %v", gotFiles, tc.hostFiles)
 			}
 		})
 	}
@@ -285,6 +313,9 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "preview[0]=ALL",
 				"--set", "otel.endpoint=http://collector:4317",
 				"--set", "atelet.nodeSelector.pool=agents",
+				"--set", "atelet.imageCredentialProviderConfig=/var/lib/kubelet/credential-provider-config.yaml",
+				"--set", "atelet.imageCredentialProviderBinDir=/var/lib/kubelet/credential-provider",
+				"--set", "atelet.imageCredentialProviderHostFiles[0]=/etc/kubernetes/azure.json",
 				"--set", "image.tag=test",
 			},
 			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[

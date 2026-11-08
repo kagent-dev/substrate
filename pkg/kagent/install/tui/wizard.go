@@ -56,6 +56,10 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				Description("Runs atelet only in this pool. WorkerPools then need the nodeSelector\nkubernetes.azure.com/agentpool set to it. Leave empty for every node.").
 				Value(&cfg.AKS.NodePool).
 				Validate(install.ValidateNodePool),
+			huh.NewConfirm().
+				Title("Pull actor images from ACR?").
+				Description("Runs the node's acr-credential-provider in atelet. atelet reads the node's\n/etc/kubernetes/azure.json and gets every registry the kubelet identity can pull from.\nOn a service principal cluster, that file holds the service principal's secret.").
+				Value(&cfg.AKS.ACRCredentialProvider),
 		).WithHideFunc(func() bool { return !aks() }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().

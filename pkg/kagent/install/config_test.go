@@ -95,6 +95,7 @@ releases:
 		{name: "acr with path", in: "profile: aks\naks: {acr: r.azurecr.io/substrate}\n", wantErr: "invalid ACR"},
 		{name: "acr without domain", in: "profile: aks\naks: {acr: myregistry}\n", wantErr: "invalid ACR"},
 		{name: "node pool", in: "profile: aks\naks: {nodePool: agents}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.NodePool = ProfileAKS, "agents" })},
+		{name: "acr credential provider", in: "profile: aks\naks: {acrCredentialProvider: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ACRCredentialProvider = ProfileAKS, true })},
 		{name: "bad node pool", in: "profile: aks\naks: {nodePool: 'agents pool'}\n", wantErr: "invalid node pool"},
 		{name: "acr with space", in: "profile: aks\naks: {acr: 'r.azurecr.io '}\n", wantErr: "invalid ACR"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
@@ -193,7 +194,7 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	}
 	c := Config{
 		Profile: ProfileAKS,
-		AKS:     AKS{ACR: "r.azurecr.io", NodePool: "agents"},
+		AKS:     AKS{ACR: "r.azurecr.io", NodePool: "agents", ACRCredentialProvider: true},
 		Releases: Releases{
 			Atelet:    ReleaseValues{Values: map[string]any{"atelet": map[string]any{"nodeSelector": map[string]any{"disk": "ssd"}}}},
 			Substrate: ReleaseValues{Values: registry("mirror.example.com")},
@@ -206,10 +207,16 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	// The release's own values win over the profile's, and only atelet gets
 	// the node pool.
 	atelet := registry("r.azurecr.io")
-	atelet["atelet"] = map[string]any{"nodeSelector": map[string]any{
-		"kubernetes.azure.com/agentpool": "agents",
-		"disk":                           "ssd",
-	}}
+	atelet["atelet"] = map[string]any{
+		"nodeSelector": map[string]any{
+			"kubernetes.azure.com/agentpool": "agents",
+			"disk":                           "ssd",
+		},
+		"imageCredentialProviderConfig":     "/var/lib/kubelet/credential-provider-config.yaml",
+		"imageCredentialProviderConfigYAML": "",
+		"imageCredentialProviderBinDir":     "/var/lib/kubelet/credential-provider",
+		"imageCredentialProviderHostFiles":  []any{"/etc/kubernetes/azure.json"},
+	}
 	want := map[string]map[string]any{
 		"substrate-podcert": registry("r.azurecr.io"),
 		"substrate-atelet":  atelet,
@@ -217,5 +224,54 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestConfigUserValuesACRCredentialProvider(t *testing.T) {
+	provider := func(config, binDir string, hostFiles ...any) map[string]any {
+		if hostFiles == nil {
+			hostFiles = []any{}
+		}
+		return map[string]any{
+			"imageCredentialProviderConfig":     config,
+			"imageCredentialProviderConfigYAML": "",
+			"imageCredentialProviderBinDir":     binDir,
+			"imageCredentialProviderHostFiles":  hostFiles,
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		c    Config
+		want map[string]any
+	}{
+		{name: "generic leaves it alone", c: Config{Profile: ProfileGeneric}},
+		{
+			name: "aks on",
+			c:    Config{Profile: ProfileAKS, AKS: AKS{ACRCredentialProvider: true}},
+			want: provider("/var/lib/kubelet/credential-provider-config.yaml", "/var/lib/kubelet/credential-provider", "/etc/kubernetes/azure.json"),
+		},
+		{
+			name: "aks off resets it",
+			c:    Config{Profile: ProfileAKS},
+			want: provider("", ""),
+		},
+		{
+			name: "aks off keeps the release's own",
+			c: Config{Profile: ProfileAKS, Releases: Releases{Atelet: ReleaseValues{Values: map[string]any{
+				"atelet": provider("/etc/provider.yaml", "/opt/provider"),
+			}}}},
+			want: provider("/etc/provider.yaml", "/opt/provider"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.c.userValues()
+			if err != nil {
+				t.Fatal(err)
+			}
+			atelet, _ := got[ateletRelease.name]["atelet"].(map[string]any)
+			if diff := cmp.Diff(tc.want, atelet); diff != "" {
+				t.Errorf("atelet values mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

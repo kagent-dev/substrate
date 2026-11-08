@@ -48,6 +48,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
   aks:                     # for profile: aks
     acr: my.azurecr.io     # pull the images from it
     nodePool: agents       # run atelet only in this pool
+    acrCredentialProvider: true # pull actor images from ACR
   postgres:
     type: bundled          # or external
   objectStore:
@@ -115,6 +116,15 @@ aks.nodePool runs atelet only on the nodes of that pool. Give each WorkerPool
 the nodeSelector kubernetes.azure.com/agentpool with the pool's name. With
 microvm.enabled, install checks that atelet's nodes have /dev/kvm, which needs
 a generation 2 VM size with nested virtualization.
+
+aks.acrCredentialProvider lets atelet pull actor images from Azure Container
+Registry. atelet runs the node's acr-credential-provider, which reads the
+node's /etc/kubernetes/azure.json, so atelet can pull from every registry the
+kubelet identity can. Grant that identity AcrPull, or attach the registry. On
+a cluster that uses a service principal instead of a managed identity, that
+file holds the service principal's secret, so atelet holds it too. With
+profile aks and the option off, install and upgrade reset atelet's
+imageCredentialProvider values, unless the config's releases set them.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to

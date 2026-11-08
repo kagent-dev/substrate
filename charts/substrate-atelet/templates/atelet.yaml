@@ -21,6 +21,9 @@ limitations under the License.
 {{- if ne (empty $credentialProviderConfig) (empty .Values.atelet.imageCredentialProviderBinDir) }}
 {{- fail "atelet.imageCredentialProviderConfig (or atelet.imageCredentialProviderConfigYAML) and atelet.imageCredentialProviderBinDir must be set together" }}
 {{- end }}
+{{- if and .Values.atelet.imageCredentialProviderHostFiles (not $credentialProviderConfig) }}
+{{- fail "atelet.imageCredentialProviderHostFiles needs atelet.imageCredentialProviderConfig or atelet.imageCredentialProviderConfigYAML" }}
+{{- end }}
 
 # atelet
 apiVersion: v1
@@ -308,6 +311,11 @@ spec:
           subPath: config.yaml
 {{- end }}
           readOnly: true
+{{- range $i, $path := .Values.atelet.imageCredentialProviderHostFiles }}
+        - name: image-credential-provider-file-{{ $i }}
+          mountPath: {{ $path | quote }}
+          readOnly: true
+{{- end }}
 {{- end }}
       volumes:
       - name: objectstore-plugin
@@ -343,6 +351,12 @@ spec:
 {{- else }}
         hostPath:
           path: {{ .Values.atelet.imageCredentialProviderConfig | quote }}
+          type: File
+{{- end }}
+{{- range $i, $path := .Values.atelet.imageCredentialProviderHostFiles }}
+      - name: image-credential-provider-file-{{ $i }}
+        hostPath:
+          path: {{ $path | quote }}
           type: File
 {{- end }}
 {{- end }}

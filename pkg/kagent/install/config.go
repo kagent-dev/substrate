@@ -195,6 +195,11 @@ type AKS struct {
 	// NodePool restricts atelet to the nodes of one node pool. WorkerPools
 	// then need the same node selector.
 	NodePool string `json:"nodePool,omitempty"`
+	// ACRCredentialProvider lets atelet pull actor images from ACR with the
+	// node's acr-credential-provider. atelet then reads the node's
+	// /etc/kubernetes/azure.json and holds the kubelet identity's registry
+	// credentials, or a service principal's secret on clusters that use one.
+	ACRCredentialProvider bool `json:"acrCredentialProvider,omitempty"`
 }
 
 // MicroVM configures the microvm sandbox class.
@@ -350,6 +355,14 @@ func (c Config) imageRegistry() string {
 // aksNodePoolLabel is the node label AKS sets to the node's pool name.
 const aksNodePoolLabel = "kubernetes.azure.com/agentpool"
 
+// The kubelet's credential provider files on AKS nodes. The provider reads
+// the kubelet identity from aksCloudConfig.
+const (
+	aksCredentialProviderConfig = "/var/lib/kubelet/credential-provider-config.yaml"
+	aksCredentialProviderBinDir = "/var/lib/kubelet/credential-provider"
+	aksCloudConfig              = "/etc/kubernetes/azure.json"
+)
+
 // nodeSelector returns the node selector atelet runs with, or nil for every
 // node.
 func (c Config) nodeSelector() map[string]string {
@@ -365,12 +378,30 @@ func (c Config) profileValues(r release) map[string]any {
 	if reg := c.imageRegistry(); reg != "" {
 		vals["global"] = map[string]any{"imageRegistry": reg}
 	}
-	if sel := c.nodeSelector(); sel != nil && r == ateletRelease {
-		nodeSelector := map[string]any{}
-		for k, v := range sel {
-			nodeSelector[k] = v
+	if r == ateletRelease {
+		atelet := map[string]any{}
+		if sel := c.nodeSelector(); sel != nil {
+			nodeSelector := map[string]any{}
+			for k, v := range sel {
+				nodeSelector[k] = v
+			}
+			atelet["nodeSelector"] = nodeSelector
 		}
-		vals["atelet"] = map[string]any{"nodeSelector": nodeSelector}
+		if c.Profile == ProfileAKS {
+			// Off resets the chart defaults, so atelet loses the kubelet
+			// identity's registry access that an earlier install gave it.
+			config, binDir, hostFiles := "", "", []any{}
+			if c.AKS.ACRCredentialProvider {
+				config, binDir, hostFiles = aksCredentialProviderConfig, aksCredentialProviderBinDir, []any{aksCloudConfig}
+			}
+			atelet["imageCredentialProviderConfig"] = config
+			atelet["imageCredentialProviderConfigYAML"] = ""
+			atelet["imageCredentialProviderBinDir"] = binDir
+			atelet["imageCredentialProviderHostFiles"] = hostFiles
+		}
+		if len(atelet) > 0 {
+			vals["atelet"] = atelet
+		}
 	}
 	return vals
 }
