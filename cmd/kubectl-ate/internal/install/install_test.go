@@ -17,7 +17,9 @@ package install
 import (
 	"bytes"
 	"context"
+	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -332,5 +334,30 @@ func TestExternalStoreValuesS3(t *testing.T) {
 	}
 	if !reflect.DeepEqual(substrate, wantSubstrate) {
 		t.Errorf("substrate values = %v, want %v", substrate, wantSubstrate)
+	}
+}
+
+func TestInstallStepsDatabase(t *testing.T) {
+	tests := []struct {
+		postgres  PostgresType
+		wantCheck bool
+	}{
+		{PostgresBundled, false},
+		{PostgresExternal, true},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.postgres), func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Postgres.Type = tc.postgres
+			in := &Installer{opts: Options{Config: cfg}, report: PlainReporter{W: io.Discard}}
+			steps, err := in.InstallSteps()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := slices.ContainsFunc(steps, func(s Step) bool { return s.Name == StepCheckDatabase })
+			if got != tc.wantCheck {
+				t.Errorf("has %q = %t, want %t", StepCheckDatabase, got, tc.wantCheck)
+			}
+		})
 	}
 }

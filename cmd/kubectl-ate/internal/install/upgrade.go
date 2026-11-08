@@ -45,28 +45,34 @@ var upgradeOrder = []struct {
 	{substrateRelease, "Upgrade Substrate"},
 }
 
-// Upgrade moves every release to the charts in this binary. With
-// Options.DryRun it writes each release's manifest diff to Options.Out.
-func (in *Installer) Upgrade(ctx context.Context) error {
+// UpgradeOptions configures Upgrade.
+type UpgradeOptions struct {
+	// DryRun writes each release's manifest diff to Out instead of applying.
+	DryRun bool
+	Out    io.Writer
+}
+
+// Upgrade moves every release to the charts in this binary.
+func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 	in.upgrading = true
-	steps := []step{
+	steps := []Step{
 		{"Check versions", in.checkVersions},
 		{"Check CRD storage versions", in.checkCRDStorage},
 	}
-	if in.opts.DryRun {
+	if opts.DryRun {
 		for _, u := range upgradeOrder {
-			steps = append(steps, step{"Diff " + u.r.name, in.diffStep(u.r, in.valuesFor(u.r))})
+			steps = append(steps, Step{"Diff " + u.r.name, in.diffStep(u.r, in.valuesFor(u.r), opts.Out)})
 		}
-		return in.run(ctx, steps)
+		return in.Run(ctx, steps)
 	}
 	steps = append(steps,
-		step{"Create pod certificate CAs", in.createPodCertCAs},
-		step{upgradeOrder[0].name, in.helmStep(podCertRelease, noValues)},
-		step{"Wait for trust bundles", in.waitTrustBundles},
-		step{"Create identity secrets", in.createIdentitySecrets},
+		Step{"Create pod certificate CAs", in.createPodCertCAs},
+		Step{upgradeOrder[0].name, in.helmStep(podCertRelease, noValues)},
+		Step{"Wait for trust bundles", in.waitTrustBundles},
+		Step{"Create identity secrets", in.createIdentitySecrets},
 	)
 	for _, u := range upgradeOrder[1:] {
-		steps = append(steps, step{u.name, in.helmStep(u.r, in.valuesFor(u.r))})
+		steps = append(steps, Step{u.name, in.helmStep(u.r, in.valuesFor(u.r))})
 	}
 	// A new release may pin new microVM assets.
 	microVM, err := in.hasMicroVMSandboxConfig(ctx)
@@ -75,12 +81,12 @@ func (in *Installer) Upgrade(ctx context.Context) error {
 	}
 	if microVM {
 		steps = append(steps,
-			step{"Stage microVM assets", in.stageMicroVMAssets},
-			step{"Apply microVM SandboxConfig", in.applyMicroVMSandboxConfig},
+			Step{"Stage microVM assets", in.stageMicroVMAssets},
+			Step{"Apply microVM SandboxConfig", in.applyMicroVMSandboxConfig},
 		)
 	}
-	steps = append(steps, step{"Check API", in.checkAPI})
-	return in.run(ctx, steps)
+	steps = append(steps, Step{"Check API", in.checkAPI})
+	return in.Run(ctx, steps)
 }
 
 // hasMicroVMSandboxConfig reports whether the microvm SandboxConfig exists.
@@ -224,8 +230,9 @@ func checkStoredVersions(ctx context.Context, c apiextclient.Interface, crds []a
 	return nil
 }
 
-// diffStep writes the change an upgrade of r would make to its manifest.
-func (in *Installer) diffStep(r release, vf valuesFunc) func(context.Context, func(string)) (string, error) {
+// diffStep writes the change an upgrade of r would make to its manifest to
+// out.
+func (in *Installer) diffStep(r release, vf valuesFunc, out io.Writer) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, _ func(string)) (string, error) {
 		ch, err := loadChart(in.charts, r.chart)
 		if err != nil {
@@ -243,7 +250,7 @@ func (in *Installer) diffStep(r release, vf valuesFunc) func(context.Context, fu
 		if err != nil {
 			return "", err
 		}
-		n, err := writeDiff(in.opts.Out, r.name, cur.Manifest, next)
+		n, err := writeDiff(out, r.name, cur.Manifest, next)
 		if err != nil {
 			return "", err
 		}
