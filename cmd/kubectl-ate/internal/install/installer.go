@@ -51,16 +51,15 @@ const (
 	PostgresExternal PostgresMode = "external"
 )
 
-// ObjectStore selects where snapshots are stored.
-type ObjectStore string
+// ObjectStoreType selects where snapshots are stored.
+type ObjectStoreType string
 
 const (
 	// ObjectStoreRustFS runs RustFS in the cluster with the substrate release.
-	ObjectStoreRustFS ObjectStore = "rustfs"
-	// ObjectStoreS3 and ObjectStoreGCS use a bucket the user configures with
-	// the charts' objectStore, objectStorePlugin and ateApi values.
-	ObjectStoreS3  ObjectStore = "s3"
-	ObjectStoreGCS ObjectStore = "gcs"
+	ObjectStoreRustFS ObjectStoreType = "rustfs"
+	// ObjectStoreS3 and ObjectStoreGCS use a bucket the user created.
+	ObjectStoreS3  ObjectStoreType = "s3"
+	ObjectStoreGCS ObjectStoreType = "gcs"
 )
 
 // Options configures an Installer.

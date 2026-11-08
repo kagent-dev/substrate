@@ -68,7 +68,12 @@ func TestHint(t *testing.T) {
 		install.DefaultConfig(),
 		func() install.Config {
 			c := install.DefaultConfig()
-			c.Postgres, c.ObjectStore = install.PostgresExternal, install.ObjectStoreGCS
+			c.Postgres = install.PostgresExternal
+			c.ObjectStore = install.ObjectStore{
+				Type:   install.ObjectStoreGCS,
+				Bucket: "snapshots",
+				GCS:    install.GCSObjectStore{TransferServiceAccount: "sa@p.iam.gserviceaccount.com"},
+			}
 			c.MicroVM = install.MicroVM{Enabled: true, AssetBucket: "assets"}
 			c.Releases.All.ValuesFiles = []string{"/etc/gke.yaml"}
 			return c

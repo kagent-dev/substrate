@@ -345,17 +345,22 @@ func (in *Installer) configureObjectStore(ctx context.Context, _ func(string)) (
 	if err := ensureNamespace(ctx, in.kube, SystemNamespace); err != nil {
 		return "", err
 	}
-	if in.opts.ObjectStore != ObjectStoreRustFS {
-		// A resumed install keeps the values the release already has.
-		vals := in.user[substrateRelease.name]
-		rel, err := in.helm.get(substrateRelease)
-		if err != nil {
-			return "", err
+	if in.opts.ObjectStore.Type != ObjectStoreRustFS {
+		// A resumed install keeps the values the releases already have.
+		atelet, substrate := in.externalStoreValues()
+		vals := map[release]map[string]any{}
+		for r, typed := range map[release]map[string]any{ateletRelease: atelet, substrateRelease: substrate} {
+			rel, err := in.helm.get(r)
+			if err != nil {
+				return "", err
+			}
+			var stored map[string]any
+			if rel != nil {
+				stored = rel.Config
+			}
+			vals[r] = mergeValues(stored, in.user[r.name], typed)
 		}
-		if rel != nil {
-			vals = mergeValues(rel.Config, in.user[substrateRelease.name])
-		}
-		return in.checkExternalObjectStore(ctx, vals)
+		return in.checkExternalObjectStore(ctx, vals[substrateRelease], vals[ateletRelease])
 	}
 	if ok, err := secretExists(ctx, in.kube, SystemNamespace, rustfsCredentialsSecret); ok || err != nil {
 		return "already present", err
@@ -377,18 +382,19 @@ func (in *Installer) configureObjectStore(ctx context.Context, _ func(string)) (
 }
 
 // checkExternalObjectStore fails before any release changes when a value the
-// charts need for an external store is missing from vals.
-func (in *Installer) checkExternalObjectStore(ctx context.Context, vals map[string]any) (string, error) {
-	location, _ := lookupString(vals, "ateApi", "snapshotLocation")
-	if location == "" && !previewEnabled(vals, "PerTemplateSnapshotLocation") {
-		return "", errors.New("set ateApi.snapshotLocation to the bucket URI for snapshots, such as gs://my-bucket/")
+// charts need for an external store is missing from the substrate or atelet
+// release values.
+func (in *Installer) checkExternalObjectStore(ctx context.Context, substrate, atelet map[string]any) (string, error) {
+	location, _ := lookupString(substrate, "ateApi", "snapshotLocation")
+	if location == "" && !previewEnabled(substrate, "PerTemplateSnapshotLocation") {
+		return "", errors.New("set objectStore.bucket to the snapshot bucket")
 	}
-	if in.opts.ObjectStore == ObjectStoreGCS {
-		if sa, _ := lookupString(vals, "objectStorePlugin", "transferServiceAccount"); sa == "" {
-			return "", errors.New("set objectStorePlugin.transferServiceAccount to the Google service account for snapshot transfers")
+	if in.opts.ObjectStore.Type == ObjectStoreGCS {
+		if sa, _ := lookupString(substrate, "objectStorePlugin", "transferServiceAccount"); sa == "" {
+			return "", errors.New("set objectStore.gcs.transferServiceAccount to the Google service account for snapshot transfers")
 		}
 	}
-	if name, _ := lookupString(vals, "objectStore", "credentialsSecret"); name != "" {
+	if name, _ := lookupString(atelet, "objectStore", "credentialsSecret"); name != "" {
 		ok, err := secretExists(ctx, in.kube, SystemNamespace, name)
 		if err != nil {
 			return "", err
@@ -398,9 +404,9 @@ func (in *Installer) checkExternalObjectStore(ctx context.Context, vals map[stri
 		}
 	}
 	if location == "" {
-		return string(in.opts.ObjectStore) + ", per-template locations", nil
+		return string(in.opts.ObjectStore.Type) + ", per-template locations", nil
 	}
-	return string(in.opts.ObjectStore) + " " + location, nil
+	return string(in.opts.ObjectStore.Type) + " " + location, nil
 }
 
 // lookup returns the value at path in vals, or nil.

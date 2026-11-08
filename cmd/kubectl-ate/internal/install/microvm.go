@@ -54,7 +54,7 @@ const (
 // assetTarget is where the microVM assets are staged. endpoint, region and
 // pathStyle come from atelet's objectStore values for an S3 store.
 type assetTarget struct {
-	store     ObjectStore
+	store     ObjectStoreType
 	scheme    string
 	bucket    string
 	endpoint  string

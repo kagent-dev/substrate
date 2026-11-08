@@ -16,10 +16,12 @@ package install
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"helm.sh/helm/v4/pkg/cli/values"
@@ -31,7 +33,7 @@ import (
 // from the file passed to --config.
 type Config struct {
 	Postgres    PostgresMode `json:"postgres,omitempty"`
-	ObjectStore ObjectStore  `json:"objectStore,omitempty"`
+	ObjectStore ObjectStore  `json:"objectStore,omitzero"`
 	MicroVM     MicroVM      `json:"microvm,omitzero"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
@@ -55,6 +57,81 @@ type ReleaseValues struct {
 	Values      map[string]any `json:"values,omitempty"`
 }
 
+// ObjectStore configures snapshot storage. The s3 and gcs settings fill the
+// charts' storage values on install, over the values in Releases.
+type ObjectStore struct {
+	Type ObjectStoreType `json:"type,omitempty"`
+	// Bucket holds snapshots with an s3 or gcs store. It sets
+	// ateApi.snapshotLocation to gs://<bucket>/, the URI both backends use.
+	// Leave it empty to set snapshot locations per template with the
+	// PerTemplateSnapshotLocation preview gate.
+	Bucket string         `json:"bucket,omitempty"`
+	S3     S3ObjectStore  `json:"s3,omitzero"`
+	GCS    GCSObjectStore `json:"gcs,omitzero"`
+}
+
+// S3ObjectStore configures an s3 store. Empty fields use the AWS SDK defaults.
+type S3ObjectStore struct {
+	Region string `json:"region,omitempty"`
+	// Endpoint is the URL of an S3-compatible service.
+	Endpoint  string `json:"endpoint,omitempty"`
+	PathStyle bool   `json:"pathStyle,omitempty"`
+	// CredentialsSecret names a Secret in SystemNamespace with
+	// AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY keys. Empty uses the
+	// pods' ambient credentials.
+	CredentialsSecret string `json:"credentialsSecret,omitempty"`
+}
+
+// GCSObjectStore configures a gcs store.
+type GCSObjectStore struct {
+	// TransferServiceAccount is the Google service account the snapshot
+	// exchange impersonates for actor-scoped transfers.
+	TransferServiceAccount string `json:"transferServiceAccount,omitempty"`
+}
+
+// UnmarshalJSON also accepts the type alone, as in objectStore: s3.
+func (o *ObjectStore) UnmarshalJSON(b []byte) error {
+	var t ObjectStoreType
+	if err := json.Unmarshal(b, &t); err == nil {
+		*o = ObjectStore{Type: t}
+		return nil
+	}
+	type plain ObjectStore
+	p := plain(*o)
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		return err
+	}
+	*o = ObjectStore(p)
+	return nil
+}
+
+func (o ObjectStore) validate() error {
+	switch o.Type {
+	case ObjectStoreRustFS:
+		if o != (ObjectStore{Type: ObjectStoreRustFS}) {
+			return errors.New("objectStore rustfs takes no other settings")
+		}
+	case ObjectStoreS3, ObjectStoreGCS:
+	default:
+		return fmt.Errorf("invalid objectStore.type %q: must be %s, %s or %s", o.Type, ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS)
+	}
+	if strings.ContainsAny(o.Bucket, ":/") {
+		return fmt.Errorf("objectStore.bucket %q must be a bucket name, not a URI", o.Bucket)
+	}
+	if o.S3 != (S3ObjectStore{}) && o.Type != ObjectStoreS3 {
+		return errors.New("objectStore.s3 needs type s3")
+	}
+	if o.GCS != (GCSObjectStore{}) && o.Type != ObjectStoreGCS {
+		return errors.New("objectStore.gcs needs type gcs")
+	}
+	if e := o.S3.Endpoint; e != "" && !strings.HasPrefix(e, "http://") && !strings.HasPrefix(e, "https://") {
+		return fmt.Errorf("objectStore.s3.endpoint %q must be an http or https URL", e)
+	}
+	return nil
+}
+
 // MicroVM configures the microvm sandbox class.
 type MicroVM struct {
 	// Enabled stages the microVM guest assets and applies the microvm
@@ -69,7 +146,7 @@ type MicroVM struct {
 func DefaultConfig() Config {
 	return Config{
 		Postgres:    PostgresBundled,
-		ObjectStore: ObjectStoreRustFS,
+		ObjectStore: ObjectStore{Type: ObjectStoreRustFS},
 		Timeout:     metav1.Duration{Duration: 10 * time.Minute},
 	}
 }
@@ -104,12 +181,10 @@ func (c Config) validate() error {
 	default:
 		return fmt.Errorf("invalid postgres %q: must be %s or %s", c.Postgres, PostgresBundled, PostgresExternal)
 	}
-	switch c.ObjectStore {
-	case ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS:
-	default:
-		return fmt.Errorf("invalid objectStore %q: must be %s, %s or %s", c.ObjectStore, ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS)
+	if err := c.ObjectStore.validate(); err != nil {
+		return err
 	}
-	if c.MicroVM.Enabled && c.ObjectStore != ObjectStoreRustFS && c.MicroVM.AssetBucket == "" {
+	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreRustFS && c.MicroVM.AssetBucket == "" {
 		return errors.New("microvm with an s3 or gcs objectStore needs microvm.assetBucket")
 	}
 	if c.Timeout.Duration <= 0 {
