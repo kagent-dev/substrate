@@ -192,6 +192,9 @@ type AKS struct {
 	// registry must hold the images under their usual paths, and the cluster
 	// must be attached to it.
 	ACR string `json:"acr,omitempty"`
+	// NodePool restricts atelet to the nodes of one node pool. WorkerPools
+	// then need the same node selector.
+	NodePool string `json:"nodePool,omitempty"`
 }
 
 // MicroVM configures the microvm sandbox class.
@@ -271,6 +274,14 @@ func ValidateACR(s string) error {
 	return nil
 }
 
+// ValidateNodePool checks that s is empty or a valid node pool label value.
+func ValidateNodePool(s string) error {
+	if errs := validation.IsValidLabelValue(s); len(errs) > 0 {
+		return fmt.Errorf("invalid node pool %q: %s", s, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // ValidateStorageClass checks that s is empty or a valid StorageClass name.
 func ValidateStorageClass(s string) error {
 	if s == "" {
@@ -291,6 +302,9 @@ func (c Config) validate() error {
 	}
 	if err := ValidateACR(c.AKS.ACR); err != nil {
 		return fmt.Errorf("aks.acr: %w", err)
+	}
+	if err := ValidateNodePool(c.AKS.NodePool); err != nil {
+		return fmt.Errorf("aks.nodePool: %w", err)
 	}
 	switch c.Postgres.Type {
 	case PostgresBundled, PostgresExternal:
@@ -333,12 +347,32 @@ func (c Config) imageRegistry() string {
 	return ""
 }
 
-// profileValues returns Helm values for every release except substrate-crds.
-func (c Config) profileValues() map[string]any {
-	if r := c.imageRegistry(); r != "" {
-		return map[string]any{"global": map[string]any{"imageRegistry": r}}
+// aksNodePoolLabel is the node label AKS sets to the node's pool name.
+const aksNodePoolLabel = "kubernetes.azure.com/agentpool"
+
+// nodeSelector returns the node selector atelet runs with, or nil for every
+// node.
+func (c Config) nodeSelector() map[string]string {
+	if c.Profile == ProfileAKS && c.AKS.NodePool != "" {
+		return map[string]string{aksNodePoolLabel: c.AKS.NodePool}
 	}
 	return nil
+}
+
+// profileValues returns the profile's Helm values for r.
+func (c Config) profileValues(r release) map[string]any {
+	vals := map[string]any{}
+	if reg := c.imageRegistry(); reg != "" {
+		vals["global"] = map[string]any{"imageRegistry": reg}
+	}
+	if sel := c.nodeSelector(); sel != nil && r == ateletRelease {
+		nodeSelector := map[string]any{}
+		for k, v := range sel {
+			nodeSelector[k] = v
+		}
+		vals["atelet"] = map[string]any{"nodeSelector": nodeSelector}
+	}
+	return vals
 }
 
 func (r *Releases) all() []*ReleaseValues {
@@ -352,7 +386,6 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	all = mergeValues(c.profileValues(), all)
 	user := map[string]map[string]any{}
 	for r, rv := range map[release]ReleaseValues{
 		podCertRelease:   c.Releases.PodCert,
@@ -363,7 +396,7 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		user[r.name] = mergeValues(all, own)
+		user[r.name] = mergeValues(c.profileValues(r), all, own)
 	}
 	return user, nil
 }

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -190,6 +191,9 @@ func (in *Installer) InstallSteps() ([]Step, error) {
 	if in.opts.Postgres.Type == PostgresBundled {
 		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres.type to external with a managed database for anything else."})
 	}
+	if sel := in.opts.nodeSelector(); sel != nil {
+		in.report.Report(Event{Kind: Note, Msg: fmt.Sprintf("atelet runs only on nodes labeled %s. Give each WorkerPool the same spec.template.nodeSelector, or its workers won't become ready.", labels.SelectorFromSet(sel))})
+	}
 	steps := []Step{
 		{"Check cluster", in.preflight},
 		{"Install CRDs", in.helmStep(crdsRelease, noValues)},
@@ -199,6 +203,9 @@ func (in *Installer) InstallSteps() ([]Step, error) {
 		{"Create identity secrets", in.createIdentitySecrets},
 		{"Configure object storage", in.configureObjectStore},
 		{"Install atelet", in.helmStep(ateletRelease, in.ateletValues)},
+	}
+	if in.opts.Profile == ProfileAKS && in.opts.MicroVM.Enabled {
+		steps = append(steps, Step{"Check KVM", in.checkKVM})
 	}
 	if in.opts.Postgres.Type == PostgresBundled {
 		steps = append(steps,

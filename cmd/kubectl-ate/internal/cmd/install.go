@@ -47,6 +47,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
   profile: aks             # or generic
   aks:                     # for profile: aks
     acr: my.azurecr.io     # pull the images from it
+    nodePool: agents       # run atelet only in this pool
   postgres:
     type: bundled          # or external
   objectStore:
@@ -109,6 +110,11 @@ NetworkPolicy without one. With aks.acr set, install pulls every image it instal
 bundled PostgreSQL's, from that Azure Container Registry. Import the images
 under their usual paths with az acr import and attach the registry with
 az aks update --attach-acr first.
+
+aks.nodePool runs atelet only on the nodes of that pool. Give each WorkerPool
+the nodeSelector kubernetes.azure.com/agentpool with the pool's name. With
+microvm.enabled, install checks that atelet's nodes have /dev/kvm, which needs
+a generation 2 VM size with nested virtualization.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to

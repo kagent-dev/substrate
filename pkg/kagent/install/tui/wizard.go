@@ -51,6 +51,11 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				Description("Login server to pull Agent Substrate's images from, like myregistry.azurecr.io. It must hold\nthe images under their usual paths, and the cluster must be attached to it. Leave empty for the public registries.").
 				Value(&cfg.AKS.ACR).
 				Validate(install.ValidateACR),
+			huh.NewInput().
+				Title("Node pool").
+				Description("Runs atelet only in this pool. WorkerPools then need the nodeSelector\nkubernetes.azure.com/agentpool set to it. Leave empty for every node.").
+				Value(&cfg.AKS.NodePool).
+				Validate(install.ValidateNodePool),
 		).WithHideFunc(func() bool { return !aks() }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().

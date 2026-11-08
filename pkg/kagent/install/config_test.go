@@ -94,6 +94,8 @@ releases:
 		{name: "aks needs profile", in: "aks: {acr: r.azurecr.io}\n", wantErr: "aks needs profile: aks"},
 		{name: "acr with path", in: "profile: aks\naks: {acr: r.azurecr.io/substrate}\n", wantErr: "invalid ACR"},
 		{name: "acr without domain", in: "profile: aks\naks: {acr: myregistry}\n", wantErr: "invalid ACR"},
+		{name: "node pool", in: "profile: aks\naks: {nodePool: agents}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.NodePool = ProfileAKS, "agents" })},
+		{name: "bad node pool", in: "profile: aks\naks: {nodePool: 'agents pool'}\n", wantErr: "invalid node pool"},
 		{name: "acr with space", in: "profile: aks\naks: {acr: 'r.azurecr.io '}\n", wantErr: "invalid ACR"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
@@ -191,8 +193,9 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	}
 	c := Config{
 		Profile: ProfileAKS,
-		AKS:     AKS{ACR: "r.azurecr.io"},
+		AKS:     AKS{ACR: "r.azurecr.io", NodePool: "agents"},
 		Releases: Releases{
+			Atelet:    ReleaseValues{Values: map[string]any{"atelet": map[string]any{"nodeSelector": map[string]any{"disk": "ssd"}}}},
 			Substrate: ReleaseValues{Values: registry("mirror.example.com")},
 		},
 	}
@@ -200,10 +203,16 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The release's own values win over the profile's.
+	// The release's own values win over the profile's, and only atelet gets
+	// the node pool.
+	atelet := registry("r.azurecr.io")
+	atelet["atelet"] = map[string]any{"nodeSelector": map[string]any{
+		"kubernetes.azure.com/agentpool": "agents",
+		"disk":                           "ssd",
+	}}
 	want := map[string]map[string]any{
 		"substrate-podcert": registry("r.azurecr.io"),
-		"substrate-atelet":  registry("r.azurecr.io"),
+		"substrate-atelet":  atelet,
 		"substrate":         registry("mirror.example.com"),
 	}
 	if diff := cmp.Diff(want, got); diff != "" {

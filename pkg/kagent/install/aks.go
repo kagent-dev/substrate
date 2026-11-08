@@ -17,10 +17,16 @@ package install
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	"go.ate.dev/substrate/internal/deviceplugin"
 )
 
 // networkPolicyEngines are the DaemonSets of the engines AKS installs with
@@ -41,6 +47,13 @@ func (in *Installer) checkAKS(ctx context.Context, progress func(string)) (strin
 		return "", err
 	}
 	summary := "NetworkPolicy by " + engine
+	if pool := in.opts.AKS.NodePool; pool != "" {
+		n, err := in.checkNodePool(ctx)
+		if err != nil {
+			return "", err
+		}
+		summary += fmt.Sprintf(", node pool %s with %d nodes", pool, n)
+	}
 	return summary, nil
 }
 
@@ -58,4 +71,42 @@ func (in *Installer) checkNetworkPolicy(ctx context.Context) (string, error) {
 		}
 	}
 	return "", errors.New("nothing in the cluster enforces NetworkPolicy; enable it with az aks update --network-policy, or set profile: generic to skip this check")
+}
+
+// checkNodePool returns how many nodes aks.nodePool has.
+func (in *Installer) checkNodePool(ctx context.Context) (int, error) {
+	pool := in.opts.AKS.NodePool
+	nodes, err := in.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: labels.SelectorFromSet(in.opts.nodeSelector()).String()})
+	if err != nil {
+		return 0, err
+	}
+	if len(nodes.Items) == 0 {
+		return 0, fmt.Errorf("node pool %s has no nodes; check aks.nodePool against az aks nodepool list", pool)
+	}
+	return len(nodes.Items), nil
+}
+
+// checkKVM waits for a node running atelet to advertise ate.dev/kvm, which
+// microVM workers request. atelet advertises it only on nodes with /dev/kvm.
+func (in *Installer) checkKVM(ctx context.Context, progress func(string)) (string, error) {
+	sel := labels.SelectorFromSet(in.opts.nodeSelector()).String()
+	var total int
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		nodes, err := in.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: sel})
+		if err != nil {
+			return false, err
+		}
+		total = len(nodes.Items)
+		for _, n := range nodes.Items {
+			if q, ok := n.Status.Allocatable[deviceplugin.ResourceKVM]; ok && !q.IsZero() {
+				return true, nil
+			}
+		}
+		progress(fmt.Sprintf("waiting for %s on %d nodes", deviceplugin.ResourceKVM, total))
+		return false, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("no node advertises %s, so microVM workers can't schedule; use a generation 2 VM size with nested virtualization, like Standard_D4s_v5: %w", deviceplugin.ResourceKVM, err)
+	}
+	return deviceplugin.ResourceKVM + " advertised", nil
 }
