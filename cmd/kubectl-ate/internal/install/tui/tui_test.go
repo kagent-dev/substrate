@@ -68,7 +68,7 @@ func TestHint(t *testing.T) {
 		install.DefaultConfig(),
 		func() install.Config {
 			c := install.DefaultConfig()
-			c.Postgres = install.PostgresExternal
+			c.Postgres = install.Postgres{Type: install.PostgresExternal}
 			c.ObjectStore = install.ObjectStore{
 				Type:   install.ObjectStoreGCS,
 				Bucket: "snapshots",

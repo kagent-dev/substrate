@@ -40,23 +40,24 @@ const (
 	PodCertNamespace = "podcertificate-controller-system"
 )
 
-// PostgresMode selects where the control plane's database comes from.
-type PostgresMode string
+// PostgresType selects where the control plane's database comes from.
+type PostgresType string
 
 const (
 	// PostgresBundled applies manifests/ate-install/postgres for evaluation.
 	// It has no backups or high availability.
-	PostgresBundled PostgresMode = "bundled"
+	PostgresBundled PostgresType = "bundled"
 	// PostgresExternal uses connection Secrets the user created.
-	PostgresExternal PostgresMode = "external"
+	PostgresExternal PostgresType = "external"
 )
 
 // ObjectStoreType selects where snapshots are stored.
 type ObjectStoreType string
 
 const (
-	// ObjectStoreRustFS runs RustFS in the cluster with the substrate release.
-	ObjectStoreRustFS ObjectStoreType = "rustfs"
+	// ObjectStoreBundled runs RustFS in the cluster with the substrate
+	// release, for evaluation.
+	ObjectStoreBundled ObjectStoreType = "bundled"
 	// ObjectStoreS3 and ObjectStoreGCS use a bucket the user created.
 	ObjectStoreS3  ObjectStoreType = "s3"
 	ObjectStoreGCS ObjectStoreType = "gcs"
@@ -175,8 +176,8 @@ func (in *Installer) Install(ctx context.Context) error {
 	if err := in.opts.validate(); err != nil {
 		return err
 	}
-	if in.opts.Postgres == PostgresBundled {
-		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres: external with a managed database for anything else."})
+	if in.opts.Postgres.Type == PostgresBundled {
+		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres.type to external with a managed database for anything else."})
 	}
 	steps := []step{
 		{"Check cluster", in.preflight},
@@ -188,7 +189,7 @@ func (in *Installer) Install(ctx context.Context) error {
 		{"Configure object storage", in.configureObjectStore},
 		{"Install atelet", in.helmStep(ateletRelease, in.ateletValues)},
 	}
-	if in.opts.Postgres == PostgresBundled {
+	if in.opts.Postgres.Type == PostgresBundled {
 		steps = append(steps,
 			step{"Install PostgreSQL", in.applyPostgres},
 			step{"Set up database", in.setupDatabase},

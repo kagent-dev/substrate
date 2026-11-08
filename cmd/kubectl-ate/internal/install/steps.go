@@ -166,7 +166,7 @@ func (in *Installer) ateletValues(context.Context) (map[string]any, map[string]a
 		// The release keeps its storage values.
 		return nil, forced, nil
 	}
-	if in.opts.ObjectStore.Type != ObjectStoreRustFS {
+	if in.opts.ObjectStore.Type != ObjectStoreBundled {
 		atelet, _ := in.externalStoreValues()
 		return nil, mergeValues(forced, atelet), nil
 	}
@@ -191,7 +191,7 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 		// The release keeps its storage and database values.
 		return nil, forced, nil
 	}
-	if in.opts.ObjectStore.Type == ObjectStoreRustFS {
+	if in.opts.ObjectStore.Type == ObjectStoreBundled {
 		access, secret, err := in.rustfsCredentials(ctx)
 		if err != nil {
 			return nil, nil, err
@@ -201,7 +201,7 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 		_, substrate := in.externalStoreValues()
 		forced = mergeValues(forced, substrate)
 	}
-	if in.opts.Postgres == PostgresBundled {
+	if in.opts.Postgres.Type == PostgresBundled {
 		forced["postgres"] = map[string]any{"clientCertificates": map[string]any{"enabled": true}}
 	}
 	return nil, forced, nil

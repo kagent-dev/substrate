@@ -75,7 +75,7 @@ func (in *Installer) microVMTarget(ctx context.Context) (assetTarget, error) {
 		if bucket == "" {
 			return assetTarget{}, errors.New("substrate release has no rustfs.bucket")
 		}
-		return assetTarget{store: ObjectStoreRustFS, scheme: "s3", bucket: bucket}, nil
+		return assetTarget{store: ObjectStoreBundled, scheme: "s3", bucket: bucket}, nil
 	}
 	atelet, err := in.installedValues(ateletRelease)
 	if err != nil {
@@ -295,7 +295,7 @@ func (b gcsBucket) put(ctx context.Context, object string, r io.Reader) error {
 // uses the caller's own cloud credentials.
 func (in *Installer) assetStore(ctx context.Context, t assetTarget) (assetBucket, func(), error) {
 	switch t.store {
-	case ObjectStoreRustFS:
+	case ObjectStoreBundled:
 		access, secret, err := in.rustfsCredentials(ctx)
 		if err != nil {
 			return nil, nil, err

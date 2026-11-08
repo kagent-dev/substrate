@@ -31,21 +31,21 @@ import (
 // quits.
 func Wizard(w io.Writer, cfg *install.Config) error {
 	store := &cfg.ObjectStore
-	external := func() bool { return store.Type != install.ObjectStoreRustFS }
+	external := func() bool { return store.Type != install.ObjectStoreBundled }
 	confirmed := true
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[install.PostgresMode]().
+			huh.NewSelect[install.PostgresType]().
 				Title("PostgreSQL").
 				Options(
 					huh.NewOption("Bundled: single replica, for evaluation only", install.PostgresBundled),
 					huh.NewOption("External: I created the connection Secrets", install.PostgresExternal),
 				).
-				Value(&cfg.Postgres),
+				Value(&cfg.Postgres.Type),
 			huh.NewSelect[install.ObjectStoreType]().
 				Title("Snapshot storage").
 				Options(
-					huh.NewOption("RustFS in the cluster", install.ObjectStoreRustFS),
+					huh.NewOption("RustFS in the cluster", install.ObjectStoreBundled),
 					huh.NewOption("Amazon S3 or compatible", install.ObjectStoreS3),
 					huh.NewOption("Google Cloud Storage", install.ObjectStoreGCS),
 				).

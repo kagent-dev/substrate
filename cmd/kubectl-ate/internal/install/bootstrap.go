@@ -345,7 +345,7 @@ func (in *Installer) configureObjectStore(ctx context.Context, _ func(string)) (
 	if err := ensureNamespace(ctx, in.kube, SystemNamespace); err != nil {
 		return "", err
 	}
-	if in.opts.ObjectStore.Type != ObjectStoreRustFS {
+	if in.opts.ObjectStore.Type != ObjectStoreBundled {
 		// A resumed install keeps the values the releases already have.
 		atelet, substrate := in.externalStoreValues()
 		vals := map[release]map[string]any{}

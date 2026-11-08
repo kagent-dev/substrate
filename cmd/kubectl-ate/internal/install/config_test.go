@@ -52,7 +52,7 @@ releases:
   substrate: {valuesFiles: [db.yaml]}
 `,
 			want: withDefaults(func(c *Config) {
-				c.Postgres = PostgresExternal
+				c.Postgres = Postgres{Type: PostgresExternal}
 				c.ObjectStore = ObjectStore{
 					Type:   ObjectStoreGCS,
 					Bucket: "snapshots",
@@ -85,8 +85,16 @@ releases:
 				}}
 			}),
 		},
+		{
+			name: "postgres as a struct",
+			in:   "postgres: {type: external}\n",
+			want: withDefaults(func(c *Config) { c.Postgres = Postgres{Type: PostgresExternal} }),
+		},
+		{name: "rustfs alias", in: "objectStore: rustfs\n", want: DefaultConfig()},
+		{name: "rustfs alias in a struct", in: "objectStore: {type: rustfs}\n", want: DefaultConfig()},
 		{name: "bad object store", in: "objectStore: nfs\n", wantErr: "invalid objectStore"},
-		{name: "rustfs with bucket", in: "objectStore: {bucket: b}\n", wantErr: "objectStore"},
+		{name: "unknown postgres field", in: "postgres: {type: external, host: db}\n", wantErr: "host"},
+		{name: "bundled with bucket", in: "objectStore: {bucket: b}\n", wantErr: "objectStore"},
 		{name: "bucket with path", in: "objectStore: {type: s3, bucket: b/dir}\n", wantErr: "objectStore.bucket"},
 		{name: "gcs block on s3", in: "objectStore: {type: s3, gcs: {transferServiceAccount: sa}}\n", wantErr: "objectStore.gcs"},
 		{name: "s3 endpoint without scheme", in: "objectStore: {type: s3, s3: {endpoint: minio:9000}}\n", wantErr: "objectStore.s3.endpoint"},

@@ -32,9 +32,9 @@ import (
 // Config describes an installation. Install, upgrade and uninstall read it
 // from the file passed to --config.
 type Config struct {
-	Postgres    PostgresMode `json:"postgres,omitempty"`
-	ObjectStore ObjectStore  `json:"objectStore,omitzero"`
-	MicroVM     MicroVM      `json:"microvm,omitzero"`
+	Postgres    Postgres    `json:"postgres,omitzero"`
+	ObjectStore ObjectStore `json:"objectStore,omitzero"`
+	MicroVM     MicroVM     `json:"microvm,omitzero"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 	// Releases holds Helm values for the releases.
@@ -55,6 +55,23 @@ type Releases struct {
 type ReleaseValues struct {
 	ValuesFiles []string       `json:"valuesFiles,omitempty"`
 	Values      map[string]any `json:"values,omitempty"`
+}
+
+// Postgres configures the control plane's database. External uses the
+// connection Secrets described in charts/substrate/README.md.
+type Postgres struct {
+	Type PostgresType `json:"type,omitempty"`
+}
+
+// UnmarshalJSON also accepts the type alone, as in postgres: external.
+func (p *Postgres) UnmarshalJSON(b []byte) error {
+	var t PostgresType
+	if json.Unmarshal(b, &t) == nil {
+		*p = Postgres{Type: t}
+		return nil
+	}
+	type plain Postgres
+	return decodeStrict(b, (*plain)(p))
 }
 
 // ObjectStore configures snapshot storage. The s3 and gcs settings fill the
@@ -92,30 +109,43 @@ type GCSObjectStore struct {
 // UnmarshalJSON also accepts the type alone, as in objectStore: s3.
 func (o *ObjectStore) UnmarshalJSON(b []byte) error {
 	var t ObjectStoreType
-	if err := json.Unmarshal(b, &t); err == nil {
+	if json.Unmarshal(b, &t) == nil {
 		*o = ObjectStore{Type: t}
 		return nil
 	}
 	type plain ObjectStore
-	p := plain(*o)
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
+	return decodeStrict(b, (*plain)(o))
+}
+
+// UnmarshalJSON reads rustfs, the v1.0.0 name, as bundled.
+func (t *ObjectStoreType) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	*o = ObjectStore(p)
+	if s == "rustfs" {
+		s = string(ObjectStoreBundled)
+	}
+	*t = ObjectStoreType(s)
 	return nil
+}
+
+// decodeStrict decodes b into v, keeping the fields b doesn't set.
+func decodeStrict(b []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 func (o ObjectStore) validate() error {
 	switch o.Type {
-	case ObjectStoreRustFS:
-		if o != (ObjectStore{Type: ObjectStoreRustFS}) {
-			return errors.New("objectStore rustfs takes no other settings")
+	case ObjectStoreBundled:
+		if o != (ObjectStore{Type: ObjectStoreBundled}) {
+			return errors.New("objectStore bundled takes no other settings")
 		}
 	case ObjectStoreS3, ObjectStoreGCS:
 	default:
-		return fmt.Errorf("invalid objectStore.type %q: must be %s, %s or %s", o.Type, ObjectStoreRustFS, ObjectStoreS3, ObjectStoreGCS)
+		return fmt.Errorf("invalid objectStore.type %q: must be %s, %s or %s", o.Type, ObjectStoreBundled, ObjectStoreS3, ObjectStoreGCS)
 	}
 	if strings.ContainsAny(o.Bucket, ":/") {
 		return fmt.Errorf("objectStore.bucket %q must be a bucket name, not a URI", o.Bucket)
@@ -145,8 +175,8 @@ type MicroVM struct {
 // DefaultConfig is an evaluation install: bundled PostgreSQL and RustFS.
 func DefaultConfig() Config {
 	return Config{
-		Postgres:    PostgresBundled,
-		ObjectStore: ObjectStore{Type: ObjectStoreRustFS},
+		Postgres:    Postgres{Type: PostgresBundled},
+		ObjectStore: ObjectStore{Type: ObjectStoreBundled},
 		Timeout:     metav1.Duration{Duration: 10 * time.Minute},
 	}
 }
@@ -176,15 +206,15 @@ func ReadConfig(r io.Reader, dir string) (Config, error) {
 }
 
 func (c Config) validate() error {
-	switch c.Postgres {
+	switch c.Postgres.Type {
 	case PostgresBundled, PostgresExternal:
 	default:
-		return fmt.Errorf("invalid postgres %q: must be %s or %s", c.Postgres, PostgresBundled, PostgresExternal)
+		return fmt.Errorf("invalid postgres.type %q: must be %s or %s", c.Postgres.Type, PostgresBundled, PostgresExternal)
 	}
 	if err := c.ObjectStore.validate(); err != nil {
 		return err
 	}
-	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreRustFS && c.MicroVM.AssetBucket == "" {
+	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreBundled && c.MicroVM.AssetBucket == "" {
 		return errors.New("microvm with an s3 or gcs objectStore needs microvm.assetBucket")
 	}
 	if c.Timeout.Duration <= 0 {

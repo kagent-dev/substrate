@@ -120,7 +120,7 @@ func TestLoadEmbeddedCharts(t *testing.T) {
 func TestBootstrapKeepsExistingSecrets(t *testing.T) {
 	ctx := context.Background()
 	kc := fake.NewClientset()
-	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreRustFS}}}}
+	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreBundled}}}}
 
 	for _, s := range []func(context.Context, func(string)) (string, error){
 		in.createPodCertCAs, in.createIdentitySecrets, in.configureObjectStore,
@@ -279,7 +279,7 @@ func TestCheckExternalObjectStore(t *testing.T) {
 }
 
 func TestExternalObjectStoreValues(t *testing.T) {
-	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: PostgresExternal}}}
+	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
 	defaults, forced, err := in.ateletValues(context.Background())
 	if err != nil {
 		t.Fatal(err)
