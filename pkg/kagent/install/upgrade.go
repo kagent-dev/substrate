@@ -67,10 +67,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 // chart versions.
 func (in *Installer) UpgradeSteps(ctx context.Context, opts UpgradeOptions) ([]Step, error) {
 	in.upgrading = true
-	steps := []Step{
-		{"Check versions", in.checkVersions},
-		{"Check CRD storage versions", in.checkCRDStorage},
-	}
+	steps := in.upgradeChecks()
 	if opts.DryRun {
 		for _, u := range upgradeOrder {
 			steps = append(steps, Step{"Diff " + u.r.name, in.diffStep(u.r, in.valuesFor(u.r), opts.Out)})
@@ -99,6 +96,19 @@ func (in *Installer) UpgradeSteps(ctx context.Context, opts UpgradeOptions) ([]S
 	}
 	steps = append(steps, Step{"Check API", in.checkAPI})
 	return steps, nil
+}
+
+// upgradeChecks returns the steps that check the cluster before Upgrade
+// changes it.
+func (in *Installer) upgradeChecks() []Step {
+	steps := []Step{
+		{"Check versions", in.checkVersions},
+		{"Check CRD storage versions", in.checkCRDStorage},
+	}
+	if in.opts.Profile == ProfileAKS {
+		steps = append(steps, Step{"Check AKS", in.checkAKS})
+	}
+	return steps
 }
 
 // hasMicroVMSandboxConfig reports whether the microvm SandboxConfig exists.

@@ -99,8 +99,9 @@ To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
 objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
 profile selects the kind of cluster, and --profile sets it from the command
-line. generic makes no assumptions. aks is for Azure Kubernetes Service:
-with aks.acr set, install pulls every image it installs, including the
+line. generic makes no assumptions. aks is for Azure Kubernetes Service. It
+checks that a NetworkPolicy engine is installed, since AKS ignores
+NetworkPolicy without one. With aks.acr set, install pulls every image it installs, including the
 bundled PostgreSQL's, from that Azure Container Registry. Import the images
 under their usual paths with az acr import and attach the registry with
 az aks update --attach-acr first.

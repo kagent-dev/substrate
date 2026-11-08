@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -105,5 +106,24 @@ func TestWriteDiff(t *testing.T) {
 	buf.Reset()
 	if n, _ := writeDiff(&buf, "substrate", "a: 1\n", "a: 1\n"); n != 0 || buf.Len() != 0 {
 		t.Errorf("identical manifests: n = %d, output %q", n, buf.String())
+	}
+}
+
+func TestUpgradeChecks(t *testing.T) {
+	for _, tc := range []struct {
+		profile Profile
+		want    []string
+	}{
+		{profile: ProfileGeneric, want: []string{"Check versions", "Check CRD storage versions"}},
+		{profile: ProfileAKS, want: []string{"Check versions", "Check CRD storage versions", "Check AKS"}},
+	} {
+		in := &Installer{opts: Options{Config: Config{Profile: tc.profile}}}
+		var got []string
+		for _, s := range in.upgradeChecks() {
+			got = append(got, s.Name)
+		}
+		if diff := cmp.Diff(tc.want, got); diff != "" {
+			t.Errorf("profile %s: upgradeChecks() mismatch (-want +got):\n%s", tc.profile, diff)
+		}
 	}
 }

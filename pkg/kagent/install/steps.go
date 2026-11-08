@@ -48,6 +48,14 @@ func (in *Installer) preflight(ctx context.Context, progress func(string)) (stri
 	if err := checkPodCertificateAPI(in); err != nil {
 		return "", err
 	}
+	summary := "Kubernetes " + sv.GitVersion
+	if in.opts.Profile == ProfileAKS {
+		aks, err := in.checkAKS(ctx, progress)
+		if err != nil {
+			return "", err
+		}
+		summary += ", " + aks
+	}
 
 	progress("checking for an existing install")
 	rel, err := in.helm.get(substrateRelease)
@@ -69,7 +77,7 @@ func (in *Installer) preflight(ctx context.Context, progress func(string)) (stri
 			return "", err
 		}
 	}
-	return "Kubernetes " + sv.GitVersion, nil
+	return summary, nil
 }
 
 // checkPodCertificateAPI checks that the cluster serves PodCertificateRequest,
