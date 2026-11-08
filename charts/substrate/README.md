@@ -95,7 +95,9 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.imageCredentialProviderConfigYAML` | `""` | Credential provider config as text, rendered into a ConfigMap, for nodes where that file cannot be authored or must differ from the kubelet's; mutually exclusive with the host path |
 | `atelet.nodeSelector` | `{}` | Node labels atelet pods must match; must cover the nodes of every WorkerPool |
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
+| `credentialProvider.enabled` | `true` | Deploy the Kubernetes Secret provider and route `k8s.io` credential URIs to it. With no provider, every credential injection fails closed |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
+| `credentialProvider.extraProviders` | `[]` | Providers you deploy, each `{name, address}`. `name` is the host of the `ate-secret://` URIs it serves; `address` is the `host:port` the egress gateway dials over mTLS. Its serving certificate must chain to the servicedns CA. See [egress credential injection](../../docs/guides/egress-credential-injection.md#the-plugin-api) |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
 | `objectStorePlugin.extraEnv` | `[]` | Object storage credentials/settings shared by both object-store plugins |
 | `objectStorePlugin.control.resources` / `objectStorePlugin.node.resources` | see `values.yaml` | Resources for the API and node object-store sidecars |

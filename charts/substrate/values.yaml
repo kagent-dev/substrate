@@ -181,6 +181,15 @@ atenetEgress:
 # Kubernetes Secret provider and AGW HTTP/HTTPS credential injection.
 # Includes get-only Secret RBAC. HTTPS requires egress-mitm-ca-pool and actor trust.
 credentialProvider:
+  # Deploy the Kubernetes Secret provider and route k8s.io credential URIs to it.
+  enabled: true
+  # Providers you deploy yourself. name is the host of the ate-secret:// URIs
+  # the provider serves, and address is the host:port the gateway dials over
+  # mTLS. The provider's serving certificate must chain to the servicedns CA
+  # and name the address host.
+  extraProviders: []
+  # - name: vault.example.com
+  #   address: vault-provider.vault.svc:50051
   namespacePolicies: []
   # - atespace: team-a
   #   allowedNamespaces: [team-a-secrets]
