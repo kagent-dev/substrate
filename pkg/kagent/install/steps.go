@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	chart "helm.sh/helm/v4/pkg/chart/v2"
 	"helm.sh/helm/v4/pkg/release/common"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,8 +96,29 @@ func noValues(context.Context) (map[string]any, map[string]any, error) { return 
 // existing release on another chart version, since resuming it would hide a
 // real upgrade.
 func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, func(string)) (string, error) {
+	return in.chartStep(r, func() (*chart.Chart, error) { return loadChart(in.charts, r.chart) }, vf)
+}
+
+// HelmInstall returns a step that installs release name in namespace from ch,
+// or upgrades it if it exists, and waits for its workloads. values are layered
+// over the values the release was last installed with. Like the substrate
+// releases, it refuses to move an existing release to another chart version
+// unless UpgradeSteps was called.
+func (in *Installer) HelmInstall(name, namespace string, ch *chart.Chart, values map[string]any) func(context.Context, func(string)) (string, error) {
+	return in.chartStep(release{name: name, namespace: namespace},
+		func() (*chart.Chart, error) { return ch, nil },
+		func(context.Context) (map[string]any, map[string]any, error) { return nil, values, nil })
+}
+
+// HelmUninstall returns a step that uninstalls release name in namespace and
+// waits for its resources to go.
+func (in *Installer) HelmUninstall(name, namespace string) func(context.Context, func(string)) (string, error) {
+	return in.uninstallStep(release{name: name, namespace: namespace})
+}
+
+func (in *Installer) chartStep(r release, load func() (*chart.Chart, error), vf valuesFunc) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, progress func(string)) (string, error) {
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := load()
 		if err != nil {
 			return "", err
 		}
@@ -118,7 +140,7 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 				return "", fmt.Errorf("release %s is %s; run helm rollback or helm uninstall on it, then retry", r.name, st)
 			}
 			if got, want := cur.Chart.Metadata.Version, ch.Metadata.Version; !in.upgrading && got != want {
-				return "", fmt.Errorf("release %s has chart version %s, want %s; use kubectl ate upgrade", r.name, got, want)
+				return "", fmt.Errorf("release %s has chart version %s, want %s; upgrade it instead", r.name, got, want)
 			}
 		}
 		vals, err := in.releaseValues(ctx, r, vf, cur == nil)
