@@ -511,3 +511,68 @@ tests:
       content:
         name: RUST_LOG
         value: "info,agentgateway=debug"
+- it: routes k8s.io credentials to the bundled provider on both listeners
+  template: atenet-egress.yaml
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: '(?s)credentialProviders:\n\s+- uriAuthority: "?k8s.io"?\n\s+target:\n\s+host: "?custom-k8s-credential-provider.custom-system.svc:50051"?.*credentialProviders:\n\s+- uriAuthority: "?k8s.io"?'
+- it: routes credentials only to extra providers when the bundled one is off
+  templates:
+  - atenet-egress.yaml
+  - k8s-credential-provider.yaml
+  set:
+    credentialProvider.enabled: false
+    atenetEgress.extraCredentialProviders:
+    - name: vault.example.com
+      address: vault-provider.vault.svc:50051
+  asserts:
+  - hasDocuments:
+      count: 0
+    template: k8s-credential-provider.yaml
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: 'k8s.io'
+    template: atenet-egress.yaml
+    documentSelector:
+      path: kind
+      value: ConfigMap
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: 'uriAuthority: "vault.example.com"\n\s+target:\n\s+host: "vault-provider.vault.svc:50051"'
+    template: atenet-egress.yaml
+    documentSelector:
+      path: kind
+      value: ConfigMap
+- it: configures no credential providers when every provider is off
+  template: atenet-egress.yaml
+  set:
+    credentialProvider.enabled: false
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - notMatchRegex:
+      path: data["config.yaml"]
+      pattern: credentialProviders
+- it: rejects an extra provider named k8s.io
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.extraCredentialProviders:
+    - name: k8s.io
+      address: a.b.svc:50051
+  asserts:
+  - failedTemplate:
+      errorMessage: "atenetEgress.extraCredentialProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead"
+- it: rejects an extra provider without a host:port address
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.extraCredentialProviders:
+    - name: vault.example.com
+      address: vault-provider.vault.svc
+  asserts:
+  - failedTemplate:
+      errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs an address as host:port"
