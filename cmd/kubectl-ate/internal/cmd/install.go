@@ -37,7 +37,7 @@ var (
 	chartDir      string
 	noTUI         bool
 	upgradeDryRun bool
-	uninstallOpts install.Options
+	uninstallOpts install.UninstallOptions
 	uninstallYes  bool
 )
 
@@ -141,9 +141,14 @@ releases, and CRD changes that would strand stored objects.
 			return err
 		}
 		defer closeTerminal(tty)
-		opts.DryRun, opts.Out = upgradeDryRun, cmd.OutOrStdout()
-		return runInstaller(cmd, opts, tty, "upgrade", (*install.Installer).Upgrade,
-			"Agent Substrate is upgraded.")
+		up := install.UpgradeOptions{DryRun: upgradeDryRun, Out: cmd.OutOrStdout()}
+		// The diff goes to stdout, so it can't share the terminal with the TUI.
+		if up.DryRun {
+			tty = nil
+		}
+		return runInstaller(cmd, opts, tty, "upgrade", func(in *install.Installer, ctx context.Context) error {
+			return in.Upgrade(ctx, up)
+		}, "Agent Substrate is upgraded.")
 	},
 }
 
@@ -166,12 +171,13 @@ data.`,
 			return err
 		}
 		defer closeTerminal(tty)
-		opts.IncludeCRDs, opts.Purge = uninstallOpts.IncludeCRDs, uninstallOpts.Purge
+		un := uninstallOpts
 		if !uninstallYes {
-			opts.Confirm = confirmFunc(cmd, tty)
+			un.Confirm = confirmFunc(cmd, tty)
 		}
-		return runInstaller(cmd, opts, tty, "uninstall", (*install.Installer).Uninstall,
-			"Agent Substrate is uninstalled.")
+		return runInstaller(cmd, opts, tty, "uninstall", func(in *install.Installer, ctx context.Context) error {
+			return in.Uninstall(ctx, un)
+		}, "Agent Substrate is uninstalled.")
 	},
 }
 
@@ -179,7 +185,10 @@ data.`,
 // from. Without --config the config is install.DefaultConfig. The terminal is
 // nil when there is none. Close it with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
-	opts := install.Options{ChartDir: chartDir}
+	var opts install.Options
+	if chartDir != "" {
+		opts.Charts = os.DirFS(chartDir)
+	}
 	var err error
 	switch configPath {
 	case "":
@@ -291,7 +300,7 @@ func newInstallerWith(cmd *cobra.Command, opts install.Options, r install.Report
 // lines otherwise. The TUI shows the error itself, so the returned error is
 // marked as reported.
 func runInstaller(cmd *cobra.Command, opts install.Options, tty *os.File, title string, fn func(*install.Installer, context.Context) error, summary string) error {
-	if !useTUI(cmd, tty) || opts.DryRun {
+	if !useTUI(cmd, tty) {
 		in, err := newInstaller(cmd, opts)
 		if err != nil {
 			return err

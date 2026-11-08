@@ -36,21 +36,33 @@ import (
 	"go.ate.dev/substrate/internal/clustertrustbundle"
 )
 
-// ErrAborted is returned when Options.Confirm declines an uninstall.
+// ErrAborted is returned when UninstallOptions.Confirm declines an uninstall.
 var ErrAborted = errors.New("aborted")
 
 var workerPoolsGVR = atev1.GroupVersion.WithResource("workerpools")
 
+// UninstallOptions configures Uninstall.
+type UninstallOptions struct {
+	// IncludeCRDs deletes the CRDs and every custom resource.
+	IncludeCRDs bool
+	// Purge deletes the namespaces, with their CA keys, secrets and database
+	// volume, and the published trust bundles.
+	Purge bool
+	// Confirm is shown what Uninstall will delete and returns whether to go
+	// on. Nil means go on.
+	Confirm func(ctx context.Context, summary string) (bool, error)
+}
+
 // Uninstall removes the releases in the reverse of install order. It keeps
 // CRDs, secrets, the database volume and the namespaces unless
-// Options.IncludeCRDs or Options.Purge say otherwise.
-func (in *Installer) Uninstall(ctx context.Context) error {
-	summary, err := in.inventory(ctx)
+// opts.IncludeCRDs or opts.Purge say otherwise.
+func (in *Installer) Uninstall(ctx context.Context, opts UninstallOptions) error {
+	summary, err := in.inventory(ctx, opts)
 	if err != nil {
 		return err
 	}
-	if in.opts.Confirm != nil {
-		ok, err := in.opts.Confirm(ctx, summary)
+	if opts.Confirm != nil {
+		ok, err := opts.Confirm(ctx, summary)
 		if err != nil {
 			return err
 		}
@@ -58,34 +70,34 @@ func (in *Installer) Uninstall(ctx context.Context) error {
 			return ErrAborted
 		}
 	}
-	steps := []step{
+	steps := []Step{
 		{"Delete worker pools", in.deleteWorkerPools},
 		{"Uninstall Substrate", in.uninstallStep(substrateRelease)},
 		{"Remove PostgreSQL", in.removePostgres},
 		{"Uninstall atelet", in.uninstallStep(ateletRelease)},
 		{"Uninstall certificate controller", in.uninstallStep(podCertRelease)},
 	}
-	if in.opts.IncludeCRDs {
-		steps = append(steps, step{"Uninstall CRDs", in.uninstallStep(crdsRelease)})
+	if opts.IncludeCRDs {
+		steps = append(steps, Step{"Uninstall CRDs", in.uninstallStep(crdsRelease)})
 	}
-	if in.opts.Purge {
+	if opts.Purge {
 		steps = append(steps,
-			step{"Delete trust bundles", in.deleteTrustBundles},
-			step{"Delete namespaces", in.deleteNamespaces},
+			Step{"Delete trust bundles", in.deleteTrustBundles},
+			Step{"Delete namespaces", in.deleteNamespaces},
 		)
 	}
-	return in.run(ctx, steps)
+	return in.Run(ctx, steps)
 }
 
-// inventory describes what Uninstall will remove, for Options.Confirm.
-func (in *Installer) inventory(ctx context.Context) (string, error) {
+// inventory describes what Uninstall will remove, for opts.Confirm.
+func (in *Installer) inventory(ctx context.Context, opts UninstallOptions) (string, error) {
 	var installed []string
 	for _, r := range allReleases {
 		rel, err := in.helm.get(r)
 		if err != nil {
 			return "", err
 		}
-		if rel != nil && (r != crdsRelease || in.opts.IncludeCRDs) {
+		if rel != nil && (r != crdsRelease || opts.IncludeCRDs) {
 			installed = append(installed, r.name)
 		}
 	}
@@ -98,10 +110,10 @@ func (in *Installer) inventory(ctx context.Context) (string, error) {
 	if pools != nil {
 		fmt.Fprintf(&b, "WorkerPools to delete: %d, and every actor running on them\n", len(pools.Items))
 	}
-	if in.opts.IncludeCRDs {
+	if opts.IncludeCRDs {
 		b.WriteString("CRDs to delete, with every WorkerPool, SandboxConfig and CSIDriverConfig\n")
 	}
-	if in.opts.Purge {
+	if opts.Purge {
 		fmt.Fprintf(&b, "Namespaces to delete: %s and %s, with their CA keys, secrets and database volume\n", SystemNamespace, PodCertNamespace)
 	}
 	return b.String(), nil
