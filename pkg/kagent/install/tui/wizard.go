@@ -18,42 +18,38 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/huh"
 	"sigs.k8s.io/yaml"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
+	"go.ate.dev/substrate/pkg/kagent/install"
 )
 
 // Wizard asks for the install choices, stores them in cfg, and prints the
 // matching config to w. It returns install.ErrAborted if the user declines or
 // quits.
 func Wizard(w io.Writer, cfg *install.Config) error {
-	var valuesFile string
-	if len(cfg.Releases.All.ValuesFiles) > 0 {
-		valuesFile = cfg.Releases.All.ValuesFiles[0]
-	}
-	external := func() bool { return cfg.ObjectStore != install.ObjectStoreRustFS }
+	store := &cfg.ObjectStore
+	external := func() bool { return store.Type != install.ObjectStoreBundled }
 	confirmed := true
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewSelect[install.PostgresMode]().
+			huh.NewSelect[install.PostgresType]().
 				Title("PostgreSQL").
 				Options(
 					huh.NewOption("Bundled: single replica, for evaluation only", install.PostgresBundled),
 					huh.NewOption("External: I created the connection Secrets", install.PostgresExternal),
 				).
-				Value(&cfg.Postgres),
-			huh.NewSelect[install.ObjectStore]().
+				Value(&cfg.Postgres.Type),
+			huh.NewSelect[install.ObjectStoreType]().
 				Title("Snapshot storage").
 				Options(
-					huh.NewOption("RustFS in the cluster", install.ObjectStoreRustFS),
+					huh.NewOption("RustFS in the cluster", install.ObjectStoreBundled),
 					huh.NewOption("Amazon S3 or compatible", install.ObjectStoreS3),
 					huh.NewOption("Google Cloud Storage", install.ObjectStoreGCS),
 				).
-				Value(&cfg.ObjectStore),
+				Value(&store.Type),
 			huh.NewConfirm().
 				Title("Install the microVM sandbox class?").
 				Description("Downloads the Kata and Cloud Hypervisor guest assets and stages them in the object store.").
@@ -61,11 +57,31 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 		),
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Values file").
-				Description("Sets objectStore.*, ateApi.snapshotLocation and, for GCS, objectStorePlugin.transferServiceAccount.").
-				Value(&valuesFile).
-				Validate(fileExists),
+				Title("Snapshot bucket").
+				Value(&store.Bucket).
+				Validate(notEmpty),
 		).WithHideFunc(func() bool { return !external() }),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("S3 region").
+				Description("Empty uses the AWS SDK default.").
+				Value(&store.S3.Region),
+			huh.NewInput().
+				Title("S3 endpoint").
+				Description("URL of an S3-compatible service. Empty uses AWS.").
+				Value(&store.S3.Endpoint),
+			huh.NewInput().
+				Title("Credentials Secret").
+				Description("Secret in "+install.SystemNamespace+" with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Empty uses ambient credentials.").
+				Value(&store.S3.CredentialsSecret),
+		).WithHideFunc(func() bool { return store.Type != install.ObjectStoreS3 }),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Transfer service account").
+				Description("Google service account the snapshot exchange impersonates.").
+				Value(&store.GCS.TransferServiceAccount).
+				Validate(notEmpty),
+		).WithHideFunc(func() bool { return store.Type != install.ObjectStoreGCS }),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("MicroVM asset bucket").
@@ -90,10 +106,15 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 	if !confirmed {
 		return install.ErrAborted
 	}
-	if external() {
-		cfg.Releases.All.ValuesFiles = []string{valuesFile}
-	} else {
-		cfg.Releases.All.ValuesFiles = nil
+	// Drop answers to questions the final choices hid.
+	if !external() {
+		store.Bucket = ""
+	}
+	if store.Type != install.ObjectStoreS3 {
+		store.S3 = install.S3ObjectStore{}
+	}
+	if store.Type != install.ObjectStoreGCS {
+		store.GCS = install.GCSObjectStore{}
 	}
 	if !external() || !cfg.MicroVM.Enabled {
 		cfg.MicroVM.AssetBucket = ""
@@ -113,16 +134,6 @@ func Hint(cfg *install.Config) (string, error) {
 		return "", err
 	}
 	return "To skip these questions next time, save this as install.yaml and run kubectl ate install -c install.yaml:\n\n" + string(data) + "\n", nil
-}
-
-func fileExists(p string) error {
-	if p == "" {
-		return errors.New("required")
-	}
-	if _, err := os.Stat(p); err != nil {
-		return fmt.Errorf("can't read %s", p)
-	}
-	return nil
 }
 
 func notEmpty(s string) error {

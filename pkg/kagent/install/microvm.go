@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/yaml"
 
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/microvmassets"
 	"go.ate.dev/substrate/internal/portforward"
 	ateinstall "go.ate.dev/substrate/manifests/ate-install"
+	"go.ate.dev/substrate/pkg/kagent/microvmassets"
 	"go.ate.dev/substrate/pkg/objectstorage"
 )
 
@@ -54,7 +54,7 @@ const (
 // assetTarget is where the microVM assets are staged. endpoint, region and
 // pathStyle come from atelet's objectStore values for an S3 store.
 type assetTarget struct {
-	store     ObjectStore
+	store     ObjectStoreType
 	scheme    string
 	bucket    string
 	endpoint  string
@@ -75,7 +75,7 @@ func (in *Installer) microVMTarget(ctx context.Context) (assetTarget, error) {
 		if bucket == "" {
 			return assetTarget{}, errors.New("substrate release has no rustfs.bucket")
 		}
-		return assetTarget{store: ObjectStoreRustFS, scheme: "s3", bucket: bucket}, nil
+		return assetTarget{store: ObjectStoreBundled, scheme: "s3", bucket: bucket}, nil
 	}
 	atelet, err := in.installedValues(ateletRelease)
 	if err != nil {
@@ -295,7 +295,7 @@ func (b gcsBucket) put(ctx context.Context, object string, r io.Reader) error {
 // uses the caller's own cloud credentials.
 func (in *Installer) assetStore(ctx context.Context, t assetTarget) (assetBucket, func(), error) {
 	switch t.store {
-	case ObjectStoreRustFS:
+	case ObjectStoreBundled:
 		access, secret, err := in.rustfsCredentials(ctx)
 		if err != nil {
 			return nil, nil, err

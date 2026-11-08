@@ -17,7 +17,9 @@ package install
 import (
 	"bytes"
 	"context"
+	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,7 +122,7 @@ func TestLoadEmbeddedCharts(t *testing.T) {
 func TestBootstrapKeepsExistingSecrets(t *testing.T) {
 	ctx := context.Background()
 	kc := fake.NewClientset()
-	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStoreRustFS}}}
+	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreBundled}}}}
 
 	for _, s := range []func(context.Context, func(string)) (string, error){
 		in.createPodCertCAs, in.createIdentitySecrets, in.configureObjectStore,
@@ -203,32 +205,49 @@ func TestApplyPostgresManifest(t *testing.T) {
 }
 
 func TestCheckExternalObjectStore(t *testing.T) {
-	gcs := map[string]any{
-		"ateApi":            map[string]any{"snapshotLocation": "gs://b/"},
-		"objectStorePlugin": map[string]any{"transferServiceAccount": "sa@p.iam.gserviceaccount.com"},
-	}
+	s3 := ObjectStore{Type: ObjectStoreS3, Bucket: "b"}
+	gcs := ObjectStore{Type: ObjectStoreGCS, Bucket: "b", GCS: GCSObjectStore{TransferServiceAccount: "sa@p.iam.gserviceaccount.com"}}
 	tests := []struct {
 		name    string
 		store   ObjectStore
-		user    map[string]any
+		user    map[release]map[string]any
+		stored  map[release]map[string]any
 		secrets []string
 		wantErr string
 	}{
-		{name: "s3", store: ObjectStoreS3, user: map[string]any{"ateApi": map[string]any{"snapshotLocation": "gs://b/"}}},
-		{name: "per-template locations", store: ObjectStoreS3, user: map[string]any{"preview": []any{"PerTemplateSnapshotLocation"}}},
-		{name: "no location", store: ObjectStoreS3, wantErr: "ateApi.snapshotLocation"},
-		{name: "gcs", store: ObjectStoreGCS, user: gcs},
-		{name: "gcs without service account", store: ObjectStoreGCS, user: map[string]any{"ateApi": map[string]any{"snapshotLocation": "gs://b/"}}, wantErr: "transferServiceAccount"},
+		{name: "s3", store: s3},
+		{name: "gcs", store: gcs},
+		{
+			name:  "location from chart values",
+			store: ObjectStore{Type: ObjectStoreS3},
+			user:  map[release]map[string]any{substrateRelease: {"ateApi": map[string]any{"snapshotLocation": "gs://b/"}}},
+		},
+		{
+			name:   "location from the release",
+			store:  ObjectStore{Type: ObjectStoreS3},
+			stored: map[release]map[string]any{substrateRelease: {"ateApi": map[string]any{"snapshotLocation": "gs://b/"}}},
+		},
+		{
+			name:  "per-template locations",
+			store: ObjectStore{Type: ObjectStoreS3},
+			user:  map[release]map[string]any{substrateRelease: {"preview": []any{"PerTemplateSnapshotLocation"}}},
+		},
+		{name: "no location", store: ObjectStore{Type: ObjectStoreS3}, wantErr: "objectStore.bucket"},
+		{name: "gcs without service account", store: ObjectStore{Type: ObjectStoreGCS, Bucket: "b"}, wantErr: "objectStore.gcs.transferServiceAccount"},
 		{
 			name:    "credentials secret present",
-			store:   ObjectStoreS3,
-			user:    map[string]any{"preview": []any{"ALL"}, "objectStore": map[string]any{"credentialsSecret": "s3-creds"}},
+			store:   ObjectStore{Type: ObjectStoreS3, Bucket: "b", S3: S3ObjectStore{CredentialsSecret: "s3-creds"}},
 			secrets: []string{"s3-creds"},
 		},
 		{
 			name:    "credentials secret missing",
-			store:   ObjectStoreS3,
-			user:    map[string]any{"preview": []any{"ALL"}, "objectStore": map[string]any{"credentialsSecret": "s3-creds"}},
+			store:   ObjectStore{Type: ObjectStoreS3, Bucket: "b", S3: S3ObjectStore{CredentialsSecret: "s3-creds"}},
+			wantErr: "doesn't exist",
+		},
+		{
+			name:    "credentials secret from chart values",
+			store:   s3,
+			user:    map[release]map[string]any{ateletRelease: {"objectStore": map[string]any{"credentialsSecret": "s3-creds"}}},
 			wantErr: "doesn't exist",
 		},
 	}
@@ -240,8 +259,14 @@ func TestCheckExternalObjectStore(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: tc.store}}}
-			_, err := in.checkExternalObjectStore(context.Background(), tc.user)
+			in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: tc.store}}, user: map[string]map[string]any{}}
+			for r, v := range tc.user {
+				in.user[r.name] = v
+			}
+			atelet, substrate := in.externalStoreValues()
+			_, err := in.checkExternalObjectStore(context.Background(),
+				mergeValues(tc.stored[substrateRelease], tc.user[substrateRelease], substrate),
+				mergeValues(tc.stored[ateletRelease], tc.user[ateletRelease], atelet))
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("checkExternalObjectStore() = %v", err)
@@ -256,7 +281,7 @@ func TestCheckExternalObjectStore(t *testing.T) {
 }
 
 func TestExternalObjectStoreValues(t *testing.T) {
-	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStoreGCS, Postgres: PostgresExternal}}}
+	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
 	defaults, forced, err := in.ateletValues(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -273,5 +298,66 @@ func TestExternalObjectStoreValues(t *testing.T) {
 	}
 	if got := forced["rustfs"].(map[string]any)["enabled"]; got != false {
 		t.Errorf("substrate rustfs.enabled = %v, want false", got)
+	}
+}
+
+func TestExternalStoreValuesS3(t *testing.T) {
+	userEnv := map[string]any{"name": "HTTPS_PROXY", "value": "http://proxy:3128"}
+	in := &Installer{
+		opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreS3, Bucket: "b", S3: S3ObjectStore{
+			Region: "us-east-1", Endpoint: "http://minio:9000", PathStyle: true, CredentialsSecret: "creds",
+		}}}},
+		user: map[string]map[string]any{substrateRelease.name: {"objectStorePlugin": map[string]any{"extraEnv": []any{userEnv}}}},
+	}
+	atelet, substrate := in.externalStoreValues()
+	wantAtelet := map[string]any{"objectStore": map[string]any{
+		"backend": "s3", "region": "us-east-1", "endpoint": "http://minio:9000", "pathStyle": true, "credentialsSecret": "creds",
+	}}
+	if !reflect.DeepEqual(atelet, wantAtelet) {
+		t.Errorf("atelet values = %v, want %v", atelet, wantAtelet)
+	}
+	secret := func(key string) map[string]any {
+		return map[string]any{"name": key, "valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": "creds", "key": key}}}
+	}
+	wantSubstrate := map[string]any{
+		"rustfs": map[string]any{"enabled": false},
+		"atelet": map[string]any{"storageBackend": "s3"},
+		"ateApi": map[string]any{"snapshotLocation": "gs://b/"},
+		"objectStorePlugin": map[string]any{"extraEnv": []any{
+			userEnv,
+			map[string]any{"name": "AWS_REGION", "value": "us-east-1"},
+			map[string]any{"name": "AWS_ENDPOINT_URL", "value": "http://minio:9000"},
+			map[string]any{"name": "AWS_S3_USE_PATH_STYLE", "value": "true"},
+			secret("AWS_ACCESS_KEY_ID"),
+			secret("AWS_SECRET_ACCESS_KEY"),
+		}},
+	}
+	if !reflect.DeepEqual(substrate, wantSubstrate) {
+		t.Errorf("substrate values = %v, want %v", substrate, wantSubstrate)
+	}
+}
+
+func TestInstallStepsDatabase(t *testing.T) {
+	tests := []struct {
+		postgres  PostgresType
+		wantCheck bool
+	}{
+		{PostgresBundled, false},
+		{PostgresExternal, true},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.postgres), func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Postgres.Type = tc.postgres
+			in := &Installer{opts: Options{Config: cfg}, report: PlainReporter{W: io.Discard}}
+			steps, err := in.InstallSteps()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := slices.ContainsFunc(steps, func(s Step) bool { return s.Name == StepCheckDatabase })
+			if got != tc.wantCheck {
+				t.Errorf("has %q = %t, want %t", StepCheckDatabase, got, tc.wantCheck)
+			}
+		})
 	}
 }

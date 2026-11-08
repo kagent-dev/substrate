@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"time"
 
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -40,27 +39,27 @@ const (
 	PodCertNamespace = "podcertificate-controller-system"
 )
 
-// PostgresMode selects where the control plane's database comes from.
-type PostgresMode string
+// PostgresType selects where the control plane's database comes from.
+type PostgresType string
 
 const (
 	// PostgresBundled applies manifests/ate-install/postgres for evaluation.
 	// It has no backups or high availability.
-	PostgresBundled PostgresMode = "bundled"
+	PostgresBundled PostgresType = "bundled"
 	// PostgresExternal uses connection Secrets the user created.
-	PostgresExternal PostgresMode = "external"
+	PostgresExternal PostgresType = "external"
 )
 
-// ObjectStore selects where snapshots are stored.
-type ObjectStore string
+// ObjectStoreType selects where snapshots are stored.
+type ObjectStoreType string
 
 const (
-	// ObjectStoreRustFS runs RustFS in the cluster with the substrate release.
-	ObjectStoreRustFS ObjectStore = "rustfs"
-	// ObjectStoreS3 and ObjectStoreGCS use a bucket the user configures with
-	// the charts' objectStore, objectStorePlugin and ateApi values.
-	ObjectStoreS3  ObjectStore = "s3"
-	ObjectStoreGCS ObjectStore = "gcs"
+	// ObjectStoreBundled runs RustFS in the cluster with the substrate
+	// release, for evaluation.
+	ObjectStoreBundled ObjectStoreType = "bundled"
+	// ObjectStoreS3 and ObjectStoreGCS use a bucket the user created.
+	ObjectStoreS3  ObjectStoreType = "s3"
+	ObjectStoreGCS ObjectStoreType = "gcs"
 )
 
 // Options configures an Installer.
@@ -68,21 +67,10 @@ type Options struct {
 	Config
 	Kubeconfig string
 	Context    string
-	// ChartDir loads charts from a directory instead of the embedded copies.
-	ChartDir string
+	// Charts holds a directory per chart. Nil uses the embedded charts.
+	Charts fs.FS
 	// HelmLog receives Helm's debug log. Nil discards it.
 	HelmLog io.Writer
-	// DryRun makes Upgrade write manifest diffs to Out instead of applying.
-	DryRun bool
-	Out    io.Writer
-	// IncludeCRDs makes Uninstall delete the CRDs and every custom resource.
-	IncludeCRDs bool
-	// Purge makes Uninstall delete the namespaces, with their CA keys,
-	// secrets and database volume, and the published trust bundles.
-	Purge bool
-	// Confirm is shown what Uninstall will delete and returns whether to go
-	// on. Nil means go on.
-	Confirm func(ctx context.Context, summary string) (bool, error)
 }
 
 // Installer runs install steps against one cluster.
@@ -119,9 +107,9 @@ func New(opts Options, r Reporter) (*Installer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("while creating Kubernetes client: %w", err)
 	}
-	charts := fs.FS(chartsfs.FS)
-	if opts.ChartDir != "" {
-		charts = os.DirFS(opts.ChartDir)
+	charts := opts.Charts
+	if charts == nil {
+		charts = chartsfs.FS
 	}
 	user, err := opts.userValues()
 	if err != nil {
@@ -140,46 +128,61 @@ func New(opts Options, r Reporter) (*Installer, error) {
 	}, nil
 }
 
-// step is one unit of work. run returns a short summary for the report.
-type step struct {
-	name string
-	run  func(ctx context.Context, progress func(string)) (string, error)
+// Step is one unit of work. Run returns a short summary for the report.
+type Step struct {
+	Name string
+	Run  func(ctx context.Context, progress func(string)) (string, error)
 }
 
-func (in *Installer) run(ctx context.Context, steps []step) error {
+// StepCheckDatabase is the name of the install step that checks the
+// connection Secrets for an external database. A caller that sets up the
+// database itself inserts its steps before this one.
+const StepCheckDatabase = "Check database secrets"
+
+// Run runs steps in order and reports each one. It stops at the first error.
+func (in *Installer) Run(ctx context.Context, steps []Step) error {
 	names := make([]string, len(steps))
 	for i, s := range steps {
-		names[i] = s.name
+		names[i] = s.Name
 	}
 	in.report.Report(Event{Kind: Plan, Steps: names})
 	for _, s := range steps {
-		in.report.Report(Event{Kind: StepStarted, Step: s.name})
+		in.report.Report(Event{Kind: StepStarted, Step: s.Name})
 		start := time.Now()
 		progress := func(msg string) {
-			in.report.Report(Event{Kind: StepProgress, Step: s.name, Msg: msg})
+			in.report.Report(Event{Kind: StepProgress, Step: s.Name, Msg: msg})
 		}
-		msg, err := s.run(ctx, progress)
+		msg, err := s.Run(ctx, progress)
 		elapsed := time.Since(start)
 		if err != nil {
-			in.report.Report(Event{Kind: StepFailed, Step: s.name, Err: err, Elapsed: elapsed})
-			return fmt.Errorf("%s: %w", s.name, err)
+			in.report.Report(Event{Kind: StepFailed, Step: s.Name, Err: err, Elapsed: elapsed})
+			return fmt.Errorf("%s: %w", s.Name, err)
 		}
-		in.report.Report(Event{Kind: StepDone, Step: s.name, Msg: msg, Elapsed: elapsed})
+		in.report.Report(Event{Kind: StepDone, Step: s.Name, Msg: msg, Elapsed: elapsed})
 	}
 	return nil
 }
 
-// Install installs every release in order. Rerunning it is safe and resumes a
-// failed install: existing secrets are kept and existing releases are
-// upgraded in place when their chart version matches.
+// Install runs InstallSteps. Rerunning it is safe and resumes a failed
+// install: existing secrets are kept and existing releases are upgraded in
+// place when their chart version matches.
 func (in *Installer) Install(ctx context.Context) error {
-	if err := in.opts.validate(); err != nil {
+	steps, err := in.InstallSteps()
+	if err != nil {
 		return err
 	}
-	if in.opts.Postgres == PostgresBundled {
-		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres: external with a managed database for anything else."})
+	return in.Run(ctx, steps)
+}
+
+// InstallSteps returns the steps that install every release in order.
+func (in *Installer) InstallSteps() ([]Step, error) {
+	if err := in.opts.validate(); err != nil {
+		return nil, err
 	}
-	steps := []step{
+	if in.opts.Postgres.Type == PostgresBundled {
+		in.report.Report(Event{Kind: Note, Msg: "Installing a single-replica PostgreSQL for evaluation only. It has no backups or high availability. Set postgres.type to external with a managed database for anything else."})
+	}
+	steps := []Step{
 		{"Check cluster", in.preflight},
 		{"Install CRDs", in.helmStep(crdsRelease, noValues)},
 		{"Create pod certificate CAs", in.createPodCertCAs},
@@ -189,21 +192,21 @@ func (in *Installer) Install(ctx context.Context) error {
 		{"Configure object storage", in.configureObjectStore},
 		{"Install atelet", in.helmStep(ateletRelease, in.ateletValues)},
 	}
-	if in.opts.Postgres == PostgresBundled {
+	if in.opts.Postgres.Type == PostgresBundled {
 		steps = append(steps,
-			step{"Install PostgreSQL", in.applyPostgres},
-			step{"Set up database", in.setupDatabase},
+			Step{"Install PostgreSQL", in.applyPostgres},
+			Step{"Set up database", in.setupDatabase},
 		)
 	} else {
-		steps = append(steps, step{"Check database secrets", in.checkDatabaseSecrets})
+		steps = append(steps, Step{StepCheckDatabase, in.checkDatabaseSecrets})
 	}
-	steps = append(steps, step{"Install Substrate", in.helmStep(substrateRelease, in.substrateValues)})
+	steps = append(steps, Step{"Install Substrate", in.helmStep(substrateRelease, in.substrateValues)})
 	if in.opts.MicroVM.Enabled {
 		steps = append(steps,
-			step{"Stage microVM assets", in.stageMicroVMAssets},
-			step{"Apply microVM SandboxConfig", in.applyMicroVMSandboxConfig},
+			Step{"Stage microVM assets", in.stageMicroVMAssets},
+			Step{"Apply microVM SandboxConfig", in.applyMicroVMSandboxConfig},
 		)
 	}
-	steps = append(steps, step{"Check API", in.checkAPI})
-	return in.run(ctx, steps)
+	steps = append(steps, Step{"Check API", in.checkAPI})
+	return steps, nil
 }

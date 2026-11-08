@@ -80,15 +80,7 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
-              credentialProviders:
-              - uriAuthority: k8s.io
-                target:
-                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
-                  policies:
-                    backendTLS:
-                      cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                      key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                      root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- include "substrate.credentialProviders" . | nindent 14 }}
       - protocol: HTTP
         routes:
         - backends:
@@ -102,15 +94,7 @@ data:
                   cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
                   root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
-              credentialProviders:
-              - uriAuthority: k8s.io
-                target:
-                  host: {{ include "substrate.fullname" (list "k8s-credential-provider" .) }}.{{ .Release.Namespace }}.svc:50051
-                  policies:
-                    backendTLS:
-                      cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                      key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
-                      root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- include "substrate.credentialProviders" . | nindent 14 }}
       - protocol: TLS
         tcpRoutes:
         - backends:

@@ -166,9 +166,9 @@ func (in *Installer) ateletValues(context.Context) (map[string]any, map[string]a
 		// The release keeps its storage values.
 		return nil, forced, nil
 	}
-	if in.opts.ObjectStore != ObjectStoreRustFS {
-		forced["objectStore"] = map[string]any{"backend": string(in.opts.ObjectStore)}
-		return nil, forced, nil
+	if in.opts.ObjectStore.Type != ObjectStoreBundled {
+		atelet, _ := in.externalStoreValues()
+		return nil, mergeValues(forced, atelet), nil
 	}
 	defaults := map[string]any{
 		"objectStore": map[string]any{
@@ -191,19 +191,77 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 		// The release keeps its storage and database values.
 		return nil, forced, nil
 	}
-	if in.opts.ObjectStore == ObjectStoreRustFS {
+	if in.opts.ObjectStore.Type == ObjectStoreBundled {
 		access, secret, err := in.rustfsCredentials(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
 		forced["rustfs"] = map[string]any{"accessKey": access, "secretKey": secret}
 	} else {
-		forced["rustfs"] = map[string]any{"enabled": false}
+		_, substrate := in.externalStoreValues()
+		forced = mergeValues(forced, substrate)
 	}
-	if in.opts.Postgres == PostgresBundled {
+	if in.opts.Postgres.Type == PostgresBundled {
 		forced["postgres"] = map[string]any{"clientCertificates": map[string]any{"enabled": true}}
 	}
 	return nil, forced, nil
+}
+
+// externalStoreValues returns the values Config.ObjectStore sets on the
+// substrate-atelet and substrate releases for an s3 or gcs store. The
+// substrate chart has no objectStore values, so its control-plane plugin gets
+// the S3 settings as extra environment variables.
+func (in *Installer) externalStoreValues() (atelet, substrate map[string]any) {
+	o := in.opts.ObjectStore
+	store := map[string]any{"backend": string(o.Type)}
+	plugin := map[string]any{}
+	substrate = map[string]any{
+		"rustfs":            map[string]any{"enabled": false},
+		"atelet":            map[string]any{"storageBackend": string(o.Type)},
+		"objectStorePlugin": plugin,
+	}
+	if o.Bucket != "" {
+		substrate["ateApi"] = map[string]any{"snapshotLocation": "gs://" + o.Bucket + "/"}
+	}
+	if sa := o.GCS.TransferServiceAccount; sa != "" {
+		plugin["transferServiceAccount"] = sa
+	}
+
+	var env []any
+	addEnv := func(name string, value any) {
+		e := map[string]any{"name": name}
+		if s, ok := value.(string); ok {
+			e["value"] = s
+		} else {
+			e["valueFrom"] = value
+		}
+		env = append(env, e)
+	}
+	s3 := o.S3
+	if s3.Region != "" {
+		store["region"] = s3.Region
+		addEnv("AWS_REGION", s3.Region)
+	}
+	if s3.Endpoint != "" {
+		store["endpoint"] = s3.Endpoint
+		addEnv("AWS_ENDPOINT_URL", s3.Endpoint)
+	}
+	if s3.PathStyle {
+		store["pathStyle"] = true
+		addEnv("AWS_S3_USE_PATH_STYLE", "true")
+	}
+	if name := s3.CredentialsSecret; name != "" {
+		store["credentialsSecret"] = name
+		for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
+			addEnv(key, map[string]any{"secretKeyRef": map[string]any{"name": name, "key": key}})
+		}
+	}
+	if env != nil {
+		// Lists replace in a merge, so keep the user's entries.
+		user, _ := lookup(in.user[substrateRelease.name], "objectStorePlugin", "extraEnv").([]any)
+		plugin["extraEnv"] = append(append([]any{}, user...), env...)
+	}
+	return map[string]any{"objectStore": store}, substrate
 }
 
 func (in *Installer) waitTrustBundles(ctx context.Context, progress func(string)) (string, error) {

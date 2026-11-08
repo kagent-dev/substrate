@@ -41,7 +41,10 @@ func TestReadConfig(t *testing.T) {
 		{
 			name: "full",
 			in: `postgres: external
-objectStore: gcs
+objectStore:
+  type: gcs
+  bucket: snapshots
+  gcs: {transferServiceAccount: sa@p.iam.gserviceaccount.com}
 microvm: {enabled: true, assetBucket: assets}
 timeout: 5m
 releases:
@@ -49,7 +52,12 @@ releases:
   substrate: {valuesFiles: [db.yaml]}
 `,
 			want: withDefaults(func(c *Config) {
-				c.Postgres, c.ObjectStore = PostgresExternal, ObjectStoreGCS
+				c.Postgres = Postgres{Type: PostgresExternal}
+				c.ObjectStore = ObjectStore{
+					Type:   ObjectStoreGCS,
+					Bucket: "snapshots",
+					GCS:    GCSObjectStore{TransferServiceAccount: "sa@p.iam.gserviceaccount.com"},
+				}
 				c.MicroVM = MicroVM{Enabled: true, AssetBucket: "assets"}
 				c.Timeout = metav1.Duration{Duration: 5 * time.Minute}
 				c.Releases.All = ReleaseValues{
@@ -63,7 +71,34 @@ releases:
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
+		{
+			name: "object store as a string",
+			in:   "objectStore: s3\n",
+			want: withDefaults(func(c *Config) { c.ObjectStore = ObjectStore{Type: ObjectStoreS3} }),
+		},
+		{
+			name: "s3 object store",
+			in:   "objectStore: {type: s3, bucket: b, s3: {region: us-east-1, endpoint: 'http://minio:9000', pathStyle: true, credentialsSecret: creds}}\n",
+			want: withDefaults(func(c *Config) {
+				c.ObjectStore = ObjectStore{Type: ObjectStoreS3, Bucket: "b", S3: S3ObjectStore{
+					Region: "us-east-1", Endpoint: "http://minio:9000", PathStyle: true, CredentialsSecret: "creds",
+				}}
+			}),
+		},
+		{
+			name: "postgres as a struct",
+			in:   "postgres: {type: external}\n",
+			want: withDefaults(func(c *Config) { c.Postgres = Postgres{Type: PostgresExternal} }),
+		},
+		{name: "rustfs alias", in: "objectStore: rustfs\n", want: DefaultConfig()},
+		{name: "rustfs alias in a struct", in: "objectStore: {type: rustfs}\n", want: DefaultConfig()},
 		{name: "bad object store", in: "objectStore: nfs\n", wantErr: "invalid objectStore"},
+		{name: "unknown postgres field", in: "postgres: {type: external, host: db}\n", wantErr: "host"},
+		{name: "bundled with bucket", in: "objectStore: {bucket: b}\n", wantErr: "objectStore"},
+		{name: "bucket with path", in: "objectStore: {type: s3, bucket: b/dir}\n", wantErr: "objectStore.bucket"},
+		{name: "gcs block on s3", in: "objectStore: {type: s3, gcs: {transferServiceAccount: sa}}\n", wantErr: "objectStore.gcs"},
+		{name: "s3 endpoint without scheme", in: "objectStore: {type: s3, s3: {endpoint: minio:9000}}\n", wantErr: "objectStore.s3.endpoint"},
+		{name: "unknown object store field", in: "objectStore: {type: s3, buckets: b}\n", wantErr: "buckets"},
 		{name: "microvm needs bucket", in: "objectStore: s3\nmicrovm: {enabled: true}\n", wantErr: "microvm.assetBucket"},
 		{name: "bad timeout", in: "timeout: 0s\n", wantErr: "timeout"},
 	}

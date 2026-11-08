@@ -28,8 +28,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install"
-	"go.ate.dev/substrate/cmd/kubectl-ate/internal/install/tui"
+	"go.ate.dev/substrate/pkg/kagent/install"
+	"go.ate.dev/substrate/pkg/kagent/install/tui"
 )
 
 var (
@@ -37,14 +37,24 @@ var (
 	chartDir      string
 	noTUI         bool
 	upgradeDryRun bool
-	uninstallOpts install.Options
+	uninstallOpts install.UninstallOptions
 	uninstallYes  bool
 )
 
 const configHelp = `--config takes a YAML file, or - for stdin:
 
-  postgres: bundled        # or external
-  objectStore: rustfs      # or s3, gcs
+  postgres:
+    type: bundled          # or external
+  objectStore:
+    type: bundled          # or s3, gcs
+    bucket: my-snapshots   # for s3 or gcs
+    s3:                    # all optional
+      region: us-east-1
+      endpoint: https://s3.example.com
+      pathStyle: true
+      credentialsSecret: s3-creds # in the system namespace
+    gcs:
+      transferServiceAccount: transfer@my-project.iam.gserviceaccount.com
   microvm:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
@@ -79,10 +89,9 @@ a RustFS for snapshots. On a terminal it asks for these choices first and
 prints the matching config.
 
 For anything but evaluation, create the database connection Secrets
-described in charts/substrate/README.md and set postgres: external. To store
-snapshots in a bucket, set objectStore to s3 or gcs and set the charts'
-objectStore.*, ateApi.snapshotLocation and, for GCS,
-objectStorePlugin.transferServiceAccount values.
+described in charts/substrate/README.md and set postgres.type to external.
+To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
+objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
@@ -132,9 +141,14 @@ releases, and CRD changes that would strand stored objects.
 			return err
 		}
 		defer closeTerminal(tty)
-		opts.DryRun, opts.Out = upgradeDryRun, cmd.OutOrStdout()
-		return runInstaller(cmd, opts, tty, "upgrade", (*install.Installer).Upgrade,
-			"Agent Substrate is upgraded.")
+		up := install.UpgradeOptions{DryRun: upgradeDryRun, Out: cmd.OutOrStdout()}
+		// The diff goes to stdout, so it can't share the terminal with the TUI.
+		if up.DryRun {
+			tty = nil
+		}
+		return runInstaller(cmd, opts, tty, "upgrade", func(in *install.Installer, ctx context.Context) error {
+			return in.Upgrade(ctx, up)
+		}, "Agent Substrate is upgraded.")
 	},
 }
 
@@ -157,12 +171,13 @@ data.`,
 			return err
 		}
 		defer closeTerminal(tty)
-		opts.IncludeCRDs, opts.Purge = uninstallOpts.IncludeCRDs, uninstallOpts.Purge
+		un := uninstallOpts
 		if !uninstallYes {
-			opts.Confirm = confirmFunc(cmd, tty)
+			un.Confirm = confirmFunc(cmd, tty)
 		}
-		return runInstaller(cmd, opts, tty, "uninstall", (*install.Installer).Uninstall,
-			"Agent Substrate is uninstalled.")
+		return runInstaller(cmd, opts, tty, "uninstall", func(in *install.Installer, ctx context.Context) error {
+			return in.Uninstall(ctx, un)
+		}, "Agent Substrate is uninstalled.")
 	},
 }
 
@@ -170,7 +185,10 @@ data.`,
 // from. Without --config the config is install.DefaultConfig. The terminal is
 // nil when there is none. Close it with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
-	opts := install.Options{ChartDir: chartDir}
+	var opts install.Options
+	if chartDir != "" {
+		opts.Charts = os.DirFS(chartDir)
+	}
 	var err error
 	switch configPath {
 	case "":
@@ -282,7 +300,7 @@ func newInstallerWith(cmd *cobra.Command, opts install.Options, r install.Report
 // lines otherwise. The TUI shows the error itself, so the returned error is
 // marked as reported.
 func runInstaller(cmd *cobra.Command, opts install.Options, tty *os.File, title string, fn func(*install.Installer, context.Context) error, summary string) error {
-	if !useTUI(cmd, tty) || opts.DryRun {
+	if !useTUI(cmd, tty) {
 		in, err := newInstaller(cmd, opts)
 		if err != nil {
 			return err
