@@ -259,3 +259,45 @@ definition so the fallback cannot drift between pods.
 {{ toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/*
+The egress gateway's credentialProviders: the bundled k8s.io provider when
+credentialProvider.enabled, then atenetEgress.extraCredentialProviders. Renders
+nothing when there are none, so every injection fails closed.
+*/}}
+{{- define "substrate.credentialProviders" -}}
+{{- $providers := list -}}
+{{- if .Values.credentialProvider.enabled -}}
+{{- $providers = append $providers (dict "name" "k8s.io" "address" (printf "%s.%s.svc:50051" (include "substrate.fullname" (list "k8s-credential-provider" .)) .Release.Namespace)) -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range .Values.atenetEgress.extraCredentialProviders -}}
+{{- if not .name -}}
+{{- fail "atenetEgress.extraCredentialProviders: each provider needs a name" -}}
+{{- end -}}
+{{- if eq .name "k8s.io" -}}
+{{- fail "atenetEgress.extraCredentialProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead" -}}
+{{- end -}}
+{{- if hasKey $seen .name -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: duplicate name %q" .name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[^:]+:[0-9]+$" (.address | default "")) -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: %s needs an address as host:port" .name) -}}
+{{- end -}}
+{{- $_ := set $seen .name true -}}
+{{- $providers = append $providers (dict "name" .name "address" .address) -}}
+{{- end -}}
+{{- if $providers -}}
+credentialProviders:
+{{- range $providers }}
+- uriAuthority: {{ .name | quote }}
+  target:
+    host: {{ .address | quote }}
+    policies:
+      backendTLS:
+        cert: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+        key: /run/podidentity.podcert.ate.dev/credential-bundle.pem
+        root: /run/servicedns.podcert.ate.dev/trust-bundle.pem
+{{- end }}
+{{- end }}
+{{- end -}}
