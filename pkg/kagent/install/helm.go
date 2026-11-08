@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"path"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -239,17 +240,45 @@ func loadChart(charts fs.FS, name string) (*chart.Chart, error) {
 	if err != nil {
 		return nil, fmt.Errorf("while loading chart %s: %w", path.Base(name), err)
 	}
-	stampVersion(ch, version.Version)
+	stampVersion(ch, chartTag())
 	return ch, nil
 }
 
-var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+var (
+	releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+	// pseudoVersion matches the timestamp and commit suffix of a Go
+	// pseudo-version, which has no published images.
+	pseudoVersion = regexp.MustCompile(`\d{14}-[0-9a-f]{12}$`)
+)
+
+// chartTag returns the release tag of this module. A program that imports
+// it gets the version from its go.mod, and kubectl-ate gets it from ldflags.
+func chartTag() string {
+	info, _ := debug.ReadBuildInfo()
+	return moduleTag(info, version.Version)
+}
+
+func moduleTag(info *debug.BuildInfo, fallback string) string {
+	if info == nil {
+		return fallback
+	}
+	for _, m := range info.Deps {
+		if m.Path != "go.ate.dev/substrate" {
+			continue
+		}
+		if m.Replace != nil {
+			m = m.Replace
+		}
+		return m.Version
+	}
+	return fallback
+}
 
 // stampVersion sets the chart and app version from a release tag, the same
 // way .github/scripts/release/publish-charts.sh does. Dev builds keep the
 // versions in Chart.yaml.
 func stampVersion(ch *chart.Chart, tag string) {
-	if !releaseTag.MatchString(tag) {
+	if !releaseTag.MatchString(tag) || pseudoVersion.MatchString(tag) {
 		return
 	}
 	ch.Metadata.Version = strings.TrimPrefix(tag, "v")

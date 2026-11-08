@@ -19,6 +19,7 @@ import (
 	"context"
 	"io"
 	"reflect"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -90,6 +91,8 @@ func TestStampVersion(t *testing.T) {
 		{"v1.2.3-rc.1", "1.2.3-rc.1", "v1.2.3-rc.1"},
 		{"dev", "0.1.0", "0.1.0"},
 		{"v1.2.3-4-gabcdef-dirty+meta", "0.1.0", "0.1.0"},
+		{"v1.0.1-0.20261108120000-abcdef123456", "0.1.0", "0.1.0"},
+		{"", "0.1.0", "0.1.0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.tag, func(t *testing.T) {
@@ -97,6 +100,30 @@ func TestStampVersion(t *testing.T) {
 			stampVersion(ch, tc.tag)
 			if ch.Metadata.Version != tc.wantVersion || ch.Metadata.AppVersion != tc.wantApp {
 				t.Errorf("got version %q app %q, want %q %q", ch.Metadata.Version, ch.Metadata.AppVersion, tc.wantVersion, tc.wantApp)
+			}
+		})
+	}
+}
+
+func TestModuleTag(t *testing.T) {
+	dep := func(version string, replace *debug.Module) *debug.Module {
+		return &debug.Module{Path: "go.ate.dev/substrate", Version: version, Replace: replace}
+	}
+	tests := []struct {
+		name string
+		info *debug.BuildInfo
+		want string
+	}{
+		{"no build info", nil, "fallback"},
+		{"main module", &debug.BuildInfo{}, "fallback"},
+		{"dependency", &debug.BuildInfo{Deps: []*debug.Module{dep("v1.0.2", nil)}}, "v1.0.2"},
+		{"replaced", &debug.BuildInfo{Deps: []*debug.Module{dep("v1.0.0", &debug.Module{Path: "github.com/kagent-dev/substrate", Version: "v1.0.3"})}}, "v1.0.3"},
+		{"local replace", &debug.BuildInfo{Deps: []*debug.Module{dep("v1.0.0", &debug.Module{Path: "../substrate"})}}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moduleTag(tc.info, "fallback"); got != tc.want {
+				t.Errorf("moduleTag() = %q, want %q", got, tc.want)
 			}
 		})
 	}
