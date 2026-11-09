@@ -126,7 +126,7 @@ func (in *Installer) checkVersions(_ context.Context, progress func(string)) (st
 		if st := cur.Info.Status; st.IsPending() {
 			return "", fmt.Errorf("release %s is %s; run helm rollback or helm uninstall on it, then retry", r.name, st)
 		}
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
@@ -171,7 +171,7 @@ func checkSkew(from, to string) error {
 // checkCRDStorage refuses to drop a CRD version that objects are still
 // stored in, which would make them unreadable.
 func (in *Installer) checkCRDStorage(ctx context.Context, _ func(string)) (string, error) {
-	ch, err := loadChart(in.charts, crdsRelease.chart)
+	ch, err := loadChart(in.charts, crdsRelease.chart, in.opts.Version)
 	if err != nil {
 		return "", err
 	}
@@ -234,7 +234,7 @@ func checkStoredVersions(ctx context.Context, c apiextclient.Interface, crds []a
 // out.
 func (in *Installer) diffStep(r release, vf valuesFunc, out io.Writer) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, _ func(string)) (string, error) {
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
