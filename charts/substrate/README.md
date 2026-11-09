@@ -105,7 +105,7 @@ See `values.yaml` for the full set; the important keys:
 | `ateApi.authorization.bootstrapOwners` | `[]` | Global owners; empty defaults to the release's shared `ate-client` ServiceAccount |
 | `ateApi.extraArgs` | `[]` | Additional command-line arguments appended to the ateapi defaults |
 | `otel.endpoint` | `""` | Set to an OTLP endpoint to export traces, metrics, the actor lifecycle events and the router access log |
-| `otel.traces.enabled` | `true` | Set to `false` to export no traces from the router; the Go components do not honor this yet |
+| `otel.traces.enabled` | `true` | Set to `false` to export no traces from the Go components and the router |
 | `otel.traces.endpoint` | `""` | OTLP endpoint for traces, overriding `otel.endpoint` |
 | `otel.traces.samplingRatio` | `0.01` | Fraction of parentless requests that start a trace, applied to the Go components and the router |
 | `otel.metrics.enabled` | `true` | Set to `false` to disable OTLP metrics push; Prometheus scraping remains available |
