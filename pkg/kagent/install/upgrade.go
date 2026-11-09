@@ -254,7 +254,7 @@ func (in *Installer) diffStep(r release, vf valuesFunc, out io.Writer) func(cont
 		if err != nil {
 			return "", err
 		}
-		vals, err := in.releaseValues(ctx, r, vf, false)
+		vals, err := in.releaseValues(ctx, r, vf)
 		if err != nil {
 			return "", err
 		}

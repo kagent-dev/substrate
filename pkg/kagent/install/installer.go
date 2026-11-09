@@ -163,9 +163,9 @@ func (in *Installer) Run(ctx context.Context, steps []Step) error {
 	return nil
 }
 
-// Install runs InstallSteps. Rerunning it is safe and resumes a failed
-// install: existing secrets are kept and existing releases are upgraded in
-// place when their chart version matches.
+// Install runs InstallSteps. It refuses a finished install. Rerunning it
+// resumes a failed install: existing secrets are kept and existing releases
+// are upgraded in place when their chart version matches.
 func (in *Installer) Install(ctx context.Context) error {
 	steps, err := in.InstallSteps()
 	if err != nil {

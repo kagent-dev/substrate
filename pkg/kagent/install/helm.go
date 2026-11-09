@@ -159,7 +159,8 @@ func (h *helmClient) newUpgrade(r release) (*action.Upgrade, error) {
 	}
 	up := action.NewUpgrade(cfg)
 	up.Namespace = r.namespace
-	up.ResetThenReuseValues = true
+	// Don't reuse the release's previous values.
+	up.ResetValues = true
 	return up, nil
 }
 
