@@ -41,8 +41,11 @@ Use the credentials from the substrate release's `rustfs.accessKey` and
 
 This chart reads the same value paths as the substrate chart for `atelet`,
 `objectStorePlugin.node`, `objectStorePlugin.extraEnv`, `preview`, `otel`,
-`image`, `imagePullSecrets` and `global`, so the substrate release's values
-file can configure both releases.
+`image`, `imagePullSecrets`, `podLabels` and `global`, so the substrate release's
+values file can configure both releases.
+
+`podLabels` defaults to `{}` and adds labels to the atelet pod template.
+It cannot set `app`, which is reserved for the DaemonSet selector.
 
 Object storage is set under `objectStore` instead of `rustfs` and
 `atelet.storageBackend`:
