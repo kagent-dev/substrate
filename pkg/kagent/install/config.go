@@ -384,6 +384,7 @@ const (
 	aksCredentialProviderConfig = "/var/lib/kubelet/credential-provider-config.yaml"
 	aksCredentialProviderBinDir = "/var/lib/kubelet/credential-provider"
 	aksCloudConfig              = "/etc/kubernetes/azure.json"
+	aksCloudConfigVolume        = "aks-cloud-config"
 )
 
 // nodeSelector returns the node selector atelet runs with, or nil for every
@@ -416,14 +417,16 @@ func (c Config) profileValues(r release) map[string]any {
 		if c.Profile == ProfileAKS {
 			// Off resets the chart defaults, so atelet loses the kubelet
 			// identity's registry access that an earlier install gave it.
-			config, binDir, hostFiles := "", "", []any{}
+			// userValues adds the cloud config mount when it's on.
+			config, binDir := "", ""
 			if c.AKS.ACRCredentialProvider {
-				config, binDir, hostFiles = aksCredentialProviderConfig, aksCredentialProviderBinDir, []any{aksCloudConfig}
+				config, binDir = aksCredentialProviderConfig, aksCredentialProviderBinDir
 			}
 			atelet["imageCredentialProviderConfig"] = config
 			atelet["imageCredentialProviderConfigYAML"] = ""
 			atelet["imageCredentialProviderBinDir"] = binDir
-			atelet["imageCredentialProviderHostFiles"] = hostFiles
+			atelet["extraVolumes"] = []any{}
+			atelet["extraVolumeMounts"] = []any{}
 		}
 		if len(atelet) > 0 {
 			vals["atelet"] = atelet
@@ -464,7 +467,33 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		}
 		user[r.name] = mergeValues(c.profileValues(r), c.otelValues(r), all, own)
 	}
+	c.addCloudConfigMount(user[ateletRelease.name])
 	return user, nil
+}
+
+// addCloudConfigMount mounts the AKS cloud config, which the ACR credential
+// provider reads, into atelet. It appends to the release's own extraVolumes
+// and extraVolumeMounts, since lists replace in a merge.
+func (c Config) addCloudConfigMount(vals map[string]any) {
+	if c.Profile != ProfileAKS || !c.AKS.ACRCredentialProvider {
+		return
+	}
+	atelet, ok := vals["atelet"].(map[string]any)
+	if !ok {
+		atelet = map[string]any{}
+		vals["atelet"] = atelet
+	}
+	volumes, _ := atelet["extraVolumes"].([]any)
+	mounts, _ := atelet["extraVolumeMounts"].([]any)
+	atelet["extraVolumes"] = append(slices.Clone(volumes), map[string]any{
+		"name":     aksCloudConfigVolume,
+		"hostPath": map[string]any{"path": aksCloudConfig, "type": "File"},
+	})
+	atelet["extraVolumeMounts"] = append(slices.Clone(mounts), map[string]any{
+		"name":      aksCloudConfigVolume,
+		"mountPath": aksCloudConfig,
+		"readOnly":  true,
+	})
 }
 
 func (rv ReleaseValues) read() (map[string]any, error) {

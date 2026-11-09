@@ -16,7 +16,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -31,7 +30,9 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
 
@@ -44,18 +45,10 @@ kind: CredentialProviderConfig
 providers: []`
 	for _, tc := range []struct {
 		name, config, configYAML, binDir string
-		hostFiles                        []string
 		wantError                        string
 	}{
 		{name: "public registries"},
 		{name: "node provider", config: "/etc/srv/kubernetes/cri_auth_config.yaml", binDir: "/home/kubernetes/bin"},
-		{
-			name:      "node provider with host files",
-			config:    "/var/lib/kubelet/credential-provider-config.yaml",
-			binDir:    "/var/lib/kubelet/credential-provider",
-			hostFiles: []string{"/etc/kubernetes/azure.json", "/etc/provider/ca.pem"},
-		},
-		{name: "host files without config", hostFiles: []string{"/etc/kubernetes/azure.json"}, wantError: "imageCredentialProviderHostFiles needs"},
 		{name: "chart provided config", configYAML: providerConfig, binDir: "/home/kubernetes/bin"},
 		{name: "missing bin directory", config: "/etc/provider.yaml", wantError: "must be set together"},
 		{name: "chart provided config without bin directory", configYAML: providerConfig, wantError: "must be set together"},
@@ -69,16 +62,11 @@ providers: []`
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hostFiles, err := json.Marshal(append([]string{}, tc.hostFiles...))
-			if err != nil {
-				t.Fatal(err)
-			}
 			out, err := exec.CommandContext(t.Context(), "helm", "template", "substrate", "../../charts/substrate",
 				"--show-only", "templates/atelet.yaml",
 				"--set-string", "atelet.imageCredentialProviderConfig="+tc.config,
 				"--set-string", "atelet.imageCredentialProviderConfigYAML="+tc.configYAML,
-				"--set-string", "atelet.imageCredentialProviderBinDir="+tc.binDir,
-				"--set-json", "atelet.imageCredentialProviderHostFiles="+string(hostFiles)).CombinedOutput()
+				"--set-string", "atelet.imageCredentialProviderBinDir="+tc.binDir).CombinedOutput()
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(string(out), tc.wantError) {
 					t.Fatalf("render rejected provider config with %q: %v\n%s", tc.wantError, err, out)
@@ -155,22 +143,37 @@ providers: []`
 					}
 				}
 			}
-			var gotFiles []string
-			for _, m := range container.VolumeMounts {
-				if !strings.HasPrefix(m.Name, "image-credential-provider-file-") {
-					continue
-				}
-				i := slices.IndexFunc(pod.Volumes, func(v corev1.Volume) bool { return v.Name == m.Name })
-				if i < 0 || pod.Volumes[i].HostPath == nil || pod.Volumes[i].HostPath.Path != m.MountPath || !m.ReadOnly {
-					t.Errorf("%s must mount host file %s read-only at the same path", m.Name, m.MountPath)
-				}
-				gotFiles = append(gotFiles, m.MountPath)
-			}
-			if !slices.Equal(gotFiles, tc.hostFiles) {
-				t.Errorf("atelet mounts host files %v, want %v", gotFiles, tc.hostFiles)
-			}
 		})
 	}
+}
+
+func TestHelmAteletExtraVolumes(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	objs := helmTemplate(t, "substrate", "../../charts/substrate", "--show-only", "templates/atelet.yaml",
+		"--set-json", `atelet.extraVolumes=[{"name": "extra", "hostPath": {"path": "/etc/extra.json", "type": "File"}}]`,
+		"--set-json", `atelet.extraVolumeMounts=[{"name": "extra", "mountPath": "/etc/extra.json", "readOnly": true}]`)
+	for _, obj := range objs {
+		if obj.GetKind() != "DaemonSet" {
+			continue
+		}
+		var ds appsv1.DaemonSet
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &ds); err != nil {
+			t.Fatal(err)
+		}
+		pod := ds.Spec.Template.Spec
+		wantVolume := corev1.Volume{Name: "extra", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/extra.json", Type: ptr.To(corev1.HostPathFile)}}}
+		if !slices.ContainsFunc(pod.Volumes, func(v corev1.Volume) bool { return reflect.DeepEqual(v, wantVolume) }) {
+			t.Errorf("atelet volumes %v don't include %v", pod.Volumes, wantVolume)
+		}
+		wantMount := corev1.VolumeMount{Name: "extra", MountPath: "/etc/extra.json", ReadOnly: true}
+		if !slices.ContainsFunc(pod.Containers[0].VolumeMounts, func(m corev1.VolumeMount) bool { return reflect.DeepEqual(m, wantMount) }) {
+			t.Errorf("atelet volume mounts %v don't include %v", pod.Containers[0].VolumeMounts, wantMount)
+		}
+		return
+	}
+	t.Fatal("no atelet DaemonSet rendered")
 }
 
 func TestHelmSandboxAssetStorage(t *testing.T) {
@@ -315,7 +318,8 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "atelet.nodeSelector.pool=agents",
 				"--set", "atelet.imageCredentialProviderConfig=/var/lib/kubelet/credential-provider-config.yaml",
 				"--set", "atelet.imageCredentialProviderBinDir=/var/lib/kubelet/credential-provider",
-				"--set", "atelet.imageCredentialProviderHostFiles[0]=/etc/kubernetes/azure.json",
+				"--set-json", `atelet.extraVolumes=[{"name": "azure-json", "hostPath": {"path": "/etc/kubernetes/azure.json", "type": "File"}}]`,
+				"--set-json", `atelet.extraVolumeMounts=[{"name": "azure-json", "mountPath": "/etc/kubernetes/azure.json", "readOnly": true}]`,
 				"--set", "podMonitors.enabled=true",
 				"--set", "podMonitors.apiVersion=azmonitoring.coreos.com/v1",
 				"--set", "image.tag=test",

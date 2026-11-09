@@ -22,9 +22,6 @@ limitations under the License.
 {{- if ne (empty $credentialProviderConfig) (empty .Values.atelet.imageCredentialProviderBinDir) }}
 {{- fail "atelet.imageCredentialProviderConfig (or atelet.imageCredentialProviderConfigYAML) and atelet.imageCredentialProviderBinDir must be set together" }}
 {{- end }}
-{{- if and .Values.atelet.imageCredentialProviderHostFiles (not $credentialProviderConfig) }}
-{{- fail "atelet.imageCredentialProviderHostFiles needs atelet.imageCredentialProviderConfig or atelet.imageCredentialProviderConfigYAML" }}
-{{- end }}
 
 # atelet
 apiVersion: v1
@@ -312,11 +309,9 @@ spec:
           subPath: config.yaml
 {{- end }}
           readOnly: true
-{{- range $i, $path := .Values.atelet.imageCredentialProviderHostFiles }}
-        - name: image-credential-provider-file-{{ $i }}
-          mountPath: {{ $path | quote }}
-          readOnly: true
 {{- end }}
+{{- with .Values.atelet.extraVolumeMounts }}
+{{- toYaml . | nindent 8 }}
 {{- end }}
       volumes:
       - name: objectstore-plugin
@@ -354,12 +349,6 @@ spec:
           path: {{ .Values.atelet.imageCredentialProviderConfig | quote }}
           type: File
 {{- end }}
-{{- range $i, $path := .Values.atelet.imageCredentialProviderHostFiles }}
-      - name: image-credential-provider-file-{{ $i }}
-        hostPath:
-          path: {{ $path | quote }}
-          type: File
-{{- end }}
 {{- end }}
       - name: podidentity
         projected:
@@ -383,6 +372,9 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
+{{- with .Values.atelet.extraVolumes }}
+{{- toYaml . | nindent 6 }}
+{{- end }}
 {{- if .Values.podMonitors.enabled }}
 ---
 apiVersion: {{ .Values.podMonitors.apiVersion }}

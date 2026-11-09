@@ -191,6 +191,11 @@ func TestConfigUserValues(t *testing.T) {
 	}
 }
 
+var (
+	cloudConfigVolume = map[string]any{"name": "aks-cloud-config", "hostPath": map[string]any{"path": "/etc/kubernetes/azure.json", "type": "File"}}
+	cloudConfigMount  = map[string]any{"name": "aks-cloud-config", "mountPath": "/etc/kubernetes/azure.json", "readOnly": true}
+)
+
 func TestConfigUserValuesProfile(t *testing.T) {
 	registry := func(r string) map[string]any {
 		return map[string]any{"global": map[string]any{"imageRegistry": r}}
@@ -228,7 +233,8 @@ func TestConfigUserValuesProfile(t *testing.T) {
 		"imageCredentialProviderConfig":     "/var/lib/kubelet/credential-provider-config.yaml",
 		"imageCredentialProviderConfigYAML": "",
 		"imageCredentialProviderBinDir":     "/var/lib/kubelet/credential-provider",
-		"imageCredentialProviderHostFiles":  []any{"/etc/kubernetes/azure.json"},
+		"extraVolumes":                      []any{cloudConfigVolume},
+		"extraVolumeMounts":                 []any{cloudConfigMount},
 	}
 	substrate := registry("mirror.example.com")
 	substrate["otel"] = otel("http://other:4317")
@@ -244,17 +250,18 @@ func TestConfigUserValuesProfile(t *testing.T) {
 }
 
 func TestConfigUserValuesACRCredentialProvider(t *testing.T) {
-	provider := func(config, binDir string, hostFiles ...any) map[string]any {
-		if hostFiles == nil {
-			hostFiles = []any{}
-		}
+	provider := func(config, binDir string, volumes, mounts []any) map[string]any {
 		return map[string]any{
 			"imageCredentialProviderConfig":     config,
 			"imageCredentialProviderConfigYAML": "",
 			"imageCredentialProviderBinDir":     binDir,
-			"imageCredentialProviderHostFiles":  hostFiles,
+			"extraVolumes":                      volumes,
+			"extraVolumeMounts":                 mounts,
 		}
 	}
+	const config, binDir = "/var/lib/kubelet/credential-provider-config.yaml", "/var/lib/kubelet/credential-provider"
+	userVolume := map[string]any{"name": "extra", "emptyDir": map[string]any{}}
+	userMount := map[string]any{"name": "extra", "mountPath": "/extra"}
 	for _, tc := range []struct {
 		name string
 		c    Config
@@ -264,19 +271,26 @@ func TestConfigUserValuesACRCredentialProvider(t *testing.T) {
 		{
 			name: "aks on",
 			c:    Config{Profile: ProfileAKS, AKS: AKS{ACRCredentialProvider: true}},
-			want: provider("/var/lib/kubelet/credential-provider-config.yaml", "/var/lib/kubelet/credential-provider", "/etc/kubernetes/azure.json"),
+			want: provider(config, binDir, []any{cloudConfigVolume}, []any{cloudConfigMount}),
+		},
+		{
+			name: "aks on keeps the release's own volumes",
+			c: Config{Profile: ProfileAKS, AKS: AKS{ACRCredentialProvider: true}, Releases: Releases{Atelet: ReleaseValues{Values: map[string]any{
+				"atelet": map[string]any{"extraVolumes": []any{userVolume}, "extraVolumeMounts": []any{userMount}},
+			}}}},
+			want: provider(config, binDir, []any{userVolume, cloudConfigVolume}, []any{userMount, cloudConfigMount}),
 		},
 		{
 			name: "aks off resets it",
 			c:    Config{Profile: ProfileAKS},
-			want: provider("", ""),
+			want: provider("", "", []any{}, []any{}),
 		},
 		{
 			name: "aks off keeps the release's own",
 			c: Config{Profile: ProfileAKS, Releases: Releases{Atelet: ReleaseValues{Values: map[string]any{
-				"atelet": provider("/etc/provider.yaml", "/opt/provider"),
+				"atelet": provider("/etc/provider.yaml", "/opt/provider", []any{userVolume}, []any{userMount}),
 			}}}},
-			want: provider("/etc/provider.yaml", "/opt/provider"),
+			want: provider("/etc/provider.yaml", "/opt/provider", []any{userVolume}, []any{userMount}),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

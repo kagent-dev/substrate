@@ -56,14 +56,15 @@ atelet:
   # either one still needs the bin directory.
   imageCredentialProviderConfigYAML: ""
   imageCredentialProviderBinDir: ""
-  # Other host files the providers read, mounted read-only at the same path
-  # (AKS: /etc/kubernetes/azure.json).
-  imageCredentialProviderHostFiles: []
   # Restricts atelet to matching nodes. Every node that runs WorkerPool pods
   # needs an atelet, so cover each pool's nodeSelector here.
   nodeSelector: {}
   extraArgs: []
   extraEnv: []
+  # Added to the atelet pod's volumes and its container's volumeMounts, such
+  # as a host file a credential provider reads.
+  extraVolumes: []
+  extraVolumeMounts: []
   resources:
     requests:
       cpu: 50m
