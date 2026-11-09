@@ -310,9 +310,6 @@ spec:
 {{- end }}
           readOnly: true
 {{- end }}
-{{- with .Values.atelet.extraVolumeMounts }}
-{{- toYaml . | nindent 8 }}
-{{- end }}
       volumes:
       - name: objectstore-plugin
         emptyDir: {}
@@ -372,22 +369,4 @@ spec:
                 matchLabels:
                   podcert.ate.dev/canarying: live
               path: trust-bundle.pem
-{{- with .Values.atelet.extraVolumes }}
-{{- toYaml . | nindent 6 }}
-{{- end }}
-{{- if .Values.podMonitors.enabled }}
----
-apiVersion: {{ .Values.podMonitors.apiVersion }}
-kind: PodMonitor
-metadata:
-  name: {{ include "substrate.fullname" (list "atelet" .) }}
-  namespace: {{ .Release.Namespace }}
-spec:
-  selector:
-    matchLabels:
-      app: atelet
-  podMetricsEndpoints:
-  - port: prometheus
-    path: /metrics
-{{- end }}
 {{- end }}

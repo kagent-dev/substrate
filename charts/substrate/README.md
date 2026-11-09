@@ -97,8 +97,6 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.imageCredentialProviderConfigYAML` | `""` | Credential provider config as text, rendered into a ConfigMap, for nodes where that file cannot be authored or must differ from the kubelet's; mutually exclusive with the host path |
 | `atelet.nodeSelector` | `{}` | Node labels atelet pods must match; must cover the nodes of every WorkerPool |
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
-| `atelet.extraVolumes` | `[]` | Volumes added to the atelet pod, such as a host file a credential provider reads |
-| `atelet.extraVolumeMounts` | `[]` | Volume mounts added to the atelet container |
 | `credentialProvider.enabled` | `true` | Deploy the Kubernetes Secret provider and route `k8s.io` credential URIs to it. With no provider, every credential injection fails closed |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
@@ -115,7 +113,7 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateworkers, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
-| `podMonitors.enabled` | `false` | Render PodMonitors that scrape `/metrics` on atelet, ate-api-server, ate-controller, atenet-router and atenet-egress; ate-controller's only while `otel.metrics.enabled`, since it serves no `/metrics` otherwise |
+| `podMonitors.enabled` | `false` | Render PodMonitors that scrape `/metrics` on ate-api-server, ate-controller, atenet-router and atenet-egress; ate-controller's only while `otel.metrics.enabled`, since it serves no `/metrics` otherwise |
 | `podMonitors.apiVersion` | `monitoring.coreos.com/v1` | PodMonitor API version; `azmonitoring.coreos.com/v1` for Azure Managed Prometheus |
 
 ## Router timeouts

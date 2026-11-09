@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- /* atelet's PodMonitor is in atelet.yaml, so substrate-atelet renders it too. */}}
 {{- if .Values.podMonitors.enabled }}
 {{- $targets := list (list "ate-api-server" "prometheus") (list "atenet-router" "gw-metrics") (list "atenet-egress" "stats") }}
 {{- /* ate-controller closes its metrics port when OTEL_METRICS_EXPORTER is none. */}}

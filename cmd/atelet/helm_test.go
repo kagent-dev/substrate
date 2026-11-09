@@ -151,7 +151,7 @@ func TestHelmAteletExtraVolumes(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	objs := helmTemplate(t, "substrate", "../../charts/substrate", "--show-only", "templates/atelet.yaml",
+	objs := helmTemplate(t, "atelet", "../../charts/substrate-atelet",
 		"--set-json", `atelet.extraVolumes=[{"name": "extra", "hostPath": {"path": "/etc/extra.json", "type": "File"}}]`,
 		"--set-json", `atelet.extraVolumeMounts=[{"name": "extra", "mountPath": "/etc/extra.json", "readOnly": true}]`)
 	for _, obj := range objs {
@@ -174,6 +174,31 @@ func TestHelmAteletExtraVolumes(t *testing.T) {
 		return
 	}
 	t.Fatal("no atelet DaemonSet rendered")
+}
+
+func TestHelmAteletPodMonitor(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	objs := helmTemplate(t, "atelet", "../../charts/substrate-atelet",
+		"--set", "podMonitors.enabled=true", "--set", "podMonitors.apiVersion=azmonitoring.coreos.com/v1")
+	for _, obj := range objs {
+		if obj.GetKind() != "PodMonitor" {
+			continue
+		}
+		if got := obj.GetAPIVersion(); got != "azmonitoring.coreos.com/v1" {
+			t.Errorf("PodMonitor apiVersion = %q, want azmonitoring.coreos.com/v1", got)
+		}
+		want := map[string]any{
+			"selector":            map[string]any{"matchLabels": map[string]any{"app": "atelet"}},
+			"podMetricsEndpoints": []any{map[string]any{"port": "prometheus", "path": "/metrics"}},
+		}
+		if diff := cmp.Diff(want, obj.Object["spec"]); diff != "" {
+			t.Errorf("PodMonitor spec mismatch (-want +got):\n%s", diff)
+		}
+		return
+	}
+	t.Fatal("no PodMonitor rendered")
 }
 
 func TestHelmSandboxAssetStorage(t *testing.T) {
@@ -318,10 +343,6 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "atelet.nodeSelector.pool=agents",
 				"--set", "atelet.imageCredentialProviderConfig=/var/lib/kubelet/credential-provider-config.yaml",
 				"--set", "atelet.imageCredentialProviderBinDir=/var/lib/kubelet/credential-provider",
-				"--set-json", `atelet.extraVolumes=[{"name": "azure-json", "hostPath": {"path": "/etc/kubernetes/azure.json", "type": "File"}}]`,
-				"--set-json", `atelet.extraVolumeMounts=[{"name": "azure-json", "mountPath": "/etc/kubernetes/azure.json", "readOnly": true}]`,
-				"--set", "podMonitors.enabled=true",
-				"--set", "podMonitors.apiVersion=azmonitoring.coreos.com/v1",
 				"--set", "image.tag=test",
 			},
 			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[

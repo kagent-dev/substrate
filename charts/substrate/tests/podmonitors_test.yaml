@@ -15,7 +15,6 @@
 suite: PodMonitors
 templates:
 - podmonitors.yaml
-- atelet.yaml
 release:
   name: custom
   namespace: custom-system
@@ -82,25 +81,3 @@ tests:
   - notEqual:
       path: spec.selector.matchLabels.app
       value: ate-controller
-- it: scrapes atelet's metrics port
-  template: atelet.yaml
-  set:
-    podMonitors.enabled: true
-  documentSelector:
-    path: kind
-    value: PodMonitor
-  asserts:
-  - isAPIVersion:
-      of: monitoring.coreos.com/v1
-  - equal:
-      path: metadata.name
-      value: custom-atelet
-  - equal:
-      path: spec
-      value:
-        selector:
-          matchLabels:
-            app: atelet
-        podMetricsEndpoints:
-        - port: prometheus
-          path: /metrics
