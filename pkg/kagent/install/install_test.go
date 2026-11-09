@@ -90,6 +90,7 @@ func TestStampVersion(t *testing.T) {
 		{"v1.2.3-rc.1", "1.2.3-rc.1", "v1.2.3-rc.1"},
 		{"dev", "0.1.0", "0.1.0"},
 		{"v1.2.3-4-gabcdef-dirty+meta", "0.1.0", "0.1.0"},
+		{"", "0.1.0", "0.1.0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.tag, func(t *testing.T) {
@@ -105,9 +106,12 @@ func TestStampVersion(t *testing.T) {
 func TestLoadEmbeddedCharts(t *testing.T) {
 	for _, r := range allReleases {
 		t.Run(r.chart, func(t *testing.T) {
-			ch, err := loadChart(chartsfs.FS, r.chart)
+			ch, err := loadChart(chartsfs.FS, r.chart, "v1.2.3")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if ch.Metadata.Version != "1.2.3" || ch.Metadata.AppVersion != "v1.2.3" {
+				t.Errorf("got version %q app %q, want 1.2.3 v1.2.3", ch.Metadata.Version, ch.Metadata.AppVersion)
 			}
 			if ch.Name() != r.chart {
 				t.Errorf("chart name = %q, want %q", ch.Name(), r.chart)
