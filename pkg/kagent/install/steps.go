@@ -96,7 +96,7 @@ func noValues(context.Context) (map[string]any, map[string]any, error) { return 
 // real upgrade.
 func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, progress func(string)) (string, error) {
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
