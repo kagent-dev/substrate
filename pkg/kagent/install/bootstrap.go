@@ -346,21 +346,10 @@ func (in *Installer) configureObjectStore(ctx context.Context, _ func(string)) (
 		return "", err
 	}
 	if in.opts.ObjectStore.Type != ObjectStoreBundled {
-		// A resumed install keeps the values the releases already have.
 		atelet, substrate := in.externalStoreValues()
-		vals := map[release]map[string]any{}
-		for r, typed := range map[release]map[string]any{ateletRelease: atelet, substrateRelease: substrate} {
-			rel, err := in.helm.get(r)
-			if err != nil {
-				return "", err
-			}
-			var stored map[string]any
-			if rel != nil {
-				stored = rel.Config
-			}
-			vals[r] = mergeValues(stored, in.user[r.name], typed)
-		}
-		return in.checkExternalObjectStore(ctx, vals[substrateRelease], vals[ateletRelease])
+		return in.checkExternalObjectStore(ctx,
+			mergeValues(in.user[substrateRelease.name], substrate),
+			mergeValues(in.user[ateletRelease.name], atelet))
 	}
 	if ok, err := secretExists(ctx, in.kube, SystemNamespace, rustfsCredentialsSecret); ok || err != nil {
 		return "already present", err

@@ -17,6 +17,7 @@ package install
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"reflect"
 	"slices"
@@ -284,24 +285,29 @@ func TestCheckExternalObjectStore(t *testing.T) {
 	}
 }
 
+// Install and upgrade set the same values from the config.
 func TestExternalObjectStoreValues(t *testing.T) {
-	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
-	defaults, forced, err := in.ateletValues(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defaults != nil {
-		t.Errorf("atelet defaults = %v, want none", defaults)
-	}
-	if got := forced["objectStore"].(map[string]any)["backend"]; got != "gcs" {
-		t.Errorf("atelet objectStore.backend = %v, want gcs", got)
-	}
-	_, forced, err = in.substrateValues(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := forced["rustfs"].(map[string]any)["enabled"]; got != false {
-		t.Errorf("substrate rustfs.enabled = %v, want false", got)
+	for _, upgrading := range []bool{false, true} {
+		t.Run(fmt.Sprintf("upgrading=%v", upgrading), func(t *testing.T) {
+			in := &Installer{upgrading: upgrading, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
+			defaults, forced, err := in.ateletValues(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults != nil {
+				t.Errorf("atelet defaults = %v, want none", defaults)
+			}
+			if got, _ := lookupString(forced, "objectStore", "backend"); got != "gcs" {
+				t.Errorf("atelet objectStore.backend = %q, want gcs", got)
+			}
+			_, forced, err = in.substrateValues(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rustfs, _ := forced["rustfs"].(map[string]any); rustfs["enabled"] != false {
+				t.Errorf("substrate rustfs = %v, want enabled false", forced["rustfs"])
+			}
+		})
 	}
 }
 
