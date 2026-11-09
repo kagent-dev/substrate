@@ -82,7 +82,8 @@ var installCmd = &cobra.Command{
 
 Installs the substrate-crds, substrate-podcert, substrate-atelet and substrate
 Helm releases in order, and creates the CA pools and secrets they need.
-Existing secrets are kept. Rerunning install resumes a failed install.
+Existing secrets are kept. Rerunning install resumes a failed install. Once
+the substrate release is deployed, install refuses to run; use upgrade.
 
 Without --config, install uses a single-replica PostgreSQL for evaluation and
 a RustFS for snapshots. On a terminal it asks for these choices first and
@@ -128,10 +129,11 @@ kubectl ate: the certificate controller, atelet, the CRDs, then the substrate
 release. It doesn't roll WorkerPool worker images, which
 docs/reference/version-skew-policy.md upgrades after atelet.
 
-Each release keeps the values it was installed with. The config's
-releases values are layered on top. Upgrade also reads timeout and
-microvm.assetBucket from the config. It refuses downgrades, skipped minor
-releases, and CRD changes that would strand stored objects.
+Upgrade doesn't reuse the values a release was installed with. Each
+release's values come from the chart and the config, the same way install
+sets them, so pass the config you installed with, changed as needed.
+It refuses downgrades, skipped minor releases, and CRD changes that would
+strand stored objects.
 
 --dry-run prints each release's manifest diff and changes nothing.`,
 	Args: cobra.NoArgs,
