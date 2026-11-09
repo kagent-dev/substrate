@@ -52,8 +52,20 @@ type UpgradeOptions struct {
 	Out    io.Writer
 }
 
-// Upgrade moves every release to the charts in this binary.
+// Upgrade runs UpgradeSteps.
 func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
+	steps, err := in.UpgradeSteps(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return in.Run(ctx, steps)
+}
+
+// UpgradeSteps returns the steps that move every release to the charts in
+// this binary. It reads the cluster to check for the microVM SandboxConfig.
+// After it is called, the Installer's helm steps upgrade releases across
+// chart versions.
+func (in *Installer) UpgradeSteps(ctx context.Context, opts UpgradeOptions) ([]Step, error) {
 	in.upgrading = true
 	steps := []Step{
 		{"Check versions", in.checkVersions},
@@ -63,7 +75,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 		for _, u := range upgradeOrder {
 			steps = append(steps, Step{"Diff " + u.r.name, in.diffStep(u.r, in.valuesFor(u.r), opts.Out)})
 		}
-		return in.Run(ctx, steps)
+		return steps, nil
 	}
 	steps = append(steps,
 		Step{"Create pod certificate CAs", in.createPodCertCAs},
@@ -77,7 +89,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 	// A new release may pin new microVM assets.
 	microVM, err := in.hasMicroVMSandboxConfig(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if microVM {
 		steps = append(steps,
@@ -86,7 +98,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 		)
 	}
 	steps = append(steps, Step{"Check API", in.checkAPI})
-	return in.Run(ctx, steps)
+	return steps, nil
 }
 
 // hasMicroVMSandboxConfig reports whether the microvm SandboxConfig exists.
