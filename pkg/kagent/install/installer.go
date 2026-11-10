@@ -30,6 +30,7 @@ import (
 	chartsfs "go.ate.dev/substrate/charts"
 	"go.ate.dev/substrate/internal/ateclient"
 	"go.ate.dev/substrate/internal/installdefaults"
+	"go.ate.dev/substrate/internal/version"
 )
 
 const (
@@ -71,6 +72,10 @@ type Options struct {
 	Charts fs.FS
 	// HelmLog receives Helm's debug log. Nil discards it.
 	HelmLog io.Writer
+	// Version is the release tag, like v1.0.1, stamped on the charts. Their
+	// images default to it. Empty uses version.Version, which kubectl-ate sets
+	// at build time.
+	Version string
 }
 
 // Installer runs install steps against one cluster.
@@ -106,6 +111,9 @@ func New(opts Options, r Reporter) (*Installer, error) {
 	dc, err := dynamic.NewForConfig(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("while creating Kubernetes client: %w", err)
+	}
+	if opts.Version == "" {
+		opts.Version = version.Version
 	}
 	charts := opts.Charts
 	if charts == nil {
@@ -163,9 +171,9 @@ func (in *Installer) Run(ctx context.Context, steps []Step) error {
 	return nil
 }
 
-// Install runs InstallSteps. Rerunning it is safe and resumes a failed
-// install: existing secrets are kept and existing releases are upgraded in
-// place when their chart version matches.
+// Install runs InstallSteps. It refuses a finished install. Rerunning it
+// resumes a failed install: existing secrets are kept and existing releases
+// are upgraded in place when their chart version matches.
 func (in *Installer) Install(ctx context.Context) error {
 	steps, err := in.InstallSteps()
 	if err != nil {

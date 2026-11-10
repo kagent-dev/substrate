@@ -52,8 +52,20 @@ type UpgradeOptions struct {
 	Out    io.Writer
 }
 
-// Upgrade moves every release to the charts in this binary.
+// Upgrade runs UpgradeSteps.
 func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
+	steps, err := in.UpgradeSteps(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return in.Run(ctx, steps)
+}
+
+// UpgradeSteps returns the steps that move every release to the charts in
+// this binary. It reads the cluster to check for the microVM SandboxConfig.
+// After it is called, the Installer's helm steps upgrade releases across
+// chart versions.
+func (in *Installer) UpgradeSteps(ctx context.Context, opts UpgradeOptions) ([]Step, error) {
 	in.upgrading = true
 	steps := []Step{
 		{"Check versions", in.checkVersions},
@@ -63,7 +75,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 		for _, u := range upgradeOrder {
 			steps = append(steps, Step{"Diff " + u.r.name, in.diffStep(u.r, in.valuesFor(u.r), opts.Out)})
 		}
-		return in.Run(ctx, steps)
+		return steps, nil
 	}
 	steps = append(steps,
 		Step{"Create pod certificate CAs", in.createPodCertCAs},
@@ -77,7 +89,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 	// A new release may pin new microVM assets.
 	microVM, err := in.hasMicroVMSandboxConfig(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if microVM {
 		steps = append(steps,
@@ -86,7 +98,7 @@ func (in *Installer) Upgrade(ctx context.Context, opts UpgradeOptions) error {
 		)
 	}
 	steps = append(steps, Step{"Check API", in.checkAPI})
-	return in.Run(ctx, steps)
+	return steps, nil
 }
 
 // hasMicroVMSandboxConfig reports whether the microvm SandboxConfig exists.
@@ -126,7 +138,7 @@ func (in *Installer) checkVersions(_ context.Context, progress func(string)) (st
 		if st := cur.Info.Status; st.IsPending() {
 			return "", fmt.Errorf("release %s is %s; run helm rollback or helm uninstall on it, then retry", r.name, st)
 		}
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
@@ -171,7 +183,7 @@ func checkSkew(from, to string) error {
 // checkCRDStorage refuses to drop a CRD version that objects are still
 // stored in, which would make them unreadable.
 func (in *Installer) checkCRDStorage(ctx context.Context, _ func(string)) (string, error) {
-	ch, err := loadChart(in.charts, crdsRelease.chart)
+	ch, err := loadChart(in.charts, crdsRelease.chart, in.opts.Version)
 	if err != nil {
 		return "", err
 	}
@@ -234,7 +246,7 @@ func checkStoredVersions(ctx context.Context, c apiextclient.Interface, crds []a
 // out.
 func (in *Installer) diffStep(r release, vf valuesFunc, out io.Writer) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, _ func(string)) (string, error) {
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
@@ -242,7 +254,7 @@ func (in *Installer) diffStep(r release, vf valuesFunc, out io.Writer) func(cont
 		if err != nil {
 			return "", err
 		}
-		vals, err := in.releaseValues(ctx, r, vf, false)
+		vals, err := in.releaseValues(ctx, r, vf)
 		if err != nil {
 			return "", err
 		}

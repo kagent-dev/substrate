@@ -17,6 +17,7 @@ package install
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"reflect"
 	"slices"
@@ -90,6 +91,7 @@ func TestStampVersion(t *testing.T) {
 		{"v1.2.3-rc.1", "1.2.3-rc.1", "v1.2.3-rc.1"},
 		{"dev", "0.1.0", "0.1.0"},
 		{"v1.2.3-4-gabcdef-dirty+meta", "0.1.0", "0.1.0"},
+		{"", "0.1.0", "0.1.0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.tag, func(t *testing.T) {
@@ -105,9 +107,12 @@ func TestStampVersion(t *testing.T) {
 func TestLoadEmbeddedCharts(t *testing.T) {
 	for _, r := range allReleases {
 		t.Run(r.chart, func(t *testing.T) {
-			ch, err := loadChart(chartsfs.FS, r.chart)
+			ch, err := loadChart(chartsfs.FS, r.chart, "v1.2.3")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if ch.Metadata.Version != "1.2.3" || ch.Metadata.AppVersion != "v1.2.3" {
+				t.Errorf("got version %q app %q, want 1.2.3 v1.2.3", ch.Metadata.Version, ch.Metadata.AppVersion)
 			}
 			if ch.Name() != r.chart {
 				t.Errorf("chart name = %q, want %q", ch.Name(), r.chart)
@@ -280,24 +285,29 @@ func TestCheckExternalObjectStore(t *testing.T) {
 	}
 }
 
+// Install and upgrade set the same values from the config.
 func TestExternalObjectStoreValues(t *testing.T) {
-	in := &Installer{opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
-	defaults, forced, err := in.ateletValues(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defaults != nil {
-		t.Errorf("atelet defaults = %v, want none", defaults)
-	}
-	if got := forced["objectStore"].(map[string]any)["backend"]; got != "gcs" {
-		t.Errorf("atelet objectStore.backend = %v, want gcs", got)
-	}
-	_, forced, err = in.substrateValues(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := forced["rustfs"].(map[string]any)["enabled"]; got != false {
-		t.Errorf("substrate rustfs.enabled = %v, want false", got)
+	for _, upgrading := range []bool{false, true} {
+		t.Run(fmt.Sprintf("upgrading=%v", upgrading), func(t *testing.T) {
+			in := &Installer{upgrading: upgrading, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreGCS}, Postgres: Postgres{Type: PostgresExternal}}}}
+			defaults, forced, err := in.ateletValues(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults != nil {
+				t.Errorf("atelet defaults = %v, want none", defaults)
+			}
+			if got, _ := lookupString(forced, "objectStore", "backend"); got != "gcs" {
+				t.Errorf("atelet objectStore.backend = %q, want gcs", got)
+			}
+			_, forced, err = in.substrateValues(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rustfs, _ := forced["rustfs"].(map[string]any); rustfs["enabled"] != false {
+				t.Errorf("substrate rustfs = %v, want enabled false", forced["rustfs"])
+			}
+		})
 	}
 }
 

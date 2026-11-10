@@ -107,23 +107,3 @@ func TestWriteDiff(t *testing.T) {
 		t.Errorf("identical manifests: n = %d, output %q", n, buf.String())
 	}
 }
-
-// Upgrade runs without install options, so it must keep the stored storage
-// values instead of forcing new ones.
-func TestUpgradeKeepsStorageValues(t *testing.T) {
-	in := &Installer{upgrading: true}
-	for _, f := range []valuesFunc{in.ateletValues, in.substrateValues} {
-		defaults, forced, err := f(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if defaults != nil {
-			t.Errorf("defaults = %v, want none", defaults)
-		}
-		for _, k := range []string{"objectStore", "rustfs", "postgres"} {
-			if v, ok := forced[k]; ok {
-				t.Errorf("forced %s = %v on upgrade", k, v)
-			}
-		}
-	}
-}

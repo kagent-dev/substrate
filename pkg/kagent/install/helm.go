@@ -34,8 +34,6 @@ import (
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/storage/driver"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-
-	"go.ate.dev/substrate/internal/version"
 )
 
 // release names a Helm release and the chart it installs.
@@ -159,7 +157,8 @@ func (h *helmClient) newUpgrade(r release) (*action.Upgrade, error) {
 	}
 	up := action.NewUpgrade(cfg)
 	up.Namespace = r.namespace
-	up.ResetThenReuseValues = true
+	// Don't reuse the release's previous values.
+	up.ResetValues = true
 	return up, nil
 }
 
@@ -219,7 +218,7 @@ func asV1(rel any, err error) (*releasev1.Release, error) {
 }
 
 // loadChart reads the chart in directory name of charts.
-func loadChart(charts fs.FS, name string) (*chart.Chart, error) {
+func loadChart(charts fs.FS, name, tag string) (*chart.Chart, error) {
 	var files []*archive.BufferedFile
 	err := fs.WalkDir(charts, name, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -239,7 +238,7 @@ func loadChart(charts fs.FS, name string) (*chart.Chart, error) {
 	if err != nil {
 		return nil, fmt.Errorf("while loading chart %s: %w", path.Base(name), err)
 	}
-	stampVersion(ch, version.Version)
+	stampVersion(ch, tag)
 	return ch, nil
 }
 

@@ -54,6 +54,11 @@ func (in *Installer) preflight(ctx context.Context, progress func(string)) (stri
 	if err != nil {
 		return "", err
 	}
+	if rel != nil && rel.Info.Status == common.StatusDeployed {
+		// The substrate release is the last one, so the install finished.
+		// Changing it is upgrade's job, which can diff it first.
+		return "", fmt.Errorf("release %s %s is already installed; use kubectl ate upgrade to change it", rel.Name, rel.Chart.Metadata.Version)
+	}
 	if rel == nil {
 		// ate-setup installs with kustomize, which this command can't manage.
 		_, err := in.kube.AppsV1().Deployments(SystemNamespace).Get(ctx, "ate-controller", metav1.GetOptions{})
@@ -96,7 +101,7 @@ func noValues(context.Context) (map[string]any, map[string]any, error) { return 
 // real upgrade.
 func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, func(string)) (string, error) {
 	return func(ctx context.Context, progress func(string)) (string, error) {
-		ch, err := loadChart(in.charts, r.chart)
+		ch, err := loadChart(in.charts, r.chart, in.opts.Version)
 		if err != nil {
 			return "", err
 		}
@@ -121,7 +126,7 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 				return "", fmt.Errorf("release %s has chart version %s, want %s; use kubectl ate upgrade", r.name, got, want)
 			}
 		}
-		vals, err := in.releaseValues(ctx, r, vf, cur == nil)
+		vals, err := in.releaseValues(ctx, r, vf)
 		if err != nil {
 			return "", err
 		}
@@ -144,16 +149,12 @@ func (in *Installer) helmStep(r release, vf valuesFunc) func(context.Context, fu
 	}
 }
 
-// releaseValues returns the values to install or upgrade r with. Installer
-// defaults apply only to a first install. An upgrade reuses the release's
-// values, so defaults would override what the user set before.
-func (in *Installer) releaseValues(ctx context.Context, r release, vf valuesFunc, first bool) (map[string]any, error) {
+// releaseValues returns the values to install or upgrade r with. The
+// release's previous values aren't reused.
+func (in *Installer) releaseValues(ctx context.Context, r release, vf valuesFunc) (map[string]any, error) {
 	defaults, forced, err := vf(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if !first {
-		defaults = nil
 	}
 	return mergeValues(defaults, in.user[r.name], forced), nil
 }
@@ -162,10 +163,6 @@ func (in *Installer) releaseValues(ctx context.Context, r release, vf valuesFunc
 // backend of an external store.
 func (in *Installer) ateletValues(context.Context) (map[string]any, map[string]any, error) {
 	forced := map[string]any{"substrateReleaseName": substrateRelease.name}
-	if in.upgrading {
-		// The release keeps its storage values.
-		return nil, forced, nil
-	}
 	if in.opts.ObjectStore.Type != ObjectStoreBundled {
 		atelet, _ := in.externalStoreValues()
 		return nil, mergeValues(forced, atelet), nil
@@ -186,10 +183,6 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 	forced := map[string]any{
 		// atelet is its own release so it can upgrade first.
 		"atelet": map[string]any{"enabled": false},
-	}
-	if in.upgrading {
-		// The release keeps its storage and database values.
-		return nil, forced, nil
 	}
 	if in.opts.ObjectStore.Type == ObjectStoreBundled {
 		access, secret, err := in.rustfsCredentials(ctx)
