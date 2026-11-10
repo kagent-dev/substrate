@@ -94,10 +94,7 @@ spec:
           value: "true"
         - name: RUSTFS_VOLUMES
           value: "/data"
-        - name: RUSTFS_ACCESS_KEY
-          value: {{ .Values.rustfs.accessKey | quote }}
-        - name: RUSTFS_SECRET_KEY
-          value: {{ .Values.rustfs.secretKey | quote }}
+        {{- include "substrate.rustfs.credentialsEnv" (list "RUSTFS_ACCESS_KEY" "RUSTFS_SECRET_KEY" .) | nindent 8 }}
         volumeMounts:
         - name: data
           mountPath: /data
@@ -124,10 +121,7 @@ spec:
         resources:
 {{ toYaml .Values.rustfs.bucketInit.resources | indent 10 }}
         env:
-        - name: AWS_ACCESS_KEY_ID
-          value: {{ .Values.rustfs.accessKey | quote }}
-        - name: AWS_SECRET_ACCESS_KEY
-          value: {{ .Values.rustfs.secretKey | quote }}
+        {{- include "substrate.rustfs.credentialsEnv" (list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" .) | nindent 8 }}
         - name: AWS_REGION
           value: us-east-1
         - name: AWS_ENDPOINT_URL

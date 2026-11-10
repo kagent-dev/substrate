@@ -50,6 +50,10 @@ rustfs:
   bucket: ate-snapshots
   accessKey: rustfsadmin
   secretKey: rustfsadmin
+  # Name of an existing Secret in the release namespace with the keys
+  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. When set, every RustFS
+  # consumer reads the credentials from it and accessKey/secretKey are ignored.
+  existingSecret: ""
   resources:
     requests:
       cpu: 50m

@@ -250,15 +250,42 @@ definition so the fallback cannot drift between pods.
   value: http://{{ include "substrate.fullname" (list "rustfs" .) }}.{{ .Release.Namespace }}.svc:9000
 - name: AWS_S3_USE_PATH_STYLE
   value: "true"
-- name: AWS_ACCESS_KEY_ID
-  value: {{ .Values.rustfs.accessKey | quote }}
-- name: AWS_SECRET_ACCESS_KEY
-  value: {{ .Values.rustfs.secretKey | quote }}
+{{ include "substrate.rustfs.credentialsEnv" (list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" .) }}
 {{- end }}
 {{- with .Values.objectStorePlugin.extraEnv }}
 {{ toYaml . }}
 {{- end }}
 {{- end }}
+
+{{/*
+RustFS credential env vars. Usage:
+  include "substrate.rustfs.credentialsEnv" (list "<access key var>" "<secret key var>" .)
+With rustfs.existingSecret the values come from that Secret's
+AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY keys, otherwise from
+rustfs.accessKey and rustfs.secretKey.
+*/}}
+{{- define "substrate.rustfs.credentialsEnv" -}}
+{{- $ctx := index . 2 -}}
+{{- $secret := $ctx.Values.rustfs.existingSecret -}}
+- name: {{ index . 0 }}
+{{- if $secret }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: AWS_ACCESS_KEY_ID
+{{- else }}
+  value: {{ $ctx.Values.rustfs.accessKey | quote }}
+{{- end }}
+- name: {{ index . 1 }}
+{{- if $secret }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: AWS_SECRET_ACCESS_KEY
+{{- else }}
+  value: {{ $ctx.Values.rustfs.secretKey | quote }}
+{{- end }}
+{{- end -}}
 
 {{/*
 The egress gateway's credentialProviders: the bundled k8s.io provider when
