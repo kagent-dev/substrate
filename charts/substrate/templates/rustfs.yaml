@@ -151,6 +151,7 @@ spec:
           done
           echo "timed out waiting for rustfs"
           exit 1
+{{- if .Values.networkPolicies.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -178,4 +179,5 @@ spec:
     ports:
     - protocol: TCP
       port: api
+{{- end }}
 {{- end }}
