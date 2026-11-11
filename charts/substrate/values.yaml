@@ -257,6 +257,12 @@ image:
   # images under this same path.
   repository: kagent-dev/substrate
   tag: ""
+  # Optional digest per component image, keyed by component name (ateapi,
+  # atecontroller, ate-idp-server, atelet, objectstore-plugin,
+  # kubernetes-secrets), appended to that image's reference after the tag:
+  #   digests:
+  #     ateapi: sha256:...
+  digests: {}
 
 images:
   rustfs: rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b

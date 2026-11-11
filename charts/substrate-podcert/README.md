@@ -34,7 +34,7 @@ PostgreSQL login identities. Entries use
 `namespace/service-account=username[,username]` form.
 
 Configure the controller image through `image.registry`, `image.repository`,
-and `image.tag`. `global.imageRegistry` overrides the registry, and
+`image.tag` and, to pin it by digest, `image.digests.podcertcontroller`. `global.imageRegistry` overrides the registry, and
 `imagePullSecrets` and `global.imagePullSecrets` are merged for the controller pod.
 
 For an existing installation, the controller resources must be transferred out

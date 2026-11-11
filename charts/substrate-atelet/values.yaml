@@ -114,3 +114,6 @@ image:
   # Image path prefix under the registry, ahead of each component name.
   repository: kagent-dev/substrate
   tag: ""
+  # Optional digest per component image, keyed by component name (atelet,
+  # objectstore-plugin), appended to its reference after the tag.
+  digests: {}

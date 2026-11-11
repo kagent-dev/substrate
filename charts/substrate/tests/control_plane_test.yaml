@@ -600,3 +600,20 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs an address as host:port"
+
+- it: pins a component image by digest when image.digests names the component
+  template: ate-api-server.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  set:
+    image.tag: v9.9.9
+    image.digests:
+      ateapi: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  asserts:
+  - equal:
+      path: spec.template.spec.containers[0].image
+      value: ghcr.io/kagent-dev/substrate/ateapi:v9.9.9@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  - equal:
+      path: spec.template.spec.initContainers[0].image
+      value: ghcr.io/kagent-dev/substrate/objectstore-plugin:v9.9.9
