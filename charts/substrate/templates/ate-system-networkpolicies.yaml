@@ -33,6 +33,7 @@
 #
 # Ports are named rather than numbered where the workloads name them, so the
 # policy follows the ports exposed by the chart workloads.
+{{- if .Values.networkPolicies.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -244,3 +245,4 @@ spec:
   - ports:
     - protocol: TCP
       port: https
+{{- end }}

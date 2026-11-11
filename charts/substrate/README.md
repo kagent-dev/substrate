@@ -98,6 +98,7 @@ See `values.yaml` for the full set; the important keys:
 | `atelet.imageCredentialProviderBinDir` | `""` | Host path to the kubelet credential provider binaries; both paths are mounted read-only |
 | `credentialProvider.enabled` | `true` | Deploy the Kubernetes Secret provider and route `k8s.io` credential URIs to it. With no provider, every credential injection fails closed |
 | `credentialProvider.namespacePolicies` | `[]` | Default-deny atespace-to-namespace grants; the chart includes get-only Secret RBAC for the provider |
+| `networkPolicies.enabled` | `true` | Render the chart's NetworkPolicies (the release namespace's default deny and allow rules, and those of k8s-credential-provider and RustFS). Set `false` on a cluster that enforces its own policies, which must then admit the same flows |
 | `ateApi.actorJWTIssuer` | `https://<idp-service>.<namespace>.svc` | Issuer placed in actor JWTs; set a stable URL reachable by relying parties |
 | `objectStorePlugin.extraEnv` | `[]` | Object storage credentials/settings shared by both object-store plugins |
 | `objectStorePlugin.control.resources` / `objectStorePlugin.node.resources` | see `values.yaml` | Resources for the API and node object-store sidecars |

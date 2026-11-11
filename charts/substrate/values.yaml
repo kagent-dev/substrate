@@ -202,6 +202,13 @@ credentialProvider:
       cpu: 500m
       memory: 256Mi
 
+# Render the chart's NetworkPolicies: the default deny and the allow rules for the
+# release namespace, and the policies of k8s-credential-provider and RustFS. A
+# cluster that enforces its own policies instead sets false and must admit the
+# same flows itself.
+networkPolicies:
+  enabled: true
+
 # Name of a ConfigMap in the release namespace that supplies per-environment
 # overrides for ate-api-server (ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING, ...).
 # Mounted via envFrom with optional=true. Created by the chart from these values.

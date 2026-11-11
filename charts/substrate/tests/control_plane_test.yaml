@@ -600,3 +600,38 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs an address as host:port"
+
+- it: renders the ate-system NetworkPolicies by default
+  template: ate-system-networkpolicies.yaml
+  asserts:
+  - containsDocument:
+      kind: NetworkPolicy
+      apiVersion: networking.k8s.io/v1
+
+- it: renders no ate-system NetworkPolicies when networkPolicies.enabled is false
+  template: ate-system-networkpolicies.yaml
+  set:
+    networkPolicies.enabled: false
+  asserts:
+  - hasDocuments:
+      count: 0
+
+- it: renders no credential provider NetworkPolicy when networkPolicies.enabled is false
+  template: k8s-credential-provider.yaml
+  set:
+    networkPolicies.enabled: false
+  asserts:
+  - containsDocument:
+      kind: NetworkPolicy
+      apiVersion: networking.k8s.io/v1
+    not: true
+
+- it: renders no RustFS NetworkPolicy when networkPolicies.enabled is false
+  template: rustfs.yaml
+  set:
+    networkPolicies.enabled: false
+  asserts:
+  - containsDocument:
+      kind: NetworkPolicy
+      apiVersion: networking.k8s.io/v1
+    not: true
