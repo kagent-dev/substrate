@@ -46,7 +46,8 @@ atelet before ate-api-server.
 
 By default, component images are pulled from `ghcr.io/kagent-dev/substrate`
 using the chart `appVersion` as the tag. Override `image.registry` and
-`image.tag` to install from a different image repository or tag.
+`image.tag` to install from a different image repository or tag. Set `image.digests` to pin
+component images by digest, keyed by component name.
 
 The chart installs the Kubernetes credential provider and enables HTTPS egress
 interception. Create the `egress-mitm-ca-pool` Secret and configure actor trust

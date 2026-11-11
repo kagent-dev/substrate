@@ -32,11 +32,14 @@ limitations under the License.
 {{- end -}}
 {{- $registry := default $ctx.Values.image.registry $ctx.Values.global.imageRegistry -}}
 {{- $tag := default $ctx.Chart.AppVersion $ctx.Values.image.tag -}}
-{{- if eq $tag "<none>" -}}
-{{- printf "%s/%s/%s" $registry $ctx.Values.image.repository $name -}}
-{{- else -}}
-{{- printf "%s/%s/%s:%s" $registry $ctx.Values.image.repository $name $tag -}}
+{{- $ref := printf "%s/%s/%s" $registry $ctx.Values.image.repository $name -}}
+{{- if ne $tag "<none>" -}}
+{{- $ref = printf "%s:%s" $ref $tag -}}
 {{- end -}}
+{{- with index ($ctx.Values.image.digests | default dict) $name -}}
+{{- $ref = printf "%s@%s" $ref . -}}
+{{- end -}}
+{{- $ref -}}
 {{- end -}}
 
 {{- define "podcert.imagePullSecrets" -}}

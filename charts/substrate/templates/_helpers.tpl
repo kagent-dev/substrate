@@ -163,6 +163,8 @@ Produces  {image.registry}/{name}:{tag}  where tag is resolved as:
   2. .Chart.AppVersion, if image.tag is empty
   3. no tag (no colon) when image.tag is the sentinel "<none>"
 
+followed by @{digest} when image.digests has an entry for {name}.
+
 The "<none>" sentinel is used by hack/render-manifests.sh so that ko:// refs
 are emitted without a tag, letting `ko resolve` supply the digest at build time.
 */}}
@@ -184,11 +186,14 @@ are emitted without a tag, letting `ko resolve` supply the digest at build time.
 {{- end -}}
 {{- $registry := printf "%s/%s" (default $ctx.Values.image.registry (($ctx.Values.global).imageRegistry)) $ctx.Values.image.repository -}}
 {{- $tag := $ctx.Values.image.tag | default $ctx.Chart.AppVersion -}}
+{{- $ref := printf "%s/%s" $registry $name -}}
 {{- if ne $tag "<none>" -}}
-{{- printf "%s/%s:%s" $registry $name $tag -}}
-{{- else -}}
-{{- printf "%s/%s" $registry $name -}}
+{{- $ref = printf "%s:%s" $ref $tag -}}
 {{- end -}}
+{{- with index ($ctx.Values.image.digests | default dict) $name -}}
+{{- $ref = printf "%s@%s" $ref . -}}
+{{- end -}}
+{{- $ref -}}
 {{- end -}}
 
 {{/*

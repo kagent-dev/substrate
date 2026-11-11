@@ -43,3 +43,6 @@ image:
   registry: ghcr.io
   repository: kagent-dev/substrate
   tag: ""
+  # Optional digest per component image, keyed by component name
+  # (podcertcontroller), appended to its reference after the tag.
+  digests: {}

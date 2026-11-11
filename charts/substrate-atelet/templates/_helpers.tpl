@@ -79,7 +79,11 @@ substrate release references.
 {{- $name := index . 0 -}}
 {{- $ctx := index . 1 -}}
 {{- $registry := default $ctx.Values.image.registry (($ctx.Values.global).imageRegistry) -}}
-{{- printf "%s/%s/%s:%s" $registry $ctx.Values.image.repository $name ($ctx.Values.image.tag | default $ctx.Chart.AppVersion) -}}
+{{- $ref := printf "%s/%s/%s:%s" $registry $ctx.Values.image.repository $name ($ctx.Values.image.tag | default $ctx.Chart.AppVersion) -}}
+{{- with index ($ctx.Values.image.digests | default dict) $name -}}
+{{- $ref = printf "%s@%s" $ref . -}}
+{{- end -}}
+{{- $ref -}}
 {{- end -}}
 
 {{/* imagePullSecrets for a pod spec. Copied from the substrate chart. */}}
