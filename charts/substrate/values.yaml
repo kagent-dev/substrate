@@ -202,6 +202,13 @@ credentialProvider:
       cpu: 500m
       memory: 256Mi
 
+# Where the default gVisor SandboxConfig (gvisor-default) fetches the gVisor
+# release tarballs it pins: each asset is
+# <gvisorReleaseLocation>/<release>/<arch>/gvisor.tar.zstd. A mirror serves the
+# same files under the same paths, at a location the object-store plugin opens
+# (gs:// or s3://); atelet still checks each asset's sha256.
+gvisorReleaseLocation: gs://gvisor/releases/release
+
 # Name of a ConfigMap in the release namespace that supplies per-environment
 # overrides for ate-api-server (ATE_API_POSTGRES_READ_WRITE_CONNECTION_STRING, ...).
 # Mounted via envFrom with optional=true. Created by the chart from these values.
