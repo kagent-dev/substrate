@@ -275,6 +275,10 @@ nothing when there are none, so every injection fails closed.
 {{- if not .name -}}
 {{- fail "atenetEgress.extraCredentialProviders: each provider needs a name" -}}
 {{- end -}}
+{{- $unknown := omit . "name" "address" "cacheTtl" -}}
+{{- if $unknown -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: %s has unknown keys %s; allowed keys are name, address and cacheTtl" .name (keys $unknown | sortAlpha | join ", ")) -}}
+{{- end -}}
 {{- if eq .name "k8s.io" -}}
 {{- fail "atenetEgress.extraCredentialProviders: k8s.io is the bundled provider; set credentialProvider.enabled instead" -}}
 {{- end -}}
@@ -284,13 +288,19 @@ nothing when there are none, so every injection fails closed.
 {{- if not (regexMatch "^[^:]+:[0-9]+$" (.address | default "")) -}}
 {{- fail (printf "atenetEgress.extraCredentialProviders: %s needs an address as host:port" .name) -}}
 {{- end -}}
+{{- if and (hasKey . "cacheTtl") (not (regexMatch "^([0-9]+(ns|us|ms|s|m|h))+$" (toString .cacheTtl))) -}}
+{{- fail (printf "atenetEgress.extraCredentialProviders: %s needs cacheTtl in whole ns, us, ms, s, m or h, like 30s or 0s" .name) -}}
+{{- end -}}
 {{- $_ := set $seen .name true -}}
-{{- $providers = append $providers (dict "name" .name "address" .address) -}}
+{{- $providers = append $providers (pick . "name" "address" "cacheTtl") -}}
 {{- end -}}
 {{- if $providers -}}
 credentialProviders:
 {{- range $providers }}
 - uriAuthority: {{ .name | quote }}
+  {{- if hasKey . "cacheTtl" }}
+  cacheTtl: {{ .cacheTtl | quote }}
+  {{- end }}
   target:
     host: {{ .address | quote }}
     policies:

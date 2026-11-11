@@ -600,3 +600,37 @@ tests:
   asserts:
   - failedTemplate:
       errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs an address as host:port"
+- it: passes an extra provider's cacheTtl to both listeners
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.extraCredentialProviders:
+    - name: vault.example.com
+      address: vault-provider.vault.svc:50051
+      cacheTtl: 0s
+  documentSelector:
+    path: kind
+    value: ConfigMap
+  asserts:
+  - matchRegex:
+      path: data["config.yaml"]
+      pattern: '(?s)uriAuthority: "vault.example.com"\n\s+cacheTtl: "0s"\n\s+target:.*uriAuthority: "vault.example.com"\n\s+cacheTtl: "0s"\n\s+target:'
+- it: rejects an extra provider with a misspelled key
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.extraCredentialProviders:
+    - name: vault.example.com
+      address: vault-provider.vault.svc:50051
+      cacheTTL: 0s
+  asserts:
+  - failedTemplate:
+      errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com has unknown keys cacheTTL; allowed keys are name, address and cacheTtl"
+- it: rejects an extra provider cacheTtl that is not a duration
+  template: atenet-egress.yaml
+  set:
+    atenetEgress.extraCredentialProviders:
+    - name: vault.example.com
+      address: vault-provider.vault.svc:50051
+      cacheTtl: 5 minutes
+  asserts:
+  - failedTemplate:
+      errorMessage: "atenetEgress.extraCredentialProviders: vault.example.com needs cacheTtl in whole ns, us, ms, s, m or h, like 30s or 0s"
