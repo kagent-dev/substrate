@@ -34,7 +34,7 @@ func TestReadConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
-		profile Profile
+		profile string
 		want    Config
 		wantErr string
 	}{
@@ -68,15 +68,22 @@ releases:
 				c.Releases.Substrate.ValuesFiles = []string{"/cfg/db.yaml"}
 			}),
 		},
-		{name: "profile argument sets profile", in: "{}", profile: ProfileAKS, want: withDefaults(func(c *Config) { c.Profile = ProfileAKS })},
-		{name: "storage class", in: "storageClass: managed-csi-premium\n", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
+		{name: "storage class", in: "storageClass: fast\n", want: withDefaults(func(c *Config) { c.StorageClass = "fast" })},
 		{name: "bad storage class", in: "storageClass: Premium_SSD\n", wantErr: "invalid StorageClass name"},
-		{name: "storage class without bundled volumes", in: "postgres: external\nobjectStore: s3\nstorageClass: fast\n", wantErr: "storageClass needs"},
-		{name: "profile argument matches", in: "profile: aks\n", profile: ProfileAKS, want: withDefaults(func(c *Config) { c.Profile = ProfileAKS })},
+		{name: "profile", in: "{}", profile: "aks", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
+		{name: "config wins over the profile", in: "storageClass: fast\n", profile: "aks", want: withDefaults(func(c *Config) { c.StorageClass = "fast" })},
+		{
+			name:    "profile without bundled volumes",
+			in:      "postgres: external\nobjectStore: s3\n",
+			profile: "aks",
+			want: withDefaults(func(c *Config) {
+				c.Postgres, c.ObjectStore = Postgres{Type: PostgresExternal}, ObjectStore{Type: ObjectStoreS3}
+				c.StorageClass = "managed-csi-premium"
+			}),
+		},
 		{name: "empty", in: "", wantErr: "config is empty"},
-		{name: "bad profile", in: "profile: eks\n", wantErr: "invalid profile"},
-		{name: "bad profile argument", in: "{}", profile: "eks", wantErr: "invalid profile"},
-		{name: "profile argument conflicts", in: "profile: aks\n", profile: ProfileGeneric, wantErr: "conflicts"},
+		{name: "bad profile", in: "{}", profile: "eks", wantErr: "invalid profile"},
+		{name: "profile in the config", in: "profile: aks\n", wantErr: "profile"},
 		{name: "image registry", in: "imageRegistry: r.azurecr.io\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "r.azurecr.io" })},
 		{name: "image registry with port", in: "imageRegistry: localhost:5001\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "localhost:5001" })},
 		{name: "image registry with path", in: "imageRegistry: r.azurecr.io/substrate\n", wantErr: "invalid imageRegistry"},
@@ -171,6 +178,17 @@ func TestConfigUserValues(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestProfileConfig(t *testing.T) {
+	for _, p := range append(Profiles(), "") {
+		if _, err := ProfileConfig(p); err != nil {
+			t.Errorf("ProfileConfig(%q): %v", p, err)
+		}
+	}
+	if _, err := ProfileConfig("eks"); err == nil || !strings.Contains(err.Error(), "invalid profile") {
+		t.Errorf("ProfileConfig(eks) error = %v, want invalid profile", err)
 	}
 }
 

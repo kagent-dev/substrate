@@ -44,7 +44,6 @@ var (
 
 const configHelp = `--config takes a YAML file, or - for stdin:
 
-  profile: aks             # or generic
   postgres:
     type: bundled          # or external
   objectStore:
@@ -101,7 +100,7 @@ To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
 objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
 storageClass sets the StorageClass of the bundled PostgreSQL and RustFS
-volumes when they are created. On AKS, managed-csi-premium uses Premium SSDs.
+volumes when they are created.
 
 imageRegistry pulls every image install deploys, including the bundled
 PostgreSQL's, from that registry. It must hold the images under their usual
@@ -110,9 +109,9 @@ paths.
 otelEndpoint points atelet and the control plane at an OTLP collector you
 already run, for traces, metrics and logs. Install doesn't deploy one.
 
-profile selects the kind of cluster, and --profile sets it from the command
-line. generic makes no assumptions. aks is for Azure Kubernetes Service, where
-the wizard suggests managed-csi-premium for storageClass.
+--profile names a config built into kubectl ate. The config from --config is
+layered over it, so its settings win. Maps merge and lists replace, as in Helm
+values. The aks profile sets storageClass to managed-csi-premium.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
@@ -208,29 +207,26 @@ data.`,
 	},
 }
 
-// options reads the config, applies --profile, and finds the terminal to read
-// keys and answers from. Without --config the config is
-// install.DefaultConfig. The terminal is nil when there is none. Close it
-// with closeTerminal.
+// options reads the config, layered over --profile, and finds the terminal to
+// read keys and answers from. Without --config the config is the profile's.
+// The terminal is nil when there is none. Close it with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
 	var opts install.Options
 	if chartDir != "" {
 		opts.Charts = os.DirFS(chartDir)
 	}
-	p := install.Profile(profile)
 	var err error
 	switch configPath {
 	case "":
-		opts.Config = install.DefaultConfig()
-		if err := opts.Config.SetProfile(p); err != nil {
+		if opts.Config, err = install.ProfileConfig(profile); err != nil {
 			return opts, nil, err
 		}
 	case "-":
-		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".", p)
+		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".", profile)
 	default:
 		var f *os.File
 		if f, err = os.Open(configPath); err == nil {
-			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath), p)
+			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath), profile)
 			f.Close()
 		}
 	}
@@ -369,7 +365,7 @@ func init() {
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
 		c.Flags().StringVarP(&configPath, "config", "c", "", "Install config file, or - for stdin")
 		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
-		c.Flags().StringVar(&profile, "profile", "", fmt.Sprintf("Kind of cluster, one of %v; the same as profile in the config", install.Profiles))
+		c.Flags().StringVar(&profile, "profile", "", fmt.Sprintf("Built-in config to layer the config over, one of %v", install.Profiles()))
 	}
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd} {
 		c.Flags().StringVar(&chartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")

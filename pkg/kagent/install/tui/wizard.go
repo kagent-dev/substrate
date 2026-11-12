@@ -27,23 +27,31 @@ import (
 )
 
 // Wizard asks for the install choices, stores them in cfg, and prints the
-// matching config to w. askProfile asks for the profile, otherwise cfg's is
-// kept. It returns install.ErrAborted if the user declines or quits.
+// matching config to w. askProfile first asks for a profile and replaces cfg
+// with install.ProfileConfig of the answer. It returns install.ErrAborted if
+// the user declines or quits.
 func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
+	if askProfile {
+		var profile string
+		options := []huh.Option[string]{huh.NewOption("Any Kubernetes cluster", "")}
+		for _, p := range install.Profiles() {
+			options = append(options, huh.NewOption(p, p))
+		}
+		if err := runForm(huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().Title("Profile").Options(options...).Value(&profile),
+		))); err != nil {
+			return err
+		}
+		var err error
+		if *cfg, err = install.ProfileConfig(profile); err != nil {
+			return err
+		}
+	}
 	store := &cfg.ObjectStore
 	external := func() bool { return store.Type != install.ObjectStoreBundled }
 	bundledVolumes := func() bool { return cfg.Postgres.Type == install.PostgresBundled || !external() }
 	confirmed := true
 	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[install.Profile]().
-				Title("Cluster").
-				Options(
-					huh.NewOption("Any Kubernetes cluster", install.ProfileGeneric),
-					huh.NewOption("Azure Kubernetes Service (AKS)", install.ProfileAKS),
-				).
-				Value(&cfg.Profile),
-		).WithHideFunc(func() bool { return !askProfile }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().
 				Title("PostgreSQL").
@@ -96,8 +104,6 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 			huh.NewInput().
 				Title("StorageClass").
 				Description("For the bundled volumes. Leave empty for the cluster's default.").
-				PlaceholderFunc(func() string { return strings.Join(storageClassSuggestions(cfg.Profile), ", ") }, &cfg.Profile).
-				SuggestionsFunc(func() []string { return storageClassSuggestions(cfg.Profile) }, &cfg.Profile).
 				Value(&cfg.StorageClass).
 				Validate(install.ValidateStorageClass),
 		).WithHideFunc(func() bool { return !bundledVolumes() }),
@@ -123,10 +129,7 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				Value(&confirmed),
 		),
 	)
-	if err := form.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return install.ErrAborted
-		}
+	if err := runForm(form); err != nil {
 		return err
 	}
 	if !confirmed {
@@ -145,9 +148,6 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	if !external() || !cfg.MicroVM.Enabled {
 		cfg.MicroVM.AssetBucket = ""
 	}
-	if !bundledVolumes() {
-		cfg.StorageClass = ""
-	}
 	hint, err := Hint(cfg)
 	if err != nil {
 		return err
@@ -165,12 +165,13 @@ func Hint(cfg *install.Config) (string, error) {
 	return "To skip these questions next time, save this as install.yaml and run kubectl ate install -c install.yaml:\n\n" + string(data) + "\n", nil
 }
 
-// storageClassSuggestions lists the StorageClasses to suggest on profile p.
-func storageClassSuggestions(p install.Profile) []string {
-	if p == install.ProfileAKS {
-		return []string{"managed-csi-premium"}
+// runForm runs f. It returns install.ErrAborted if the user quits.
+func runForm(f *huh.Form) error {
+	err := f.Run()
+	if errors.Is(err, huh.ErrUserAborted) {
+		return install.ErrAborted
 	}
-	return nil
+	return err
 }
 
 func notEmpty(s string) error {

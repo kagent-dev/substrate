@@ -80,7 +80,7 @@ func TestHint(t *testing.T) {
 		}(),
 		func() install.Config {
 			c := install.DefaultConfig()
-			c.Profile, c.ImageRegistry = install.ProfileAKS, "r.azurecr.io"
+			c.ImageRegistry, c.StorageClass = "r.azurecr.io", "managed-csi-premium"
 			c.OTelEndpoint = "http://collector:4317"
 			return c
 		}(),

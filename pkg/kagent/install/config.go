@@ -16,13 +16,13 @@ package install
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -33,11 +33,14 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// profileFS holds the built-in profiles, one config file each.
+//
+//go:embed profiles/*.yaml
+var profileFS embed.FS
+
 // Config describes an installation. Install, upgrade and uninstall read it
 // from the file passed to --config.
 type Config struct {
-	// Profile selects the kind of cluster.
-	Profile     Profile     `json:"profile,omitempty"`
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
@@ -179,19 +182,6 @@ func (o ObjectStore) validate() error {
 	return nil
 }
 
-// Profile selects the kind of cluster to install on.
-type Profile string
-
-const (
-	// ProfileGeneric makes no assumptions about the cluster.
-	ProfileGeneric Profile = "generic"
-	// ProfileAKS installs on Azure Kubernetes Service.
-	ProfileAKS Profile = "aks"
-)
-
-// Profiles lists the valid profiles.
-var Profiles = []Profile{ProfileGeneric, ProfileAKS}
-
 // MicroVM configures the microvm sandbox class.
 type MicroVM struct {
 	// Enabled stages the microVM guest assets and applies the microvm
@@ -205,27 +195,44 @@ type MicroVM struct {
 // DefaultConfig is an evaluation install: bundled PostgreSQL and RustFS.
 func DefaultConfig() Config {
 	return Config{
-		Profile:     ProfileGeneric,
 		Postgres:    Postgres{Type: PostgresBundled},
 		ObjectStore: ObjectStore{Type: ObjectStoreBundled},
 		Timeout:     metav1.Duration{Duration: 10 * time.Minute},
 	}
 }
 
-// ReadConfig decodes a config from r and fills unset fields from
-// DefaultConfig. dir resolves relative ValuesFiles. A non-empty profile is
-// applied with SetProfile.
-func ReadConfig(r io.Reader, dir string, profile Profile) (Config, error) {
+// Profiles lists the built-in profiles. Each is a config file that ReadConfig
+// and ProfileConfig layer a config over.
+func Profiles() []string {
+	entries, err := profileFS.ReadDir("profiles")
+	if err != nil {
+		panic(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
+	}
+	return names
+}
+
+// ReadConfig decodes a config from r and fills unset fields from the profile,
+// then from DefaultConfig. An empty profile is none. dir resolves relative
+// ValuesFiles.
+func ReadConfig(r io.Reader, dir string, profile string) (Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
 	}
-	cfg := DefaultConfig()
 	if len(bytes.TrimSpace(data)) == 0 {
 		return Config{}, errors.New("config is empty")
 	}
-	if err := yaml.UnmarshalStrict(data, &cfg); err != nil {
+	var user map[string]any
+	if err := yaml.UnmarshalStrict(data, &user); err != nil {
 		return Config{}, fmt.Errorf("while decoding config: %w", err)
+	}
+	cfg, err := layerConfig(profile, user)
+	if err != nil {
+		return Config{}, err
 	}
 	for _, rv := range cfg.Releases.all() {
 		for i, f := range rv.ValuesFiles {
@@ -234,26 +241,41 @@ func ReadConfig(r io.Reader, dir string, profile Profile) (Config, error) {
 			}
 		}
 	}
-	if err := cfg.SetProfile(profile); err != nil {
+	return cfg, cfg.validate()
+}
+
+// ProfileConfig returns DefaultConfig with the profile's settings. An empty
+// profile is DefaultConfig.
+func ProfileConfig(profile string) (Config, error) {
+	cfg, err := layerConfig(profile, nil)
+	if err != nil {
 		return Config{}, err
 	}
 	return cfg, cfg.validate()
 }
 
-// SetProfile sets the profile unless p is empty. A profile already set to
-// anything but generic must equal p.
-func (c *Config) SetProfile(p Profile) error {
-	if p == "" {
-		return nil
+// layerConfig decodes user over the profile over DefaultConfig. Maps merge
+// and lists replace, as in Helm values.
+func layerConfig(profile string, user map[string]any) (Config, error) {
+	var base map[string]any
+	if profile != "" {
+		data, err := profileFS.ReadFile("profiles/" + profile + ".yaml")
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid profile %q: must be one of %v", profile, Profiles())
+		}
+		if err := yaml.UnmarshalStrict(data, &base); err != nil {
+			return Config{}, fmt.Errorf("while decoding profile %s: %w", profile, err)
+		}
 	}
-	if err := validateProfile(p); err != nil {
-		return err
+	data, err := json.Marshal(mergeValues(base, user))
+	if err != nil {
+		return Config{}, err
 	}
-	if c.Profile != ProfileGeneric && c.Profile != p {
-		return fmt.Errorf("profile %s conflicts with profile: %s in the config", p, c.Profile)
+	cfg := DefaultConfig()
+	if err := decodeStrict(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("while decoding config: %w", err)
 	}
-	c.Profile = p
-	return nil
+	return cfg, nil
 }
 
 // validateImageRegistry checks that s is empty or a registry host.
@@ -293,9 +315,6 @@ func ValidateOTelEndpoint(s string) error {
 }
 
 func (c Config) validate() error {
-	if err := validateProfile(c.Profile); err != nil {
-		return err
-	}
 	if err := validateImageRegistry(c.ImageRegistry); err != nil {
 		return err
 	}
@@ -307,13 +326,8 @@ func (c Config) validate() error {
 	if err := c.ObjectStore.validate(); err != nil {
 		return err
 	}
-	if c.StorageClass != "" {
-		if err := ValidateStorageClass(c.StorageClass); err != nil {
-			return fmt.Errorf("storageClass: %w", err)
-		}
-		if c.Postgres.Type != PostgresBundled && c.ObjectStore.Type != ObjectStoreBundled {
-			return fmt.Errorf("storageClass needs postgres.type: %s or objectStore.type: %s", PostgresBundled, ObjectStoreBundled)
-		}
+	if err := ValidateStorageClass(c.StorageClass); err != nil {
+		return fmt.Errorf("storageClass: %w", err)
 	}
 	if err := ValidateOTelEndpoint(c.OTelEndpoint); err != nil {
 		return fmt.Errorf("otelEndpoint: %w", err)
@@ -323,13 +337,6 @@ func (c Config) validate() error {
 	}
 	if c.Timeout.Duration <= 0 {
 		return errors.New("timeout must be positive")
-	}
-	return nil
-}
-
-func validateProfile(p Profile) error {
-	if !slices.Contains(Profiles, p) {
-		return fmt.Errorf("invalid profile %q: must be one of %v", p, Profiles)
 	}
 	return nil
 }
