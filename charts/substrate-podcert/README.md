@@ -5,8 +5,10 @@ of the application release. It issues service DNS and pod identity certificates
 and publishes their cluster trust bundles. It does not require PostgreSQL or
 a certificate issued by itself.
 
-The cluster must enable `ClusterTrustBundle`, `ClusterTrustBundleProjection`,
-and `PodCertificateRequest`, including the `certificates.k8s.io/v1beta1` API.
+The cluster must serve Pod Certificates and Cluster Trust Bundles. Kubernetes
+1.37 and later serve them at `certificates.k8s.io/v1` by default. On earlier
+versions, enable `ClusterTrustBundle`, `ClusterTrustBundleProjection`, and
+`PodCertificateRequest`, including the `certificates.k8s.io/v1beta1` API.
 Create `service-dns-ca-pool`, `pod-identity-ca-pool`, and `postgres-ca-pool`
 Secrets in the controller's namespace before installation. Each Secret must
 contain a signing pool in its `pool` key. The existing setup command creates
