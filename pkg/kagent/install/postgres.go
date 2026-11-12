@@ -118,7 +118,7 @@ func postgresManifest(c Config) ([]byte, error) {
 		TypeMeta:  kusttypes.TypeMeta{APIVersion: kusttypes.KustomizationVersion, Kind: kusttypes.KustomizationKind},
 		Resources: []string{"../kind/postgres"},
 	}
-	if r := c.imageRegistry(); r != "" {
+	if r := c.ImageRegistry; r != "" {
 		overlay.Images = []kusttypes.Image{{Name: "postgres", NewName: r + "/postgres"}}
 	}
 	if sc := c.StorageClass; sc != "" {

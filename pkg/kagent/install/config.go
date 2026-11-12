@@ -43,6 +43,10 @@ type Config struct {
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
+	// ImageRegistry is a registry to pull every image kubectl ate installs
+	// from, like myregistry.azurecr.io. It must hold the images under their
+	// usual paths. Empty keeps each image's own registry.
+	ImageRegistry string `json:"imageRegistry,omitempty"`
 	// StorageClass is the StorageClass of the bundled PostgreSQL and RustFS
 	// volumes. Empty uses the cluster's default.
 	StorageClass string `json:"storageClass,omitempty"`
@@ -192,11 +196,6 @@ var Profiles = []Profile{ProfileGeneric, ProfileAKS}
 
 // AKS configures the aks profile.
 type AKS struct {
-	// ACR is the login server of an Azure Container Registry to pull every
-	// image kubectl ate installs from, like myregistry.azurecr.io. The
-	// registry must hold the images under their usual paths, and the cluster
-	// must be attached to it.
-	ACR string `json:"acr,omitempty"`
 	// NodePool restricts atelet to the nodes of one node pool. WorkerPools
 	// then need the same node selector.
 	NodePool string `json:"nodePool,omitempty"`
@@ -274,15 +273,15 @@ func (c *Config) SetProfile(p Profile) error {
 	return nil
 }
 
-// ValidateACR checks that s is empty or an Azure Container Registry login
-// server.
-func ValidateACR(s string) error {
+// validateImageRegistry checks that s is empty or a registry host.
+func validateImageRegistry(s string) error {
 	if s == "" {
 		return nil
 	}
-	// Without a dot, image references read the name as a Docker Hub namespace.
-	if !strings.Contains(s, ".") || strings.ContainsFunc(s, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
-		return fmt.Errorf("invalid ACR %q: must be a login server like myregistry.azurecr.io", s)
+	// Image references read a first component without a dot or a port as a
+	// Docker Hub namespace.
+	if !strings.ContainsAny(s, ".:") || strings.ContainsFunc(s, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
+		return fmt.Errorf("invalid imageRegistry %q: must be a registry host like myregistry.azurecr.io", s)
 	}
 	return nil
 }
@@ -325,8 +324,8 @@ func (c Config) validate() error {
 	if c.AKS != (AKS{}) && c.Profile != ProfileAKS {
 		return fmt.Errorf("aks needs profile: %s", ProfileAKS)
 	}
-	if err := ValidateACR(c.AKS.ACR); err != nil {
-		return fmt.Errorf("aks.acr: %w", err)
+	if err := validateImageRegistry(c.ImageRegistry); err != nil {
+		return err
 	}
 	if err := ValidateNodePool(c.AKS.NodePool); err != nil {
 		return fmt.Errorf("aks.nodePool: %w", err)
@@ -366,13 +365,13 @@ func validateProfile(p Profile) error {
 	return nil
 }
 
-// imageRegistry returns the registry to pull every image kubectl ate installs
-// from, or "" to keep each image's own.
-func (c Config) imageRegistry() string {
-	if c.Profile == ProfileAKS {
-		return c.AKS.ACR
+// registryValues returns the Helm values that pull a release's images from
+// ImageRegistry.
+func (c Config) registryValues() map[string]any {
+	if c.ImageRegistry == "" {
+		return nil
 	}
-	return ""
+	return map[string]any{"global": map[string]any{"imageRegistry": c.ImageRegistry}}
 }
 
 // aksNodePoolLabel is the node label AKS sets to the node's pool name.
@@ -399,9 +398,6 @@ func (c Config) nodeSelector() map[string]string {
 // profileValues returns the profile's Helm values for r.
 func (c Config) profileValues(r release) map[string]any {
 	vals := map[string]any{}
-	if reg := c.imageRegistry(); reg != "" {
-		vals["global"] = map[string]any{"imageRegistry": reg}
-	}
 	if c.Profile == ProfileAKS && c.AKS.ManagedPrometheus && (r == ateletRelease || r == substrateRelease) {
 		vals["podMonitors"] = map[string]any{"enabled": true, "apiVersion": managedPrometheusAPI}
 	}
@@ -447,9 +443,9 @@ func (c Config) otelValues(r release) map[string]any {
 	return map[string]any{"otel": map[string]any{"endpoint": c.OTelEndpoint}}
 }
 
-// userValues returns each release's values, keyed by release name: the
-// profile's and OTelEndpoint's, All's files and values, then the release's
-// own.
+// userValues returns each release's values, keyed by release name:
+// ImageRegistry's, the profile's and OTelEndpoint's, All's files and values,
+// then the release's own.
 func (c Config) userValues() (map[string]map[string]any, error) {
 	all, err := c.Releases.All.read()
 	if err != nil {
@@ -465,7 +461,7 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		user[r.name] = mergeValues(c.profileValues(r), c.otelValues(r), all, own)
+		user[r.name] = mergeValues(c.registryValues(), c.profileValues(r), c.otelValues(r), all, own)
 	}
 	c.addCloudConfigMount(user[ateletRelease.name])
 	return user, nil

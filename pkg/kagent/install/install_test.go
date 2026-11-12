@@ -242,7 +242,7 @@ func TestPostgresManifestRegistry(t *testing.T) {
 		}
 		return out
 	}
-	base, mirrored := images(Config{}), images(Config{Profile: ProfileAKS, AKS: AKS{ACR: "r.azurecr.io"}})
+	base, mirrored := images(Config{}), images(Config{ImageRegistry: "r.azurecr.io"})
 	if len(base) == 0 || len(base) != len(mirrored) {
 		t.Fatalf("got images %v and %v, want the same nonzero count", base, mirrored)
 	}

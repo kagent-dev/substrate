@@ -46,7 +46,6 @@ const configHelp = `--config takes a YAML file, or - for stdin:
 
   profile: aks             # or generic
   aks:                     # for profile: aks
-    acr: my.azurecr.io     # pull the images from it
     nodePool: agents       # run atelet only in this pool
     acrCredentialProvider: true # pull actor images from ACR
     managedPrometheus: true # scrape metrics with Azure Managed Prometheus
@@ -65,6 +64,7 @@ const configHelp = `--config takes a YAML file, or - for stdin:
   microvm:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
+  imageRegistry: my.azurecr.io # pull every image from it
   storageClass: fast       # bundled volumes; empty for the default
   otelEndpoint: http://otel-collector:4317 # your OTLP collector
   timeout: 10m             # each wait for workloads
@@ -107,16 +107,17 @@ objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 storageClass sets the StorageClass of the bundled PostgreSQL and RustFS
 volumes when they are created. On AKS, managed-csi-premium uses Premium SSDs.
 
+imageRegistry pulls every image install deploys, including the bundled
+PostgreSQL's, from that registry. It must hold the images under their usual
+paths.
+
 otelEndpoint points atelet and the control plane at an OTLP collector you
 already run, for traces, metrics and logs. Install doesn't deploy one.
 
 profile selects the kind of cluster, and --profile sets it from the command
 line. generic makes no assumptions. aks is for Azure Kubernetes Service. It
 checks that a NetworkPolicy engine is installed, since AKS ignores
-NetworkPolicy without one. With aks.acr set, install pulls every image it installs, including the
-bundled PostgreSQL's, from that Azure Container Registry. Import the images
-under their usual paths with az acr import and attach the registry with
-az aks update --attach-acr first.
+NetworkPolicy without one.
 
 aks.nodePool runs atelet only on the nodes of that pool. Give each WorkerPool
 the nodeSelector kubernetes.azure.com/agentpool with the pool's name.

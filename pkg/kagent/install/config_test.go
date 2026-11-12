@@ -70,17 +70,17 @@ releases:
 		},
 		{
 			name: "aks",
-			in:   "profile: aks\naks: {acr: r.azurecr.io}\n",
+			in:   "profile: aks\naks: {nodePool: agents}\n",
 			want: withDefaults(func(c *Config) {
-				c.Profile, c.AKS.ACR = ProfileAKS, "r.azurecr.io"
+				c.Profile, c.AKS.NodePool = ProfileAKS, "agents"
 			}),
 		},
 		{
 			name:    "profile argument sets profile",
-			in:      "aks: {acr: r.azurecr.io}\n",
+			in:      "aks: {nodePool: agents}\n",
 			profile: ProfileAKS,
 			want: withDefaults(func(c *Config) {
-				c.Profile, c.AKS.ACR = ProfileAKS, "r.azurecr.io"
+				c.Profile, c.AKS.NodePool = ProfileAKS, "agents"
 			}),
 		},
 		{name: "storage class", in: "storageClass: managed-csi-premium\n", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
@@ -91,16 +91,17 @@ releases:
 		{name: "bad profile", in: "profile: eks\n", wantErr: "invalid profile"},
 		{name: "bad profile argument", in: "{}", profile: "eks", wantErr: "invalid profile"},
 		{name: "profile argument conflicts", in: "profile: aks\n", profile: ProfileGeneric, wantErr: "conflicts"},
-		{name: "aks needs profile", in: "aks: {acr: r.azurecr.io}\n", wantErr: "aks needs profile: aks"},
-		{name: "acr with path", in: "profile: aks\naks: {acr: r.azurecr.io/substrate}\n", wantErr: "invalid ACR"},
-		{name: "acr without domain", in: "profile: aks\naks: {acr: myregistry}\n", wantErr: "invalid ACR"},
-		{name: "node pool", in: "profile: aks\naks: {nodePool: agents}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.NodePool = ProfileAKS, "agents" })},
+		{name: "aks needs profile", in: "aks: {nodePool: agents}\n", wantErr: "aks needs profile: aks"},
+		{name: "image registry", in: "imageRegistry: r.azurecr.io\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "r.azurecr.io" })},
+		{name: "image registry with port", in: "imageRegistry: localhost:5001\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "localhost:5001" })},
+		{name: "image registry with path", in: "imageRegistry: r.azurecr.io/substrate\n", wantErr: "invalid imageRegistry"},
+		{name: "image registry without domain", in: "imageRegistry: myregistry\n", wantErr: "invalid imageRegistry"},
+		{name: "image registry with space", in: "imageRegistry: 'r.azurecr.io '\n", wantErr: "invalid imageRegistry"},
 		{name: "acr credential provider", in: "profile: aks\naks: {acrCredentialProvider: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ACRCredentialProvider = ProfileAKS, true })},
 		{name: "managed prometheus", in: "profile: aks\naks: {managedPrometheus: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ManagedPrometheus = ProfileAKS, true })},
 		{name: "otel endpoint", in: "otelEndpoint: http://collector:4317\n", want: withDefaults(func(c *Config) { c.OTelEndpoint = "http://collector:4317" })},
 		{name: "otel endpoint without scheme", in: "otelEndpoint: collector:4317\n", wantErr: "invalid OTLP endpoint"},
 		{name: "bad node pool", in: "profile: aks\naks: {nodePool: 'agents pool'}\n", wantErr: "invalid node pool"},
-		{name: "acr with space", in: "profile: aks\naks: {acr: 'r.azurecr.io '}\n", wantErr: "invalid ACR"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
@@ -206,9 +207,10 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	substrateValues := registry("mirror.example.com")
 	substrateValues["otel"] = otel("http://other:4317")
 	c := Config{
-		Profile:      ProfileAKS,
-		AKS:          AKS{ACR: "r.azurecr.io", NodePool: "agents", ACRCredentialProvider: true, ManagedPrometheus: true},
-		OTelEndpoint: "http://collector:4317",
+		Profile:       ProfileAKS,
+		AKS:           AKS{NodePool: "agents", ACRCredentialProvider: true, ManagedPrometheus: true},
+		ImageRegistry: "r.azurecr.io",
+		OTelEndpoint:  "http://collector:4317",
 		Releases: Releases{
 			Atelet:    ReleaseValues{Values: map[string]any{"atelet": map[string]any{"nodeSelector": map[string]any{"disk": "ssd"}}}},
 			Substrate: ReleaseValues{Values: substrateValues},
