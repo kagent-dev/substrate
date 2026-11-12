@@ -14,8 +14,10 @@
 
 # Default values for the substrate chart.
 #
-# The chart requires ClusterTrustBundle, ClusterTrustBundleProjection,
-# PodCertificateRequest, and the certificates.k8s.io/v1beta1 API.
+# The chart requires Pod Certificates and Cluster Trust Bundles, served at
+# certificates.k8s.io/v1 by default on Kubernetes 1.37 and later. Earlier
+# versions need the ClusterTrustBundle, ClusterTrustBundleProjection, and
+# PodCertificateRequest feature gates and the certificates.k8s.io/v1beta1 API.
 
 # Set to true to have the chart create the release namespace.
 # Off by default — most helm workflows expect the namespace to already exist
