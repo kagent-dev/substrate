@@ -21,12 +21,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"go.ate.dev/substrate/internal/deviceplugin"
 )
 
 func TestCheckNetworkPolicy(t *testing.T) {
@@ -91,16 +88,12 @@ func TestCheckManagedPrometheus(t *testing.T) {
 	}
 }
 
-func node(name, pool string, kvm bool) runtime.Object {
-	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{aksNodePoolLabel: pool}}}
-	if kvm {
-		n.Status.Allocatable = corev1.ResourceList{deviceplugin.ResourceKVM: resource.MustParse("4096")}
-	}
-	return n
+func node(name, pool string) runtime.Object {
+	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{aksNodePoolLabel: pool}}}
 }
 
 func TestCheckNodePool(t *testing.T) {
-	kc := fake.NewClientset(node("a", "agents", false), node("b", "agents", false), node("c", "system", false))
+	kc := fake.NewClientset(node("a", "agents"), node("b", "agents"), node("c", "system"))
 	for _, tc := range []struct {
 		pool    string
 		want    int
@@ -120,31 +113,5 @@ func TestCheckNodePool(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Errorf("pool %s: checkNodePool() = %d, %v, want %d", tc.pool, got, err, tc.want)
 		}
-	}
-}
-
-func TestCheckKVM(t *testing.T) {
-	tests := []struct {
-		name    string
-		pool    string
-		nodes   []runtime.Object
-		wantErr bool
-	}{
-		{name: "any node", nodes: []runtime.Object{node("a", "system", false), node("b", "agents", true)}},
-		{name: "in pool", pool: "agents", nodes: []runtime.Object{node("a", "agents", true)}},
-		{name: "outside pool", pool: "agents", nodes: []runtime.Object{node("a", "agents", false), node("b", "system", true)}, wantErr: true},
-		{name: "none", nodes: []runtime.Object{node("a", "system", false)}, wantErr: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			in := &Installer{kube: fake.NewClientset(tc.nodes...), opts: Options{Config: Config{Profile: ProfileAKS, AKS: AKS{NodePool: tc.pool}}}}
-			// The first check runs before the poll sees the canceled context.
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			_, err := in.checkKVM(ctx, func(string) {})
-			if gotErr := err != nil; gotErr != tc.wantErr {
-				t.Errorf("checkKVM() error = %v, want error %t", err, tc.wantErr)
-			}
-		})
 	}
 }

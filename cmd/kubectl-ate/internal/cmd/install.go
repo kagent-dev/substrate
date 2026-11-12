@@ -119,9 +119,7 @@ under their usual paths with az acr import and attach the registry with
 az aks update --attach-acr first.
 
 aks.nodePool runs atelet only on the nodes of that pool. Give each WorkerPool
-the nodeSelector kubernetes.azure.com/agentpool with the pool's name. With
-microvm.enabled, install checks that atelet's nodes have /dev/kvm, which needs
-a generation 2 VM size with nested virtualization.
+the nodeSelector kubernetes.azure.com/agentpool with the pool's name.
 
 aks.acrCredentialProvider lets atelet pull actor images from Azure Container
 Registry. atelet runs the node's acr-credential-provider, which reads the
@@ -139,6 +137,8 @@ with az aks update --enable-azure-monitor-metrics.
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
 the object store, and applies the microvm SandboxConfig. Upgrade restages them.
+Install also checks that a node advertises ate.dev/kvm, which atelet does on
+nodes with /dev/kvm.
 
 Each release keeps the values an earlier install set, so turning an option off
 doesn't undo it. To undo it, set the chart values under releases.

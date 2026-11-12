@@ -204,7 +204,7 @@ func (in *Installer) InstallSteps() ([]Step, error) {
 		{"Configure object storage", in.configureObjectStore},
 		{"Install atelet", in.helmStep(ateletRelease, in.ateletValues)},
 	}
-	if in.opts.Profile == ProfileAKS && in.opts.MicroVM.Enabled {
+	if in.opts.MicroVM.Enabled {
 		steps = append(steps, Step{"Check KVM", in.checkKVM})
 	}
 	if in.opts.Postgres.Type == PostgresBundled {

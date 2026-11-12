@@ -27,11 +27,14 @@ import (
 	chart "helm.sh/helm/v4/pkg/chart/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
 	chartsfs "go.ate.dev/substrate/charts"
+	"go.ate.dev/substrate/internal/deviceplugin"
 )
 
 func TestMergeValues(t *testing.T) {
@@ -307,6 +310,35 @@ func TestSubstrateValuesStorageClass(t *testing.T) {
 	want := map[string]any{"rustfs": map[string]any{"storageClassName": "fast"}}
 	if !reflect.DeepEqual(defaults, want) {
 		t.Errorf("substrate defaults = %v, want %v", defaults, want)
+	}
+}
+
+func TestCheckKVM(t *testing.T) {
+	node := func(name string, kvm bool) runtime.Object {
+		n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		if kvm {
+			n.Status.Allocatable = corev1.ResourceList{deviceplugin.ResourceKVM: resource.MustParse("4096")}
+		}
+		return n
+	}
+	for _, tc := range []struct {
+		name    string
+		nodes   []runtime.Object
+		wantErr bool
+	}{
+		{name: "one node", nodes: []runtime.Object{node("a", false), node("b", true)}},
+		{name: "none", nodes: []runtime.Object{node("a", false)}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &Installer{kube: fake.NewClientset(tc.nodes...)}
+			// The first check runs before the poll sees the canceled context.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err := in.checkKVM(ctx, func(string) {})
+			if gotErr := err != nil; gotErr != tc.wantErr {
+				t.Errorf("checkKVM() error = %v, want error %t", err, tc.wantErr)
+			}
+		})
 	}
 }
 
