@@ -68,21 +68,7 @@ releases:
 				c.Releases.Substrate.ValuesFiles = []string{"/cfg/db.yaml"}
 			}),
 		},
-		{
-			name: "aks",
-			in:   "profile: aks\naks: {nodePool: agents}\n",
-			want: withDefaults(func(c *Config) {
-				c.Profile, c.AKS.NodePool = ProfileAKS, "agents"
-			}),
-		},
-		{
-			name:    "profile argument sets profile",
-			in:      "aks: {nodePool: agents}\n",
-			profile: ProfileAKS,
-			want: withDefaults(func(c *Config) {
-				c.Profile, c.AKS.NodePool = ProfileAKS, "agents"
-			}),
-		},
+		{name: "profile argument sets profile", in: "{}", profile: ProfileAKS, want: withDefaults(func(c *Config) { c.Profile = ProfileAKS })},
 		{name: "storage class", in: "storageClass: managed-csi-premium\n", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
 		{name: "bad storage class", in: "storageClass: Premium_SSD\n", wantErr: "invalid StorageClass name"},
 		{name: "storage class without bundled volumes", in: "postgres: external\nobjectStore: s3\nstorageClass: fast\n", wantErr: "storageClass needs"},
@@ -91,17 +77,13 @@ releases:
 		{name: "bad profile", in: "profile: eks\n", wantErr: "invalid profile"},
 		{name: "bad profile argument", in: "{}", profile: "eks", wantErr: "invalid profile"},
 		{name: "profile argument conflicts", in: "profile: aks\n", profile: ProfileGeneric, wantErr: "conflicts"},
-		{name: "aks needs profile", in: "aks: {nodePool: agents}\n", wantErr: "aks needs profile: aks"},
 		{name: "image registry", in: "imageRegistry: r.azurecr.io\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "r.azurecr.io" })},
 		{name: "image registry with port", in: "imageRegistry: localhost:5001\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "localhost:5001" })},
 		{name: "image registry with path", in: "imageRegistry: r.azurecr.io/substrate\n", wantErr: "invalid imageRegistry"},
 		{name: "image registry without domain", in: "imageRegistry: myregistry\n", wantErr: "invalid imageRegistry"},
 		{name: "image registry with space", in: "imageRegistry: 'r.azurecr.io '\n", wantErr: "invalid imageRegistry"},
-		{name: "acr credential provider", in: "profile: aks\naks: {acrCredentialProvider: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ACRCredentialProvider = ProfileAKS, true })},
-		{name: "managed prometheus", in: "profile: aks\naks: {managedPrometheus: true}\n", want: withDefaults(func(c *Config) { c.Profile, c.AKS.ManagedPrometheus = ProfileAKS, true })},
 		{name: "otel endpoint", in: "otelEndpoint: http://collector:4317\n", want: withDefaults(func(c *Config) { c.OTelEndpoint = "http://collector:4317" })},
 		{name: "otel endpoint without scheme", in: "otelEndpoint: collector:4317\n", wantErr: "invalid OTLP endpoint"},
-		{name: "bad node pool", in: "profile: aks\naks: {nodePool: 'agents pool'}\n", wantErr: "invalid node pool"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
@@ -192,12 +174,7 @@ func TestConfigUserValues(t *testing.T) {
 	}
 }
 
-var (
-	cloudConfigVolume = map[string]any{"name": "aks-cloud-config", "hostPath": map[string]any{"path": "/etc/kubernetes/azure.json", "type": "File"}}
-	cloudConfigMount  = map[string]any{"name": "aks-cloud-config", "mountPath": "/etc/kubernetes/azure.json", "readOnly": true}
-)
-
-func TestConfigUserValuesProfile(t *testing.T) {
+func TestConfigUserValuesRegistryAndOTel(t *testing.T) {
 	registry := func(r string) map[string]any {
 		return map[string]any{"global": map[string]any{"imageRegistry": r}}
 	}
@@ -207,103 +184,23 @@ func TestConfigUserValuesProfile(t *testing.T) {
 	substrateValues := registry("mirror.example.com")
 	substrateValues["otel"] = otel("http://other:4317")
 	c := Config{
-		Profile:       ProfileAKS,
-		AKS:           AKS{NodePool: "agents", ACRCredentialProvider: true, ManagedPrometheus: true},
 		ImageRegistry: "r.azurecr.io",
 		OTelEndpoint:  "http://collector:4317",
-		Releases: Releases{
-			Atelet:    ReleaseValues{Values: map[string]any{"atelet": map[string]any{"nodeSelector": map[string]any{"disk": "ssd"}}}},
-			Substrate: ReleaseValues{Values: substrateValues},
-		},
+		Releases:      Releases{Substrate: ReleaseValues{Values: substrateValues}},
 	}
 	got, err := c.userValues()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The release's own values win over the profile's and otelEndpoint's.
-	// Only atelet gets the node pool, and podcert gets no otel or
-	// PodMonitors.
-	podMonitors := map[string]any{"enabled": true, "apiVersion": "azmonitoring.coreos.com/v1"}
+	// The release's own values win, and podcert gets no otel.
 	atelet := registry("r.azurecr.io")
 	atelet["otel"] = otel("http://collector:4317")
-	atelet["podMonitors"] = podMonitors
-	atelet["atelet"] = map[string]any{
-		"nodeSelector": map[string]any{
-			"kubernetes.azure.com/agentpool": "agents",
-			"disk":                           "ssd",
-		},
-		"imageCredentialProviderConfig":     "/var/lib/kubelet/credential-provider-config.yaml",
-		"imageCredentialProviderConfigYAML": "",
-		"imageCredentialProviderBinDir":     "/var/lib/kubelet/credential-provider",
-		"extraVolumes":                      []any{cloudConfigVolume},
-		"extraVolumeMounts":                 []any{cloudConfigMount},
-	}
-	substrate := registry("mirror.example.com")
-	substrate["otel"] = otel("http://other:4317")
-	substrate["podMonitors"] = podMonitors
 	want := map[string]map[string]any{
 		"substrate-podcert": registry("r.azurecr.io"),
 		"substrate-atelet":  atelet,
-		"substrate":         substrate,
+		"substrate":         substrateValues,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestConfigUserValuesACRCredentialProvider(t *testing.T) {
-	provider := func(config, binDir string, volumes, mounts []any) map[string]any {
-		return map[string]any{
-			"imageCredentialProviderConfig":     config,
-			"imageCredentialProviderConfigYAML": "",
-			"imageCredentialProviderBinDir":     binDir,
-			"extraVolumes":                      volumes,
-			"extraVolumeMounts":                 mounts,
-		}
-	}
-	const config, binDir = "/var/lib/kubelet/credential-provider-config.yaml", "/var/lib/kubelet/credential-provider"
-	userVolume := map[string]any{"name": "extra", "emptyDir": map[string]any{}}
-	userMount := map[string]any{"name": "extra", "mountPath": "/extra"}
-	for _, tc := range []struct {
-		name string
-		c    Config
-		want map[string]any
-	}{
-		{name: "generic leaves it alone", c: Config{Profile: ProfileGeneric}},
-		{
-			name: "aks on",
-			c:    Config{Profile: ProfileAKS, AKS: AKS{ACRCredentialProvider: true}},
-			want: provider(config, binDir, []any{cloudConfigVolume}, []any{cloudConfigMount}),
-		},
-		{
-			name: "aks on keeps the release's own volumes",
-			c: Config{Profile: ProfileAKS, AKS: AKS{ACRCredentialProvider: true}, Releases: Releases{Atelet: ReleaseValues{Values: map[string]any{
-				"atelet": map[string]any{"extraVolumes": []any{userVolume}, "extraVolumeMounts": []any{userMount}},
-			}}}},
-			want: provider(config, binDir, []any{userVolume, cloudConfigVolume}, []any{userMount, cloudConfigMount}),
-		},
-		{
-			name: "aks off resets it",
-			c:    Config{Profile: ProfileAKS},
-			want: provider("", "", []any{}, []any{}),
-		},
-		{
-			name: "aks off keeps the release's own",
-			c: Config{Profile: ProfileAKS, Releases: Releases{Atelet: ReleaseValues{Values: map[string]any{
-				"atelet": provider("/etc/provider.yaml", "/opt/provider", []any{userVolume}, []any{userMount}),
-			}}}},
-			want: provider("/etc/provider.yaml", "/opt/provider", []any{userVolume}, []any{userMount}),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := tc.c.userValues()
-			if err != nil {
-				t.Fatal(err)
-			}
-			atelet, _ := got[ateletRelease.name]["atelet"].(map[string]any)
-			if diff := cmp.Diff(tc.want, atelet); diff != "" {
-				t.Errorf("atelet values mismatch (-want +got):\n%s", diff)
-			}
-		})
 	}
 }

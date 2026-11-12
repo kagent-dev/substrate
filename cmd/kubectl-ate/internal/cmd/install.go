@@ -45,10 +45,6 @@ var (
 const configHelp = `--config takes a YAML file, or - for stdin:
 
   profile: aks             # or generic
-  aks:                     # for profile: aks
-    nodePool: agents       # run atelet only in this pool
-    acrCredentialProvider: true # pull actor images from ACR
-    managedPrometheus: true # scrape metrics with Azure Managed Prometheus
   postgres:
     type: bundled          # or external
   objectStore:
@@ -115,25 +111,8 @@ otelEndpoint points atelet and the control plane at an OTLP collector you
 already run, for traces, metrics and logs. Install doesn't deploy one.
 
 profile selects the kind of cluster, and --profile sets it from the command
-line. generic makes no assumptions. aks is for Azure Kubernetes Service. It
-checks that a NetworkPolicy engine is installed, since AKS ignores
-NetworkPolicy without one.
-
-aks.nodePool runs atelet only on the nodes of that pool. Give each WorkerPool
-the nodeSelector kubernetes.azure.com/agentpool with the pool's name.
-
-aks.acrCredentialProvider lets atelet pull actor images from Azure Container
-Registry. atelet runs the node's acr-credential-provider, which reads the
-node's /etc/kubernetes/azure.json, so atelet can pull from every registry the
-kubelet identity can. Grant that identity AcrPull, or attach the registry. On
-a cluster that uses a service principal instead of a managed identity, that
-file holds the service principal's secret, so atelet holds it too. With
-profile aks and the option off, install and upgrade reset atelet's
-imageCredentialProvider values, unless the config's releases set them.
-
-aks.managedPrometheus creates PodMonitors so Azure Managed Prometheus scrapes
-the metrics of atelet and the control plane. Enable it on the cluster first
-with az aks update --enable-azure-monitor-metrics.
+line. generic makes no assumptions. aks is for Azure Kubernetes Service, where
+the wizard suggests managed-csi-premium for storageClass.
 
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to

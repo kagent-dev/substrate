@@ -32,7 +32,6 @@ import (
 func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	store := &cfg.ObjectStore
 	external := func() bool { return store.Type != install.ObjectStoreBundled }
-	aks := func() bool { return cfg.Profile == install.ProfileAKS }
 	bundledVolumes := func() bool { return cfg.Postgres.Type == install.PostgresBundled || !external() }
 	confirmed := true
 	form := huh.NewForm(
@@ -45,21 +44,6 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 				).
 				Value(&cfg.Profile),
 		).WithHideFunc(func() bool { return !askProfile }),
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Node pool").
-				Description("Runs atelet only in this pool. WorkerPools then need the nodeSelector\nkubernetes.azure.com/agentpool set to it. Leave empty for every node.").
-				Value(&cfg.AKS.NodePool).
-				Validate(install.ValidateNodePool),
-			huh.NewConfirm().
-				Title("Pull actor images from ACR?").
-				Description("Runs the node's acr-credential-provider in atelet. atelet reads the node's\n/etc/kubernetes/azure.json and gets every registry the kubelet identity can pull from.\nOn a service principal cluster, that file holds the service principal's secret.").
-				Value(&cfg.AKS.ACRCredentialProvider),
-			huh.NewConfirm().
-				Title("Scrape metrics with Azure Managed Prometheus?").
-				Description("Creates PodMonitors for atelet and the control plane.\nNeeds az aks update --enable-azure-monitor-metrics.").
-				Value(&cfg.AKS.ManagedPrometheus),
-		).WithHideFunc(func() bool { return !aks() }),
 		huh.NewGroup(
 			huh.NewSelect[install.PostgresType]().
 				Title("PostgreSQL").
@@ -163,9 +147,6 @@ func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
 	}
 	if !bundledVolumes() {
 		cfg.StorageClass = ""
-	}
-	if !aks() {
-		cfg.AKS = install.AKS{}
 	}
 	hint, err := Hint(cfg)
 	if err != nil {

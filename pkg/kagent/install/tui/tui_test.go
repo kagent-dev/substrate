@@ -81,7 +81,6 @@ func TestHint(t *testing.T) {
 		func() install.Config {
 			c := install.DefaultConfig()
 			c.Profile, c.ImageRegistry = install.ProfileAKS, "r.azurecr.io"
-			c.AKS.ManagedPrometheus = true
 			c.OTelEndpoint = "http://collector:4317"
 			return c
 		}(),

@@ -36,10 +36,8 @@ import (
 // Config describes an installation. Install, upgrade and uninstall read it
 // from the file passed to --config.
 type Config struct {
-	// Profile selects the kind of cluster. Each profile but generic has its
-	// own section of options.
+	// Profile selects the kind of cluster.
 	Profile     Profile     `json:"profile,omitempty"`
-	AKS         AKS         `json:"aks,omitzero"`
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
@@ -194,21 +192,6 @@ const (
 // Profiles lists the valid profiles.
 var Profiles = []Profile{ProfileGeneric, ProfileAKS}
 
-// AKS configures the aks profile.
-type AKS struct {
-	// NodePool restricts atelet to the nodes of one node pool. WorkerPools
-	// then need the same node selector.
-	NodePool string `json:"nodePool,omitempty"`
-	// ACRCredentialProvider lets atelet pull actor images from ACR with the
-	// node's acr-credential-provider. atelet then reads the node's
-	// /etc/kubernetes/azure.json and holds the kubelet identity's registry
-	// credentials, or a service principal's secret on clusters that use one.
-	ACRCredentialProvider bool `json:"acrCredentialProvider,omitempty"`
-	// ManagedPrometheus has Azure Managed Prometheus scrape atelet and the
-	// control plane, through PodMonitors.
-	ManagedPrometheus bool `json:"managedPrometheus,omitempty"`
-}
-
 // MicroVM configures the microvm sandbox class.
 type MicroVM struct {
 	// Enabled stages the microVM guest assets and applies the microvm
@@ -286,14 +269,6 @@ func validateImageRegistry(s string) error {
 	return nil
 }
 
-// ValidateNodePool checks that s is empty or a valid node pool label value.
-func ValidateNodePool(s string) error {
-	if errs := validation.IsValidLabelValue(s); len(errs) > 0 {
-		return fmt.Errorf("invalid node pool %q: %s", s, strings.Join(errs, "; "))
-	}
-	return nil
-}
-
 // ValidateStorageClass checks that s is empty or a valid StorageClass name.
 func ValidateStorageClass(s string) error {
 	if s == "" {
@@ -321,14 +296,8 @@ func (c Config) validate() error {
 	if err := validateProfile(c.Profile); err != nil {
 		return err
 	}
-	if c.AKS != (AKS{}) && c.Profile != ProfileAKS {
-		return fmt.Errorf("aks needs profile: %s", ProfileAKS)
-	}
 	if err := validateImageRegistry(c.ImageRegistry); err != nil {
 		return err
-	}
-	if err := ValidateNodePool(c.AKS.NodePool); err != nil {
-		return fmt.Errorf("aks.nodePool: %w", err)
 	}
 	switch c.Postgres.Type {
 	case PostgresBundled, PostgresExternal:
@@ -374,63 +343,6 @@ func (c Config) registryValues() map[string]any {
 	return map[string]any{"global": map[string]any{"imageRegistry": c.ImageRegistry}}
 }
 
-// aksNodePoolLabel is the node label AKS sets to the node's pool name.
-const aksNodePoolLabel = "kubernetes.azure.com/agentpool"
-
-// The kubelet's credential provider files on AKS nodes. The provider reads
-// the kubelet identity from aksCloudConfig.
-const (
-	aksCredentialProviderConfig = "/var/lib/kubelet/credential-provider-config.yaml"
-	aksCredentialProviderBinDir = "/var/lib/kubelet/credential-provider"
-	aksCloudConfig              = "/etc/kubernetes/azure.json"
-	aksCloudConfigVolume        = "aks-cloud-config"
-)
-
-// nodeSelector returns the node selector atelet runs with, or nil for every
-// node.
-func (c Config) nodeSelector() map[string]string {
-	if c.Profile == ProfileAKS && c.AKS.NodePool != "" {
-		return map[string]string{aksNodePoolLabel: c.AKS.NodePool}
-	}
-	return nil
-}
-
-// profileValues returns the profile's Helm values for r.
-func (c Config) profileValues(r release) map[string]any {
-	vals := map[string]any{}
-	if c.Profile == ProfileAKS && c.AKS.ManagedPrometheus && (r == ateletRelease || r == substrateRelease) {
-		vals["podMonitors"] = map[string]any{"enabled": true, "apiVersion": managedPrometheusAPI}
-	}
-	if r == ateletRelease {
-		atelet := map[string]any{}
-		if sel := c.nodeSelector(); sel != nil {
-			nodeSelector := map[string]any{}
-			for k, v := range sel {
-				nodeSelector[k] = v
-			}
-			atelet["nodeSelector"] = nodeSelector
-		}
-		if c.Profile == ProfileAKS {
-			// Off resets the chart defaults, so atelet loses the kubelet
-			// identity's registry access that an earlier install gave it.
-			// userValues adds the cloud config mount when it's on.
-			config, binDir := "", ""
-			if c.AKS.ACRCredentialProvider {
-				config, binDir = aksCredentialProviderConfig, aksCredentialProviderBinDir
-			}
-			atelet["imageCredentialProviderConfig"] = config
-			atelet["imageCredentialProviderConfigYAML"] = ""
-			atelet["imageCredentialProviderBinDir"] = binDir
-			atelet["extraVolumes"] = []any{}
-			atelet["extraVolumeMounts"] = []any{}
-		}
-		if len(atelet) > 0 {
-			vals["atelet"] = atelet
-		}
-	}
-	return vals
-}
-
 func (r *Releases) all() []*ReleaseValues {
 	return []*ReleaseValues{&r.All, &r.PodCert, &r.Atelet, &r.Substrate}
 }
@@ -444,8 +356,8 @@ func (c Config) otelValues(r release) map[string]any {
 }
 
 // userValues returns each release's values, keyed by release name:
-// ImageRegistry's, the profile's and OTelEndpoint's, All's files and values,
-// then the release's own.
+// ImageRegistry's and OTelEndpoint's, All's files and values, then the
+// release's own.
 func (c Config) userValues() (map[string]map[string]any, error) {
 	all, err := c.Releases.All.read()
 	if err != nil {
@@ -461,35 +373,9 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		user[r.name] = mergeValues(c.registryValues(), c.profileValues(r), c.otelValues(r), all, own)
+		user[r.name] = mergeValues(c.registryValues(), c.otelValues(r), all, own)
 	}
-	c.addCloudConfigMount(user[ateletRelease.name])
 	return user, nil
-}
-
-// addCloudConfigMount mounts the AKS cloud config, which the ACR credential
-// provider reads, into atelet. It appends to the release's own extraVolumes
-// and extraVolumeMounts, since lists replace in a merge.
-func (c Config) addCloudConfigMount(vals map[string]any) {
-	if c.Profile != ProfileAKS || !c.AKS.ACRCredentialProvider {
-		return
-	}
-	atelet, ok := vals["atelet"].(map[string]any)
-	if !ok {
-		atelet = map[string]any{}
-		vals["atelet"] = atelet
-	}
-	volumes, _ := atelet["extraVolumes"].([]any)
-	mounts, _ := atelet["extraVolumeMounts"].([]any)
-	atelet["extraVolumes"] = append(slices.Clone(volumes), map[string]any{
-		"name":     aksCloudConfigVolume,
-		"hostPath": map[string]any{"path": aksCloudConfig, "type": "File"},
-	})
-	atelet["extraVolumeMounts"] = append(slices.Clone(mounts), map[string]any{
-		"name":      aksCloudConfigVolume,
-		"mountPath": aksCloudConfig,
-		"readOnly":  true,
-	})
 }
 
 func (rv ReleaseValues) read() (map[string]any, error) {
