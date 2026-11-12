@@ -119,9 +119,6 @@ the object store, and applies the microvm SandboxConfig. Upgrade restages them.
 Install also checks that a node advertises ate.dev/kvm, which atelet does on
 nodes with /dev/kvm.
 
-Each release keeps the values an earlier install set, so turning an option off
-doesn't undo it. To undo it, set the chart values under releases.
-
 ` + configHelp,
 	Example: `  kubectl ate install -c install.yaml
   kubectl ate install -c - <<EOF
@@ -155,9 +152,9 @@ docs/reference/version-skew-policy.md upgrades after atelet.
 
 Upgrade doesn't reuse the values a release was installed with. Each
 release's values come from the chart and the config, the same way install
-sets them, so pass the config you installed with, changed as needed.
-It refuses downgrades, skipped minor releases, and CRD changes that would
-strand stored objects.
+sets them, so pass the config and --profile you installed with, changed as
+needed. It refuses downgrades, skipped minor releases, and CRD changes that
+would strand stored objects.
 
 --dry-run prints each release's manifest diff and changes nothing.`,
 	Args: cobra.NoArgs,
