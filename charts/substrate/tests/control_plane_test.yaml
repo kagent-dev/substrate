@@ -206,6 +206,67 @@ tests:
       content:
         name: statusz
         containerPort: 4040
+- it: stops OTLP push without an endpoint but keeps the scraped metrics
+  template: ate-controller.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_TRACES_EXPORTER
+        value: none
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_METRICS_EXPORTER
+        value: prometheus
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_LOGS_EXPORTER
+        value: none
+- it: stops the credential provider's OTLP push without an endpoint
+  template: k8s-credential-provider.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_TRACES_EXPORTER
+        value: none
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_METRICS_EXPORTER
+        value: prometheus
+- it: exports the credential provider's telemetry to the configured endpoint
+  template: k8s-credential-provider.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  set:
+    otel.endpoint: http://collector:4317
+    otel.metrics.enabled: false
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://collector:4317
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_METRICS_EXPORTER
+        value: none
+  - notContains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: OTEL_TRACES_EXPORTER
+        value: none
 - it: denies ingress by default in the release namespace
   template: ate-system-networkpolicies.yaml
   documentSelector:

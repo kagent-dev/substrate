@@ -127,11 +127,13 @@ Usage:
 {{- end }}
 {{- range $signal := list "traces" "metrics" "logs" }}
 {{- $cfg := index $otel $signal }}
-{{- if not $cfg.enabled }}
-{{- /* Request no OTLP export with the SDK exporter name "none".
+{{- if not (include "substrate.otel.signalEndpoint" (list $signal $)) }}
+{{- /* Disabled, or enabled with no endpoint: request no OTLP export, since
+       otlp without one retries localhost:4317. Enabled metrics keep the
+       scraped endpoint with "prometheus"; otherwise the SDK name "none".
        Actor events still go to stdout. */}}
 - name: OTEL_{{ upper $signal }}_EXPORTER
-  value: none
+  value: {{ ternary "prometheus" "none" (and $cfg.enabled (eq $signal "metrics")) }}
 {{- else if $cfg.endpoint }}
 - name: OTEL_EXPORTER_OTLP_{{ upper $signal }}_ENDPOINT
   value: {{ $cfg.endpoint | quote }}

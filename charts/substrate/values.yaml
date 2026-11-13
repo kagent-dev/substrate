@@ -215,7 +215,7 @@ ateApiServerEnvVarsConfigMap: ate-api-server-envvars
 # A signal exports only when it is enabled and resolves to an endpoint.
 #
 # metrics.enabled disables OTLP metrics push from the Go components and router.
-# traces.enabled takes effect on the router; Go components do not read it yet.
+# traces.enabled disables OTLP trace push from the Go components and router.
 # logs.enabled gates OTLP actor events from ateapi and the ateworkers, plus the
 # router's access log. Actor events go to stdout when OTLP logs are disabled
 # or no endpoint resolves.
