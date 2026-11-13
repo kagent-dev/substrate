@@ -25,11 +25,16 @@ import (
 	"testing"
 
 	chart "helm.sh/helm/v4/pkg/chart/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
 
 	chartsfs "go.ate.dev/substrate/charts"
+	"go.ate.dev/substrate/internal/deviceplugin"
 )
 
 func TestMergeValues(t *testing.T) {
@@ -185,7 +190,7 @@ func secretData(t *testing.T, kc *fake.Clientset) map[string]any {
 
 func TestApplyPostgresManifest(t *testing.T) {
 	ctx := context.Background()
-	manifest, err := postgresManifest()
+	manifest, err := postgresManifest(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +211,156 @@ func TestApplyPostgresManifest(t *testing.T) {
 	}
 	if _, err := kc.CoreV1().Services(SystemNamespace).Get(ctx, "postgres", metav1.GetOptions{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func postgresStatefulSetFor(t *testing.T, c Config) *appsv1.StatefulSet {
+	t.Helper()
+	ctx := context.Background()
+	manifest, err := postgresManifest(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kc := fake.NewClientset()
+	if err := applyManifest(ctx, kc, manifest); err != nil {
+		t.Fatal(err)
+	}
+	ss, err := kc.AppsV1().StatefulSets(SystemNamespace).Get(ctx, postgresStatefulSet, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ss
+}
+
+func TestPostgresManifestRegistry(t *testing.T) {
+	images := func(c Config) []string {
+		t.Helper()
+		ss := postgresStatefulSetFor(t, c)
+		var out []string
+		for _, c := range append(ss.Spec.Template.Spec.InitContainers, ss.Spec.Template.Spec.Containers...) {
+			out = append(out, c.Image)
+		}
+		return out
+	}
+	base, mirrored := images(Config{}), images(Config{ImageRegistry: "r.azurecr.io"})
+	if len(base) == 0 || len(base) != len(mirrored) {
+		t.Fatalf("got images %v and %v, want the same nonzero count", base, mirrored)
+	}
+	// The digest stays, so the mirror must hold the same image.
+	for i := range base {
+		if want := "r.azurecr.io/" + base[i]; mirrored[i] != want {
+			t.Errorf("image %d = %s, want %s", i, mirrored[i], want)
+		}
+	}
+}
+
+func TestPostgresManifestStorageClass(t *testing.T) {
+	for _, sc := range []string{"", "managed-csi-premium"} {
+		ss := postgresStatefulSetFor(t, Config{StorageClass: sc})
+		vct := ss.Spec.VolumeClaimTemplates[0].Spec
+		if got := ptr.Deref(vct.StorageClassName, ""); got != sc {
+			t.Errorf("StorageClass %q: storageClassName = %q", sc, got)
+		}
+		// The overlay keeps the kind overlay's patches.
+		if got := vct.Resources.Requests.Storage().String(); got != "1Gi" {
+			t.Errorf("StorageClass %q: volume size = %s, want 1Gi", sc, got)
+		}
+	}
+}
+
+func TestPostgresStorageClass(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		existing *string
+		want     string
+	}{
+		{name: "new install uses the config's", want: "managed-csi-premium"},
+		{name: "existing keeps the default", existing: ptr.To(""), want: ""},
+		{name: "existing keeps its own", existing: ptr.To("managed-csi"), want: "managed-csi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kc := fake.NewClientset()
+			if tc.existing != nil {
+				ss := postgresStatefulSetFor(t, Config{StorageClass: *tc.existing})
+				if _, err := kc.AppsV1().StatefulSets(SystemNamespace).Create(t.Context(), ss, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := postgresStorageClass(t.Context(), kc, "managed-csi-premium")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("postgresStorageClass() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSubstrateValuesStorageClass(t *testing.T) {
+	kc := fake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: rustfsCredentialsSecret},
+		Data:       map[string][]byte{"AWS_ACCESS_KEY_ID": []byte("a"), "AWS_SECRET_ACCESS_KEY": []byte("s")},
+	})
+	in := &Installer{kube: kc, opts: Options{Config: Config{ObjectStore: ObjectStore{Type: ObjectStoreBundled}, Postgres: Postgres{Type: PostgresBundled}, StorageClass: "fast"}}}
+	defaults, _, err := in.substrateValues(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"rustfs": map[string]any{"storageClassName": "fast"}}
+	if !reflect.DeepEqual(defaults, want) {
+		t.Errorf("substrate defaults = %v, want %v", defaults, want)
+	}
+}
+
+func TestCheckKVM(t *testing.T) {
+	node := func(name string, kvm bool) runtime.Object {
+		n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		if kvm {
+			n.Status.Allocatable = corev1.ResourceList{deviceplugin.ResourceKVM: resource.MustParse("4096")}
+		}
+		return n
+	}
+	for _, tc := range []struct {
+		name    string
+		nodes   []runtime.Object
+		wantErr bool
+	}{
+		{name: "one node", nodes: []runtime.Object{node("a", false), node("b", true)}},
+		{name: "none", nodes: []runtime.Object{node("a", false)}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &Installer{kube: fake.NewClientset(tc.nodes...)}
+			// The first check runs before the poll sees the canceled context.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err := in.checkKVM(ctx, func(string) {})
+			if gotErr := err != nil; gotErr != tc.wantErr {
+				t.Errorf("checkKVM() error = %v, want error %t", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckPodCertificateAPI(t *testing.T) {
+	pcr := []metav1.APIResource{{Name: "podcertificaterequests"}}
+	for _, tc := range []struct {
+		name      string
+		resources []*metav1.APIResourceList
+		wantErr   bool
+	}{
+		{name: "v1", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1", APIResources: pcr}}},
+		{name: "v1beta1", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1beta1", APIResources: pcr}}},
+		{name: "v1 without podcertificaterequests", resources: []*metav1.APIResourceList{{GroupVersion: "certificates.k8s.io/v1", APIResources: []metav1.APIResource{{Name: "clustertrustbundles"}}}}, wantErr: true},
+		{name: "neither", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kc := fake.NewClientset()
+			kc.Resources = tc.resources
+			if err := checkPodCertificateAPI(&Installer{kube: kc}); (err != nil) != tc.wantErr {
+				t.Errorf("checkPodCertificateAPI() = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 

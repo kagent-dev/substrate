@@ -27,11 +27,29 @@ import (
 )
 
 // Wizard asks for the install choices, stores them in cfg, and prints the
-// matching config to w. It returns install.ErrAborted if the user declines or
-// quits.
-func Wizard(w io.Writer, cfg *install.Config) error {
+// matching config to w. askProfile first asks for a profile and replaces cfg
+// with install.ProfileConfig of the answer. It returns install.ErrAborted if
+// the user declines or quits.
+func Wizard(w io.Writer, cfg *install.Config, askProfile bool) error {
+	if askProfile {
+		var profile string
+		options := []huh.Option[string]{huh.NewOption("Any Kubernetes cluster", "")}
+		for _, p := range install.Profiles() {
+			options = append(options, huh.NewOption(p, p))
+		}
+		if err := runForm(huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().Title("Profile").Options(options...).Value(&profile),
+		))); err != nil {
+			return err
+		}
+		var err error
+		if *cfg, err = install.ProfileConfig(profile); err != nil {
+			return err
+		}
+	}
 	store := &cfg.ObjectStore
 	external := func() bool { return store.Type != install.ObjectStoreBundled }
+	bundledVolumes := func() bool { return cfg.Postgres.Type == install.PostgresBundled || !external() }
 	confirmed := true
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -84,11 +102,25 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 		).WithHideFunc(func() bool { return store.Type != install.ObjectStoreGCS }),
 		huh.NewGroup(
 			huh.NewInput().
+				Title("StorageClass").
+				Description("For the bundled volumes. Leave empty for the cluster's default.").
+				Value(&cfg.StorageClass).
+				Validate(install.ValidateStorageClass),
+		).WithHideFunc(func() bool { return !bundledVolumes() }),
+		huh.NewGroup(
+			huh.NewInput().
 				Title("MicroVM asset bucket").
 				Description("atelet must be able to read it.").
 				Value(&cfg.MicroVM.AssetBucket).
 				Validate(notEmpty),
 		).WithHideFunc(func() bool { return !external() || !cfg.MicroVM.Enabled }),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("OTLP endpoint").
+				Description("An OTLP collector you already run, for traces, metrics and logs, like\nhttp://otel-collector.observability:4317. Install doesn't deploy one. Leave empty for none.").
+				Value(&cfg.OTelEndpoint).
+				Validate(install.ValidateOTelEndpoint),
+		),
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Install Agent Substrate?").
@@ -97,10 +129,7 @@ func Wizard(w io.Writer, cfg *install.Config) error {
 				Value(&confirmed),
 		),
 	)
-	if err := form.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return install.ErrAborted
-		}
+	if err := runForm(form); err != nil {
 		return err
 	}
 	if !confirmed {
@@ -134,6 +163,15 @@ func Hint(cfg *install.Config) (string, error) {
 		return "", err
 	}
 	return "To skip these questions next time, save this as install.yaml and run kubectl ate install -c install.yaml:\n\n" + string(data) + "\n", nil
+}
+
+// runForm runs f. It returns install.ErrAborted if the user quits.
+func runForm(f *huh.Form) error {
+	err := f.Run()
+	if errors.Is(err, huh.ErrUserAborted) {
+		return install.ErrAborted
+	}
+	return err
 }
 
 func notEmpty(s string) error {

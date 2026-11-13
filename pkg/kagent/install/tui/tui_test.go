@@ -78,6 +78,12 @@ func TestHint(t *testing.T) {
 			c.Releases.All.ValuesFiles = []string{"/etc/gke.yaml"}
 			return c
 		}(),
+		func() install.Config {
+			c := install.DefaultConfig()
+			c.ImageRegistry, c.StorageClass = "r.azurecr.io", "managed-csi-premium"
+			c.OTelEndpoint = "http://collector:4317"
+			return c
+		}(),
 	} {
 		hint, err := Hint(&cfg)
 		if err != nil {
@@ -87,7 +93,7 @@ func TestHint(t *testing.T) {
 		if !ok {
 			t.Fatalf("Hint() has no config:\n%s", hint)
 		}
-		got, err := install.ReadConfig(strings.NewReader(doc), "")
+		got, err := install.ReadConfig(strings.NewReader(doc), "", "")
 		if err != nil {
 			t.Fatalf("ReadConfig(Hint()): %v\n%s", err, doc)
 		}

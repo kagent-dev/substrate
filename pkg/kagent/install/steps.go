@@ -16,6 +16,7 @@ package install
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -73,21 +74,23 @@ func (in *Installer) preflight(ctx context.Context, progress func(string)) (stri
 }
 
 // checkPodCertificateAPI checks that the cluster serves PodCertificateRequest,
-// which the certificate controller signs.
+// which the certificate controller signs, at v1 or v1beta1.
 func checkPodCertificateAPI(in *Installer) error {
-	const gv = "certificates.k8s.io/v1beta1"
-	res, err := in.kube.Discovery().ServerResourcesForGroupVersion(gv)
-	if err == nil {
+	for _, gv := range []string{"certificates.k8s.io/v1", "certificates.k8s.io/v1beta1"} {
+		res, err := in.kube.Discovery().ServerResourcesForGroupVersion(gv)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("while discovering %s: %w", gv, err)
+		}
 		for _, r := range res.APIResources {
 			if r.Name == "podcertificaterequests" {
 				return nil
 			}
 		}
 	}
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("while discovering %s: %w", gv, err)
-	}
-	return fmt.Errorf("cluster doesn't serve %s podcertificaterequests; enable the PodCertificateRequest feature gate and API", gv)
+	return errors.New("cluster serves neither certificates.k8s.io/v1 nor v1beta1 podcertificaterequests; enable the PodCertificateRequest feature gate and API")
 }
 
 // valuesFunc returns installer defaults, which user values override, and
@@ -184,12 +187,16 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 		// atelet is its own release so it can upgrade first.
 		"atelet": map[string]any{"enabled": false},
 	}
+	var defaults map[string]any
 	if in.opts.ObjectStore.Type == ObjectStoreBundled {
 		access, secret, err := in.rustfsCredentials(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
 		forced["rustfs"] = map[string]any{"accessKey": access, "secretKey": secret}
+		if sc := in.opts.StorageClass; sc != "" {
+			defaults = map[string]any{"rustfs": map[string]any{"storageClassName": sc}}
+		}
 	} else {
 		_, substrate := in.externalStoreValues()
 		forced = mergeValues(forced, substrate)
@@ -197,7 +204,7 @@ func (in *Installer) substrateValues(ctx context.Context) (map[string]any, map[s
 	if in.opts.Postgres.Type == PostgresBundled {
 		forced["postgres"] = map[string]any{"clientCertificates": map[string]any{"enabled": true}}
 	}
-	return nil, forced, nil
+	return defaults, forced, nil
 }
 
 // externalStoreValues returns the values Config.ObjectStore sets on the

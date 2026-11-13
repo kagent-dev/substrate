@@ -326,6 +326,25 @@ tests:
       value:
       - protocol: TCP
         port: api
+- it: leaves the RustFS volume on the default StorageClass
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: PersistentVolumeClaim
+  asserts:
+  - notExists:
+      path: spec.storageClassName
+- it: puts the RustFS volume on rustfs.storageClassName
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: PersistentVolumeClaim
+  set:
+    rustfs.storageClassName: managed-csi-premium
+  asserts:
+  - equal:
+      path: spec.storageClassName
+      value: managed-csi-premium
 
 - it: supplies the required API config and bootstraps the release client
   template: ate-api-server.yaml

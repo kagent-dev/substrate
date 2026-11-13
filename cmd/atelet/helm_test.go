@@ -30,7 +30,9 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 )
 
@@ -143,6 +145,60 @@ providers: []`
 			}
 		})
 	}
+}
+
+func TestHelmAteletExtraVolumes(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	objs := helmTemplate(t, "atelet", "../../charts/substrate-atelet",
+		"--set-json", `atelet.extraVolumes=[{"name": "extra", "hostPath": {"path": "/etc/extra.json", "type": "File"}}]`,
+		"--set-json", `atelet.extraVolumeMounts=[{"name": "extra", "mountPath": "/etc/extra.json", "readOnly": true}]`)
+	for _, obj := range objs {
+		if obj.GetKind() != "DaemonSet" {
+			continue
+		}
+		var ds appsv1.DaemonSet
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &ds); err != nil {
+			t.Fatal(err)
+		}
+		pod := ds.Spec.Template.Spec
+		wantVolume := corev1.Volume{Name: "extra", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/extra.json", Type: ptr.To(corev1.HostPathFile)}}}
+		if !slices.ContainsFunc(pod.Volumes, func(v corev1.Volume) bool { return reflect.DeepEqual(v, wantVolume) }) {
+			t.Errorf("atelet volumes %v don't include %v", pod.Volumes, wantVolume)
+		}
+		wantMount := corev1.VolumeMount{Name: "extra", MountPath: "/etc/extra.json", ReadOnly: true}
+		if !slices.ContainsFunc(pod.Containers[0].VolumeMounts, func(m corev1.VolumeMount) bool { return reflect.DeepEqual(m, wantMount) }) {
+			t.Errorf("atelet volume mounts %v don't include %v", pod.Containers[0].VolumeMounts, wantMount)
+		}
+		return
+	}
+	t.Fatal("no atelet DaemonSet rendered")
+}
+
+func TestHelmAteletPodMonitor(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	objs := helmTemplate(t, "atelet", "../../charts/substrate-atelet",
+		"--set", "podMonitors.enabled=true", "--set", "podMonitors.apiVersion=azmonitoring.coreos.com/v1")
+	for _, obj := range objs {
+		if obj.GetKind() != "PodMonitor" {
+			continue
+		}
+		if got := obj.GetAPIVersion(); got != "azmonitoring.coreos.com/v1" {
+			t.Errorf("PodMonitor apiVersion = %q, want azmonitoring.coreos.com/v1", got)
+		}
+		want := map[string]any{
+			"selector":            map[string]any{"matchLabels": map[string]any{"app": "atelet"}},
+			"podMetricsEndpoints": []any{map[string]any{"port": "prometheus", "path": "/metrics"}},
+		}
+		if diff := cmp.Diff(want, obj.Object["spec"]); diff != "" {
+			t.Errorf("PodMonitor spec mismatch (-want +got):\n%s", diff)
+		}
+		return
+	}
+	t.Fatal("no PodMonitor rendered")
 }
 
 func TestHelmSandboxAssetStorage(t *testing.T) {
@@ -285,6 +341,8 @@ func TestHelmAteletChartMatchesSubstrateChart(t *testing.T) {
 				"--set", "preview[0]=ALL",
 				"--set", "otel.endpoint=http://collector:4317",
 				"--set", "atelet.nodeSelector.pool=agents",
+				"--set", "atelet.imageCredentialProviderConfig=/var/lib/kubelet/credential-provider-config.yaml",
+				"--set", "atelet.imageCredentialProviderBinDir=/var/lib/kubelet/credential-provider",
 				"--set", "image.tag=test",
 			},
 			substrate: append([]string{"--set-json", `objectStorePlugin.extraEnv=[

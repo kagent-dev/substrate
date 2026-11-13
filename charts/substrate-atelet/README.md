@@ -44,6 +44,15 @@ This chart reads the same value paths as the substrate chart for `atelet`,
 `image`, `imagePullSecrets` and `global`, so the substrate release's values
 file can configure both releases.
 
+These values are only in this chart:
+
+| Key | Default | Description |
+|---|---|---|
+| `atelet.extraVolumes` | `[]` | Volumes added to the atelet pod, such as a host file a credential provider reads |
+| `atelet.extraVolumeMounts` | `[]` | Volume mounts added to the atelet container |
+| `podMonitors.enabled` | `false` | Render a PodMonitor that scrapes atelet's `/metrics` |
+| `podMonitors.apiVersion` | `monitoring.coreos.com/v1` | PodMonitor API version; `azmonitoring.coreos.com/v1` for Azure Managed Prometheus |
+
 Object storage is set under `objectStore` instead of `rustfs` and
 `atelet.storageBackend`:
 

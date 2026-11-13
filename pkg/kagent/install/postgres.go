@@ -26,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,9 +35,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/kustomize/api/krusty"
 	kusttypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/kustomize/kyaml/resid"
+	"sigs.k8s.io/yaml"
 
 	ateinstall "go.ate.dev/substrate/manifests/ate-install"
 	"go.ate.dev/substrate/pkg/postgressetup"
@@ -57,7 +61,13 @@ const (
 // applyPostgres applies manifests/ate-install/kind/postgres and waits for it.
 // That overlay sizes the database for evaluation rather than production.
 func (in *Installer) applyPostgres(ctx context.Context, progress func(string)) (string, error) {
-	manifest, err := postgresManifest()
+	c := in.opts.Config
+	sc, err := postgresStorageClass(ctx, in.kube, c.StorageClass)
+	if err != nil {
+		return "", err
+	}
+	c.StorageClass = sc
+	manifest, err := postgresManifest(c)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +81,24 @@ func (in *Installer) applyPostgres(ctx context.Context, progress func(string)) (
 	return "statefulset/" + postgresStatefulSet + " ready", nil
 }
 
-func postgresManifest() ([]byte, error) {
+// postgresStorageClass returns the StorageClass to apply the bundled
+// PostgreSQL with. An existing StatefulSet keeps its own, since its
+// volumeClaimTemplates can't change.
+func postgresStorageClass(ctx context.Context, kc kubernetes.Interface, sc string) (string, error) {
+	ss, err := kc.AppsV1().StatefulSets(SystemNamespace).Get(ctx, postgresStatefulSet, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return sc, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return ptr.Deref(ss.Spec.VolumeClaimTemplates[0].Spec.StorageClassName, ""), nil
+}
+
+// postgresManifest builds the bundled PostgreSQL manifest. c's image registry
+// replaces the image's, the way the charts' global.imageRegistry does, and c's
+// StorageClass sets the volume's.
+func postgresManifest(c Config) ([]byte, error) {
 	mem := filesys.MakeFsInMemory()
 	err := fs.WalkDir(ateinstall.Postgres, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -86,10 +113,42 @@ func postgresManifest() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	dir := "/kind/postgres"
+	overlay := kusttypes.Kustomization{
+		TypeMeta:  kusttypes.TypeMeta{APIVersion: kusttypes.KustomizationVersion, Kind: kusttypes.KustomizationKind},
+		Resources: []string{"../kind/postgres"},
+	}
+	if r := c.ImageRegistry; r != "" {
+		overlay.Images = []kusttypes.Image{{Name: "postgres", NewName: r + "/postgres"}}
+	}
+	if sc := c.StorageClass; sc != "" {
+		patch, err := yaml.Marshal([]map[string]any{{
+			"op":    "add",
+			"path":  "/spec/volumeClaimTemplates/0/spec/storageClassName",
+			"value": sc,
+		}})
+		if err != nil {
+			return nil, err
+		}
+		overlay.Patches = []kusttypes.Patch{{
+			Target: &kusttypes.Selector{ResId: resid.NewResIdWithNamespace(resid.NewGvk("apps", "v1", "StatefulSet"), postgresStatefulSet, SystemNamespace)},
+			Patch:  string(patch),
+		}}
+	}
+	if overlay.Images != nil || overlay.Patches != nil {
+		k, err := yaml.Marshal(overlay)
+		if err != nil {
+			return nil, err
+		}
+		dir = "/overlay"
+		if err := mem.WriteFile(dir+"/kustomization.yaml", k); err != nil {
+			return nil, err
+		}
+	}
 	opts := krusty.MakeDefaultOptions()
 	// The overlay references its base outside its own directory.
 	opts.LoadRestrictions = kusttypes.LoadRestrictionsNone
-	res, err := krusty.MakeKustomizer(opts).Run(mem, "/kind/postgres")
+	res, err := krusty.MakeKustomizer(opts).Run(mem, dir)
 	if err != nil {
 		return nil, fmt.Errorf("while building the PostgreSQL manifest: %w", err)
 	}

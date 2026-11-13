@@ -47,6 +47,8 @@ postgres:
 rustfs:
   enabled: true
   storageSize: 1Gi
+  # StorageClass of the data volume. Empty uses the cluster's default.
+  storageClassName: ""
   bucket: ate-snapshots
   accessKey: rustfsadmin
   secretKey: rustfsadmin
@@ -231,6 +233,14 @@ otel:
   logs:
     enabled: true
     endpoint: ""
+
+# PodMonitors that scrape the control plane's /metrics endpoints. The
+# substrate-atelet chart has its own for atelet. They need the Prometheus
+# Operator CRDs, or apiVersion azmonitoring.coreos.com/v1 for Azure Managed
+# Prometheus.
+podMonitors:
+  enabled: false
+  apiVersion: monitoring.coreos.com/v1
 
 # Values under `global` are visible to this chart and to every subchart. A parent
 # chart or an operator sets one value here instead of one value per chart.

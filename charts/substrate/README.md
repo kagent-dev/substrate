@@ -89,6 +89,7 @@ See `values.yaml` for the full set; the important keys:
 | `atenetEgress.extraCredentialProviders` | `[]` | Credential providers you deploy, added after the bundled `k8s.io` provider, each `{name, address, cacheTtl}`. `name` is the host of the `ate-secret://` URIs it serves; `address` is the `host:port` the egress gateway dials over mTLS. Its serving certificate must chain to the servicedns CA. Optional `cacheTtl` sets how long the gateway reuses a fetched credential (default `5m`; `0s` disables caching). See [egress credential injection](../../docs/guides/egress-credential-injection.md#the-plugin-api) |
 | `atenetEgress.agentgateway.logLevel` | `info` | Egress proxy `RUST_LOG` filter, e.g. `debug` or `info,agentgateway=debug` when troubleshooting |
 | `rustfs.enabled` | `true` | Deploy an in-cluster S3-compatible RustFS bucket for snapshots |
+| `rustfs.storageClassName` | `""` | StorageClass of the RustFS data volume; empty uses the cluster's default |
 | `ateApi.snapshotLocation` | `""` | Cluster-wide snapshot URI; defaults to `gs://<rustfs.bucket>/` with bundled RustFS |
 | `atelet.enabled` | `true` | Deprecated. Set to `false` and install atelet with the [substrate-atelet](../substrate-atelet/README.md) chart |
 | `atelet.storageBackend` | `s3` | Default snapshot backend, wired to RustFS when `rustfs.enabled=true` |
@@ -112,6 +113,8 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateworkers, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+| `podMonitors.enabled` | `false` | Render PodMonitors that scrape `/metrics` on ate-api-server, ate-controller, atenet-router and atenet-egress; ate-controller's only while `otel.metrics.enabled`, since it serves no `/metrics` otherwise |
+| `podMonitors.apiVersion` | `monitoring.coreos.com/v1` | PodMonitor API version; `azmonitoring.coreos.com/v1` for Azure Managed Prometheus |
 
 ## Router timeouts
 
