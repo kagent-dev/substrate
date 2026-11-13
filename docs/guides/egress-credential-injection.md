@@ -313,6 +313,10 @@ name. An actor that is deleted and recreated under the same name can get its
 predecessor's token until that token's refresh point, up to two thirds of its
 lifetime, and that token's UID claim names the old actor.
 
+**Revoked grants work for up to 5 minutes.** agentgateway caches each fetched
+credential per actor and URI. Set `cacheTtl: 0s` on the provider's
+`atenetEgress.extraCredentialProviders` entry to skip the cache.
+
 **Scope of the reference provider's RBAC.** The sample deployment grants read
 on Secrets cluster-wide so the policy may name any namespace; a production
 deployment should scope this to the namespaces the provider is allowed to

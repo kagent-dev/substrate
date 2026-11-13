@@ -172,10 +172,13 @@ atenetEgress:
   # when credentialProvider.enabled. name is the host of the ate-secret:// URIs
   # the provider serves, and address is the host:port the gateway dials over
   # mTLS. The provider's serving certificate must chain to the servicedns CA
-  # and name the address host.
+  # and name the address host. Optional cacheTtl sets how long the gateway
+  # reuses a fetched credential, 5m by default. A grant the provider revokes
+  # keeps working until then. 0s sends every request to the provider.
   extraCredentialProviders: []
   # - name: vault.example.com
   #   address: vault-provider.vault.svc:50051
+  #   cacheTtl: 30s
   agentgateway:
     logLevel: info
     resources:
