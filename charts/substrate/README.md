@@ -2,9 +2,12 @@
 
 Helm chart for installing Agent Substrate.
 
-The chart uses mTLS and requires a prepared PostgreSQL database. It requires the
+The chart uses mTLS and requires a prepared PostgreSQL database. It also
+requires Pod Certificates and Cluster Trust Bundles. Kubernetes 1.37 and later
+serve them at `certificates.k8s.io/v1` by default, with no feature gates or
+`--runtime-config` changes. On earlier versions, enable the
 `ClusterTrustBundle`, `ClusterTrustBundleProjection`, and
-`PodCertificateRequest` feature gates plus the `certificates.k8s.io/v1beta1`
+`PodCertificateRequest` feature gates and the `certificates.k8s.io/v1beta1`
 API.
 
 Install the [certificate controller](../substrate-podcert/README.md) as a separate
