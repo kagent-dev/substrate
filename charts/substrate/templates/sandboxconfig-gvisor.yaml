@@ -21,6 +21,8 @@ limitations under the License.
 # it) matching the worker node's architecture and extracts it locally. To pin a
 # different release, add a version below and point defaultVersion at it, or
 # create another SandboxConfig and reference it from the WorkerPool.
+# gvisorReleaseLocation in values.yaml sets where the tarballs are fetched
+# from, for example a mirror.
 #
 # A bump adds a version and points defaultVersion at it. Keep the
 # previous version unless it has a known vulnerability: an actor restores its
@@ -46,11 +48,11 @@ spec:
     assets:
       amd64:
         gvisor:
-          url: "gs://gvisor/releases/release/20261026.0/x86_64/gvisor.tar.zstd"
+          url: {{ printf "%s/20261026.0/x86_64/gvisor.tar.zstd" (.Values.gvisorReleaseLocation | trimSuffix "/") | quote }}
           sha256: "708afc62f2ee82d19930c703e85f9dab4f27a78c0aec40c0f55eb1040107f1a7"
       arm64:
         gvisor:
-          url: "gs://gvisor/releases/release/20261026.0/aarch64/gvisor.tar.zstd"
+          url: {{ printf "%s/20261026.0/aarch64/gvisor.tar.zstd" (.Values.gvisorReleaseLocation | trimSuffix "/") | quote }}
           sha256: "6257e49955f13e6caceb2c4181c5dc5406c460e805940c944e67ad65553f5b02"
   # gVisor release 20261102.0.
   - name: v7
@@ -58,9 +60,9 @@ spec:
     assets:
       amd64:
         gvisor:
-          url: "gs://gvisor/releases/release/20261102.0/x86_64/gvisor.tar.zstd"
+          url: {{ printf "%s/20261102.0/x86_64/gvisor.tar.zstd" (.Values.gvisorReleaseLocation | trimSuffix "/") | quote }}
           sha256: "a1439ffbba7d212e0fde32ea79fa9bb51cbc4c5f6c16af1f047260290b861d42"
       arm64:
         gvisor:
-          url: "gs://gvisor/releases/release/20261102.0/aarch64/gvisor.tar.zstd"
+          url: {{ printf "%s/20261102.0/aarch64/gvisor.tar.zstd" (.Values.gvisorReleaseLocation | trimSuffix "/") | quote }}
           sha256: "f702ae92ad7a0c4134be34ca23f52966dbb696db0c0f5b8ec439210ab2cd7c6a"
