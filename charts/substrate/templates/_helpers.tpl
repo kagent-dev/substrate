@@ -241,6 +241,17 @@ definition so the fallback cannot drift between pods.
 {{- ((.Values.global).imagePullPolicy) | default "IfNotPresent" -}}
 {{- end -}}
 
+{{/*
+pinIDs is non-empty unless the cluster is OpenShift. OpenShift's default SCC,
+restricted-v2, assigns each pod a UID and fsGroup from its namespace's range
+and refuses a runAsUser or fsGroup outside it. Pods leave runAsGroup unset there
+too, so they run in group 0 like other pods with an assigned UID. To render for
+OpenShift without a cluster, pass --api-versions security.openshift.io/v1.
+*/}}
+{{- define "substrate.pinIDs" -}}
+{{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}true{{ end -}}
+{{- end -}}
+
 {{/* Object storage settings shared by object-store plugins. */}}
 {{- define "substrate.storage.env" -}}
 - name: ATE_STORAGE_BACKEND

@@ -206,6 +206,24 @@ tests:
       content:
         name: statusz
         containerPort: 4040
+- it: leaves pod IDs to OpenShift's SCC
+  templates:
+  - k8s-credential-provider.yaml
+  - rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+    matchMany: true
+  capabilities:
+    apiVersions:
+    - security.openshift.io/v1
+  asserts:
+  - notExists:
+      path: spec.template.spec.securityContext.runAsUser
+  - notExists:
+      path: spec.template.spec.securityContext.runAsGroup
+  - notExists:
+      path: spec.template.spec.securityContext.fsGroup
 - it: stops OTLP push without an endpoint but keeps the scraped metrics
   template: ate-controller.yaml
   documentSelector:
