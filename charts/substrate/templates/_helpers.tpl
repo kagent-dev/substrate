@@ -242,11 +242,8 @@ definition so the fallback cannot drift between pods.
 {{- end -}}
 
 {{/*
-pinIDs is non-empty unless the cluster is OpenShift. OpenShift's default SCC,
-restricted-v2, assigns each pod a UID and fsGroup from its namespace's range
-and refuses a runAsUser or fsGroup outside it. Pods leave runAsGroup unset there
-too, so they run in group 0 like other pods with an assigned UID. To render for
-OpenShift without a cluster, pass --api-versions security.openshift.io/v1.
+Empty on OpenShift, whose restricted-v2 SCC assigns each pod's UID and fsGroup
+and refuses IDs outside the namespace's range.
 */}}
 {{- define "substrate.pinIDs" -}}
 {{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}true{{ end -}}
