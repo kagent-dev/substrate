@@ -31,7 +31,7 @@ data:
   config.yaml: |
     # yaml-language-server: $schema=https://agentgateway.dev/schema/config
     config:
-      statsAddr: 0.0.0.0:15020
+      statsAddr: "[::]:15020"
       # Actor sandboxes behind a worker IP are replaced between requests. Do
       # not retain an idle connection that may belong to the previous actor.
       backend:
