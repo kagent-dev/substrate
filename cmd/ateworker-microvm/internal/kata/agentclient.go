@@ -204,8 +204,8 @@ func (a *AgentClient) UpdateRoutes(ctx context.Context, routes []*agentpb.Route)
 	return nil
 }
 
-// AddARPNeighbors installs static ARP entries in the guest — used to pin the
-// gateway (169.254.17.1) to its FIXED MAC so a restored guest's frozen neighbor
+// AddARPNeighbors installs static ARP and NDP entries in the guest — used to pin
+// the gateway's addresses to its FIXED MAC so a restored guest's frozen neighbor
 // entry stays valid across pods. Mirrors grpc.AgentService/AddARPNeighbors.
 func (a *AgentClient) AddARPNeighbors(ctx context.Context, neighbors []*agentpb.ARPNeighbor) error {
 	req := &agentpb.AddARPNeighborsRequest{Neighbors: &agentpb.ARPNeighbors{ARPNeighbors: neighbors}}

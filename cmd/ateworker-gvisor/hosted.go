@@ -112,6 +112,7 @@ func (s *AteWorkerService) hostActor(ctx context.Context, attribution resources.
 	session, err := actornet.ServeSandbox(ctx, actornet.SandboxNetworkConfig{
 		ActorUID:   uid,
 		Veth:       true,
+		Families:   s.families,
 		EgressPort: s.tunnel.EgressPort,
 		DNSPolicy:  s.tunnel.ActorEgressPolicy(attribution),
 	}, s.tunnel.Egress, s.tunnel.DNSRelay)

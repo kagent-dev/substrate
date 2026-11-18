@@ -45,6 +45,7 @@ func TestHostActorReplacesSameActor(t *testing.T) {
 		tunnel:    &atunnel.Tunnel{Egress: egressProxy, EgressPort: 15001},
 		actors:    map[string]*hostedActor{},
 		maxActors: 1,
+		families:  actornet.Families{IPv4: true, IPv6: true},
 	}
 	const actorUID = "microvm-network-replace"
 	t.Cleanup(func() {
@@ -86,10 +87,23 @@ func tapNetNS(t *testing.T, name string) netns.Handle {
 // address and the MAC the guest's snapshot froze into its ARP cache.
 func TestSetupActorTap(t *testing.T) {
 	roottest.Require(t, "creates network namespaces and tap devices")
+	for _, tc := range []struct {
+		name     string
+		families actornet.Families
+	}{
+		{"ipv4", actornet.Families{IPv4: true}},
+		{"ipv6", actornet.Families{IPv6: true}},
+		{"dual", actornet.Families{IPv4: true, IPv6: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testSetupActorTap(t, tc.families) })
+	}
+}
+
+func testSetupActorTap(t *testing.T, families actornet.Families) {
 	ctx := context.Background()
 	ns := tapNetNS(t, "microvm-tap-test")
 
-	fds, err := setupActorTap(ctx, ns, "tap0_kata", 1)
+	fds, err := setupActorTap(ctx, ns, "tap0_kata", 1, families)
 	if err != nil {
 		t.Fatalf("setupActorTap: %v", err)
 	}
@@ -116,18 +130,26 @@ func TestSetupActorTap(t *testing.T) {
 		if got := link.Attrs().MTU; got != actorTapMTU {
 			t.Errorf("tap MTU = %d, want %d, the value the guest was snapshotted against", got, actorTapMTU)
 		}
-		addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+		addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 		if err != nil {
 			return err
 		}
-		var found bool
-		for _, a := range addrs {
-			if a.IPNet.String() == actornet.HostVethAddr.IPNet.String() {
-				found = true
+		for _, f := range []struct {
+			addr *netlink.Addr
+			want bool
+		}{
+			{actornet.HostVethAddr, families.IPv4},
+			{actornet.HostVethAddrV6, families.IPv6},
+		} {
+			var found bool
+			for _, a := range addrs {
+				if a.IPNet.String() == f.addr.IPNet.String() {
+					found = true
+				}
 			}
-		}
-		if !found {
-			t.Errorf("tap addresses = %v, want the gateway %s the guest routes to", addrs, actornet.HostVethAddr)
+			if found != f.want {
+				t.Errorf("tap addresses = %v, gateway %s present = %v, want %v", addrs, f.addr, found, f.want)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -147,7 +169,7 @@ func TestSetupActorTapReplacesALeftover(t *testing.T) {
 	ctx := context.Background()
 	ns := tapNetNS(t, "microvm-tap-replace")
 
-	first, err := setupActorTap(ctx, ns, "tap0_kata", 1)
+	first, err := setupActorTap(ctx, ns, "tap0_kata", 1, actornet.Families{IPv4: true, IPv6: true})
 	if err != nil {
 		t.Fatalf("first setupActorTap: %v", err)
 	}
@@ -155,7 +177,7 @@ func TestSetupActorTapReplacesALeftover(t *testing.T) {
 		defer f.Close()
 	}
 
-	second, err := setupActorTap(ctx, ns, "tap0_kata", 2)
+	second, err := setupActorTap(ctx, ns, "tap0_kata", 2, actornet.Families{IPv4: true, IPv6: true})
 	if err != nil {
 		t.Fatalf("second setupActorTap over a leftover: %v", err)
 	}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"go.ate.dev/substrate/cmd/ateworker-microvm/internal/kata"
+	"go.ate.dev/substrate/internal/ateworker/actornet"
 	"go.ate.dev/substrate/internal/proto/ateworkerpb"
 )
 
@@ -206,7 +207,7 @@ func TestWorkloadIDs(t *testing.T) {
 		}
 		containers = append(containers, &ateworkerpb.Container{Name: name, ContainerSpec: &ateworkerpb.ContainerSpec{Args: []string{"/app"}}})
 	}
-	ctrs, err := (&AteWorkerService{}).buildActorContainers("uid", dirs, containers)
+	ctrs, err := (&AteWorkerService{families: actornet.Families{IPv4: true, IPv6: true}}).buildActorContainers("uid", dirs, containers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +230,13 @@ func TestKernelParamsDebugConsole(t *testing.T) {
 		if !strings.Contains(dbgParams, want) {
 			t.Errorf("expected kernelParams() with guestDebug=true to contain %q, but got %q", want, dbgParams)
 		}
+	}
+}
+
+func TestBuildVMConfigSkipsIPv6DAD(t *testing.T) {
+	cfg := buildVMConfig("actor-1", "/vmlinux", "/rootfs.img", "", "/console.log", 256, 1, true, false)
+	if want := "sysctl.net.ipv6.conf.eth0.accept_dad=0"; !strings.Contains(cfg.Payload.Cmdline, want) {
+		t.Errorf("cmdline = %q, want %s", cfg.Payload.Cmdline, want)
 	}
 }
 

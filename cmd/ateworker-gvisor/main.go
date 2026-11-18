@@ -263,11 +263,15 @@ func do(ctx context.Context) error {
 	}
 
 	actorLogger := actorlog.NewActorLogger(syncedWriter, metadata.OnGCE())
-	tunnel, err := atunnel.Start(ctx, *tunnelConfig, actornet.ActorHTTPUpstream)
+	families, err := actornet.PodFamilies(register.ParsePodIPs(*podIPs))
 	if err != nil {
 		return err
 	}
-	ateworkerService := NewService(tunnel, actorLogger, *maxActors, flags, bootID)
+	tunnel, err := atunnel.Start(ctx, *tunnelConfig, families.HTTPUpstream())
+	if err != nil {
+		return err
+	}
+	ateworkerService := NewService(tunnel, actorLogger, *maxActors, families, flags, bootID)
 	ateworkerService.throttleMemory = cgroup.PSIEnabled(defaultCgroupRoot)
 	if !ateworkerService.throttleMemory {
 		slog.WarnContext(ctx, "Kernel has no cgroup memory pressure (PSI), so sandboxes keep memory.max and an OOM kill in one can restart the worker")
@@ -366,6 +370,9 @@ type workloadSession struct {
 type AteWorkerService struct {
 	ateworkerpb.UnimplementedWorkerServer
 
+	// families are the IP families each sandbox carries, those of this pod.
+	families actornet.Families
+
 	// Serializes lifecycle RPCs per actor.
 	locks *actorlock.Locks
 	// Tracks lifecycle RPCs for shutdown cancellation and draining.
@@ -428,8 +435,9 @@ type AteWorkerService struct {
 var _ ateworkerpb.WorkerServer = (*AteWorkerService)(nil)
 
 // NewService creates a new AteWorkerService.
-func NewService(tunnel *atunnel.Tunnel, actorLogger *actorlog.ActorLogger, maxActors int, flags *flagStore, bootID string) *AteWorkerService {
+func NewService(tunnel *atunnel.Tunnel, actorLogger *actorlog.ActorLogger, maxActors int, families actornet.Families, flags *flagStore, bootID string) *AteWorkerService {
 	s := &AteWorkerService{
+		families:         families,
 		locks:            actorlock.New(),
 		inFlight:         actorlock.NewInFlight(),
 		actors:           map[string]*hostedActor{},
@@ -776,7 +784,7 @@ func (s *AteWorkerService) RunWorkload(ctx context.Context, req *ateworkerpb.Run
 			return nil, fmt.Errorf("while starting json log pipe for %q: %w", ac.GetName(), err)
 		}
 		defer pw.Close()
-		if err := setupAppRootfs(req.GetActorDirs(), ac.GetName()); err != nil {
+		if err := setupAppRootfs(req.GetActorDirs(), ac.GetName(), s.families); err != nil {
 			return nil, fmt.Errorf("while composing %q rootfs: %w", ac.GetName(), err)
 		}
 		containersToDelete = append(containersToDelete, ac.GetName())
@@ -789,7 +797,7 @@ func (s *AteWorkerService) RunWorkload(ctx context.Context, req *ateworkerpb.Run
 	}
 
 	// Block until every wakeup-probe-enabled container reports 200.
-	if err := wakeupprobe.WaitAll(ctx, req.GetSpec().GetContainers(), actornet.ActorVethIP, wakeupprobe.DialFunc(s.sandboxDialer(req.GetActorUid()))); err != nil {
+	if err := wakeupprobe.WaitAll(ctx, req.GetSpec().GetContainers(), s.families.ActorIP(), wakeupprobe.DialFunc(s.sandboxDialer(req.GetActorUid()))); err != nil {
 		return nil, fmt.Errorf("while waiting for container wakeup probe: %w", err)
 	}
 	if err := s.tunnel.ActivateIngress(attribution, s.sandboxDialer(req.GetActorUid())); err != nil {
@@ -1279,7 +1287,7 @@ func (s *AteWorkerService) RestoreWorkload(ctx context.Context, req *ateworkerpb
 			return nil, fmt.Errorf("while starting json log pipe for %q: %w", ac.GetName(), err)
 		}
 		defer pw.Close()
-		err = setupAppRootfs(req.GetActorDirs(), ac.GetName())
+		err = setupAppRootfs(req.GetActorDirs(), ac.GetName(), s.families)
 		timing.appRootfs += lap(&tLast)
 		if err != nil {
 			return nil, fmt.Errorf("while composing %q rootfs: %w", ac.GetName(), err)
@@ -1307,7 +1315,7 @@ func (s *AteWorkerService) RestoreWorkload(ctx context.Context, req *ateworkerpb
 	}
 
 	// Block until every wakeup-probe-enabled container reports 200.
-	err = wakeupprobe.WaitAll(ctx, containers, actornet.ActorVethIP, wakeupprobe.DialFunc(s.sandboxDialer(req.GetActorUid())))
+	err = wakeupprobe.WaitAll(ctx, containers, s.families.ActorIP(), wakeupprobe.DialFunc(s.sandboxDialer(req.GetActorUid())))
 	timing.wakeupProbe = lap(&tLast)
 	if err != nil {
 		return nil, fmt.Errorf("while waiting for container wakeup probe: %w", err)

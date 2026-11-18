@@ -56,6 +56,12 @@ func TestURL(t *testing.T) {
 			want:    "http://10.0.0.1:80/ready",
 		},
 		{
+			name:    "IPv6 actor",
+			probe:   &ateworkerpb.WakeupProbe{HttpGet: &ateworkerpb.HttpGetAction{Path: "/health", Port: 9000}},
+			actorIP: "fd00:a7e:17::2",
+			want:    "http://[fd00:a7e:17::2]:9000/health",
+		},
+		{
 			name:    "missing httpGet",
 			probe:   &ateworkerpb.WakeupProbe{},
 			actorIP: "1.2.3.4",

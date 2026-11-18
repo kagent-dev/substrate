@@ -153,10 +153,12 @@ func TestActorIdentity_AfterRestore_IsOwnID_NotGolden(t *testing.T) {
 		seenUIDs[got.UID] = id
 
 		// Resolved from the /etc/hosts the runtime writes, not DNS: images
-		// commonly ship an empty one.
-		for host, want := range map[string]string{"localhost": "127.0.0.1", got.Hostname: "169.254.17.2"} {
-			if addrs, err := lookup(ctx, rc, id, host); err != nil || !slices.Contains(addrs, want) {
-				t.Errorf("actor %q: lookup %q = %v, %v; want %s", id, host, addrs, err, want)
+		// commonly ship an empty one. The hostname maps to the actor's
+		// address in each family its sandbox has.
+		for host, want := range map[string][]string{"localhost": {"127.0.0.1"}, got.Hostname: {"169.254.17.2", "fd00:a7e:17::2"}} {
+			addrs, err := lookup(ctx, rc, id, host)
+			if err != nil || !slices.ContainsFunc(want, func(w string) bool { return slices.Contains(addrs, w) }) {
+				t.Errorf("actor %q: lookup %q = %v, %v; want one of %v", id, host, addrs, err, want)
 			}
 		}
 	}
