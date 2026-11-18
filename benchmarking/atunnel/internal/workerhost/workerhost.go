@@ -40,8 +40,11 @@ import (
 const Atespace = "bench"
 
 // ActorPort is where the ingress actor listens inside each sandbox: the port
-// of actornet.ActorHTTPUpstream, which ingress proxies to.
+// of families.HTTPUpstream, which ingress proxies to.
 const ActorPort = 80
+
+// families are those of an IPv4 cluster's sandboxes.
+var families = actornet.Families{IPv4: true}
 
 // Sandbox is one hosted actor, as a process placing an ingress actor in it needs it.
 type Sandbox struct {
@@ -76,7 +79,7 @@ type actor struct {
 // Start starts atunnel from cfg, as a worker's main does, and hosts actors
 // actors whose egress tunnels to gatewayAddress.
 func Start(ctx context.Context, cfg atunnel.Config, actors int, gatewayAddress string) (*Host, error) {
-	t, err := atunnel.Start(ctx, cfg, actornet.ActorHTTPUpstream)
+	t, err := atunnel.Start(ctx, cfg, families.HTTPUpstream())
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +111,7 @@ func (h *Host) host(ctx context.Context, attribution resources.ActorAttribution,
 	session, err := actornet.ServeSandbox(ctx, actornet.SandboxNetworkConfig{
 		ActorUID:   attribution.UID,
 		Veth:       true,
+		Families:   families,
 		EgressPort: h.tunnel.EgressPort,
 		DNSPolicy:  h.tunnel.ActorEgressPolicy(attribution),
 	}, h.tunnel.Egress, h.tunnel.DNSRelay)

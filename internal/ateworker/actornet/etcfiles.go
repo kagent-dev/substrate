@@ -22,18 +22,21 @@ import (
 )
 
 // WriteRootfsEtcFiles writes the sandbox's /etc/resolv.conf and /etc/hosts
-// into rootfs, pointing the resolver at the actor's gateway.
+// into rootfs for families, pointing the resolver at the actor's gateway.
 //
 // rootfs must be the base layer under the actor's restored rootfs writes, so
 // rewriting it on every activation keeps the actor's own edits. Writing these
 // after restore instead would clobber them.
-func WriteRootfsEtcFiles(rootfs, hostname string) error {
+func WriteRootfsEtcFiles(rootfs, hostname string, families Families) error {
+	if err := families.validate(); err != nil {
+		return fmt.Errorf("actornet: %w", err)
+	}
 	pod, err := os.ReadFile("/etc/resolv.conf")
 	if err != nil {
 		return fmt.Errorf("reading the worker pod resolv.conf: %w", err)
 	}
-	if err := WriteRootfsResolvConf(rootfs, SandboxResolvConf(ActorVethGateway, pod)); err != nil {
+	if err := WriteRootfsResolvConf(rootfs, SandboxResolvConf(families.gatewayIPs(), pod)); err != nil {
 		return err
 	}
-	return WriteRootfsHosts(rootfs, SandboxHosts(hostname, ActorVethIP))
+	return WriteRootfsHosts(rootfs, SandboxHosts(hostname, families.actorIPs()))
 }

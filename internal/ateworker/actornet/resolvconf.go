@@ -23,12 +23,14 @@ import (
 	"strings"
 )
 
-// SandboxResolvConf replaces the pod's nameservers with nameserver, the
-// address the sandbox's DNS is served on, while preserving the pod's search
+// SandboxResolvConf replaces the pod's nameservers with nameservers, the
+// addresses the sandbox's DNS is served on, while preserving the pod's search
 // domains and options for Kubernetes DNS.
-func SandboxResolvConf(nameserver string, podResolvConf []byte) []byte {
+func SandboxResolvConf(nameservers []string, podResolvConf []byte) []byte {
 	var out strings.Builder
-	out.WriteString("nameserver " + nameserver + "\n")
+	for _, nameserver := range nameservers {
+		out.WriteString("nameserver " + nameserver + "\n")
+	}
 	for line := range strings.SplitSeq(string(podResolvConf), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "nameserver") {
 			continue
@@ -41,13 +43,16 @@ func SandboxResolvConf(nameserver string, podResolvConf []byte) []byte {
 	return []byte(out.String())
 }
 
-// SandboxHosts maps localhost to loopback and hostname to ip, the way a
-// container runtime fills in /etc/hosts.
-func SandboxHosts(hostname, ip string) []byte {
-	return []byte("# Agent Substrate-managed hosts file.\n" +
+// SandboxHosts maps localhost to loopback and hostname to each of ips, the
+// way a container runtime fills in /etc/hosts.
+func SandboxHosts(hostname string, ips []string) []byte {
+	hosts := "# Agent Substrate-managed hosts file.\n" +
 		"127.0.0.1\tlocalhost\n" +
-		"::1\tlocalhost ip6-localhost ip6-loopback\n" +
-		ip + "\t" + hostname + "\n")
+		"::1\tlocalhost ip6-localhost ip6-loopback\n"
+	for _, ip := range ips {
+		hosts += ip + "\t" + hostname + "\n"
+	}
+	return []byte(hosts)
 }
 
 // WriteRootfsResolvConf installs content at /etc/resolv.conf inside rootfs.

@@ -541,7 +541,7 @@ func (s *AteWorkerService) coldBootActor(ctx context.Context, p actorBootParams)
 
 	// Network device: build the actor's tap and add a virtio-net to the created
 	// (pre-boot) VM with its FDs (SCM_RIGHTS).
-	tapFiles, err := setupActorTap(ctx, s.sandboxNetNS(actorUID), "tap0_kata", 1)
+	tapFiles, err := setupActorTap(ctx, s.sandboxNetNS(actorUID), "tap0_kata", 1, s.families)
 	if err != nil {
 		return fmt.Errorf("while building tap: %w", err)
 	}
@@ -597,7 +597,7 @@ func (s *AteWorkerService) coldBootActor(ctx context.Context, p actorBootParams)
 	tContainers := time.Now()
 
 	// Block until every wakeup-probe-enabled container reports 200.
-	if err := wakeupprobe.WaitAll(ctx, containers, actornet.ActorVethIP, wakeupprobe.DialFunc(s.sandboxDialer(actorUID))); err != nil {
+	if err := wakeupprobe.WaitAll(ctx, containers, s.families.ActorIP(), wakeupprobe.DialFunc(s.sandboxDialer(actorUID))); err != nil {
 		return fmt.Errorf("while waiting for container wakeup probe: %w", err)
 	}
 
@@ -668,7 +668,7 @@ func (s *AteWorkerService) buildActorContainers(actorUID string, actorDirs *atew
 		}
 		bundleRootfs := filepath.Join(bundle, "rootfs")
 		// Set guest DNS and hosts before serving the rootfs over virtio-fs, on boot and restore.
-		if err := actornet.WriteRootfsEtcFiles(bundleRootfs, ocispec.Hostname); err != nil {
+		if err := actornet.WriteRootfsEtcFiles(bundleRootfs, ocispec.Hostname, s.families); err != nil {
 			return nil, fmt.Errorf("while writing guest /etc files for %q: %w", cn, err)
 		}
 		ctrs[i] = actorContainer{
@@ -801,9 +801,15 @@ func initParams(agentInit bool) string {
 // with earlycon (and pays the ~800ms) for diagnosing a guest that dies before then.
 //
 // swiotlb=noforce skips the software bounce buffer.
+//
+// The guest skips duplicate address detection on eth0, which would hold the
+// agent's IPv6 address tentative for a second after boot. The kernel applies
+// sysctl. parameters after probing devices, so it names the link: eth0 has
+// already copied conf/default by then.
 func buildVMConfig(id, kernel, image, kparams, consoleLog string, memMiB, vcpus int, agentInit, debug bool) ch.VmConfig {
 	cmdline := "root=/dev/pmem0p1 rootflags=dax,data=ordered,errors=remount-ro ro rootfstype=ext4 " +
 		"panic=1 no_timer_check noreplace-smp console=hvc0 swiotlb=noforce " +
+		"sysctl.net.ipv6.conf." + actornet.ActorVethName + ".accept_dad=0 " +
 		initParams(agentInit)
 	if kparams != "" {
 		cmdline += " " + kparams
@@ -1040,32 +1046,50 @@ func tailString(s string, n int) string {
 
 // configureGuestNetwork replicates the kata shim's guest network setup over the
 // agent: configure eth0 (IP/MAC/MTU), install the connected + default routes, and
-// pin the gateway's ARP entry to its fixed MAC (so a restored guest's frozen
-// neighbor entry stays valid).
+// pin the gateway's neighbor entries to its fixed MAC (so a restored guest's
+// frozen neighbor entries stay valid). The guest gets the sandbox's families,
+// those setupActorTap gives the tap a gateway address in.
 func (s *AteWorkerService) configureGuestNetwork(ctx context.Context, ac *kata.AgentClient, mtu uint64) error {
+	var addresses []*agentpb.IPAddress
+	var routes []*agentpb.Route
+	var neighbors []*agentpb.ARPNeighbor
+	for _, f := range []struct {
+		enabled          bool
+		family           agentpb.IPFamily
+		ip, mask, subnet string
+		gateway          string
+	}{
+		{s.families.IPv4, agentpb.IPFamily_v4, actornet.ActorVethIP, "30", actornet.ActorVethSubnet, actornet.ActorVethGateway},
+		{s.families.IPv6, agentpb.IPFamily_v6, actornet.ActorVethIPv6, "126", actornet.ActorVethSubnetV6, actornet.ActorVethGatewayV6},
+	} {
+		if !f.enabled {
+			continue
+		}
+		addresses = append(addresses, &agentpb.IPAddress{Family: f.family, Address: f.ip, Mask: f.mask})
+		routes = append(routes,
+			&agentpb.Route{Dest: f.subnet, Device: actornet.ActorVethName, Scope: uint32(unix.RT_SCOPE_LINK), Family: f.family},
+			&agentpb.Route{Dest: "", Gateway: f.gateway, Device: actornet.ActorVethName, Family: f.family},
+		)
+		neighbors = append(neighbors, &agentpb.ARPNeighbor{
+			ToIPAddress: &agentpb.IPAddress{Family: f.family, Address: f.gateway},
+			Device:      actornet.ActorVethName,
+			Lladdr:      gatewayMAC,
+			State:       0x80, // NUD_PERMANENT
+		})
+	}
 	if err := ac.UpdateInterface(ctx, &agentpb.Interface{
-		Device: actornet.ActorVethName,
-		Name:   actornet.ActorVethName,
-		HwAddr: actorGuestMAC,
-		Mtu:    mtu,
-		IPAddresses: []*agentpb.IPAddress{
-			{Family: agentpb.IPFamily_v4, Address: actornet.ActorVethIP, Mask: "30"},
-		},
-	}); err != nil {
-		return err
-	}
-	if err := ac.UpdateRoutes(ctx, []*agentpb.Route{
-		{Dest: actornet.ActorVethSubnet, Device: actornet.ActorVethName, Scope: uint32(unix.RT_SCOPE_LINK), Family: agentpb.IPFamily_v4},
-		{Dest: "", Gateway: actornet.ActorVethGateway, Device: actornet.ActorVethName, Family: agentpb.IPFamily_v4},
-	}); err != nil {
-		return err
-	}
-	return ac.AddARPNeighbors(ctx, []*agentpb.ARPNeighbor{{
-		ToIPAddress: &agentpb.IPAddress{Family: agentpb.IPFamily_v4, Address: actornet.ActorVethGateway},
 		Device:      actornet.ActorVethName,
-		Lladdr:      gatewayMAC,
-		State:       0x80, // NUD_PERMANENT
-	}})
+		Name:        actornet.ActorVethName,
+		HwAddr:      actorGuestMAC,
+		Mtu:         mtu,
+		IPAddresses: addresses,
+	}); err != nil {
+		return err
+	}
+	if err := ac.UpdateRoutes(ctx, routes); err != nil {
+		return err
+	}
+	return ac.AddARPNeighbors(ctx, neighbors)
 }
 
 // waitForFile polls for path to exist, up to d. Used to wait for the kata-agent
