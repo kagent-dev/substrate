@@ -206,6 +206,28 @@ tests:
       content:
         name: statusz
         containerPort: 4040
+- it: pins RustFS's IDs off OpenShift
+  template: rustfs.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - equal:
+      path: spec.template.spec.securityContext
+      value:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+- it: runs the credential provider as its image's non-root user
+  template: k8s-credential-provider.yaml
+  documentSelector:
+    path: kind
+    value: Deployment
+  asserts:
+  - equal:
+      path: spec.template.spec.securityContext
+      value:
+        runAsNonRoot: true
 - it: leaves pod IDs to OpenShift's SCC
   templates:
   - k8s-credential-provider.yaml
