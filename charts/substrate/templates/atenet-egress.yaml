@@ -33,7 +33,7 @@ data:
         mode: tunnel
       accessLog:
         add:
-          substrate.connect.authority: 'destination.address + ":" + string(destination.port)'
+          substrate.connect.authority: '(destination.address.contains(":") ? "[" + destination.address + "]" : destination.address) + ":" + string(destination.port)'
       # Authorize the actor identity at CONNECT-accept, before any tunnel
       # (HTTP, TLS, or opaque TCP) is terminated. Fails closed when the
       # control plane is unreachable.
@@ -85,7 +85,7 @@ data:
         routes:
         - backends:
           - dynamic:
-              target: 'destination.address + ":" + string(destination.port)'
+              target: '(destination.address.contains(":") ? "[" + destination.address + "]" : destination.address) + ":" + string(destination.port)'
           policies:
             substrateEgress:
               host: {{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443
