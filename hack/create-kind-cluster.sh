@@ -21,6 +21,8 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kind}"
 KUBECTL_CONTEXT="kind-${KIND_CLUSTER_NAME}"
 reg_name="kind-registry"
 reg_port="${KIND_REGISTRY_PORT:-5001}"
+dns_name="kind-dns"
+dns_image="registry.k8s.io/coredns/coredns:v1.14.6@sha256:900f9c109f7a33545d3c811516e8376df9019147b750f5ce3e254468769176ea"
 
 if [[ $# -gt 0 ]]; then
   case "$1" in
@@ -147,6 +149,7 @@ if [[ "${IP_FAMILY}" != "ipv4" &&
       "$(docker network inspect kind --format '{{.EnableIPv6}}' 2>/dev/null || echo absent)" == "false" ]]; then
   echo "The 'kind' Docker network exists without IPv6; recreating it..."
   docker network disconnect kind "${reg_name}" 2>/dev/null || true
+  docker rm -f "${dns_name}" >/dev/null 2>&1 || true
   if ! docker network rm kind >/dev/null; then
     echo "error: could not remove the 'kind' Docker network. Something else is still" >&2
     echo "       attached to it; disconnect it and re-run:" >&2
@@ -188,10 +191,13 @@ fi
 # host with about a thousand sandboxes overflows it ("neighbour: arp_cache:
 # neighbor table overflow!" in dmesg) and connections to sandboxes time out while
 # the host sits idle. Only Linux hosts expose the sysctl; warn, do not change it.
-if thresh3="$(sysctl -n net.ipv4.neigh.default.gc_thresh3 2>/dev/null)" && [ "${thresh3}" -le 1024 ]; then
-  echo "warning: net.ipv4.neigh.default.gc_thresh3=${thresh3}; above about 1000 sandboxes on this host set" >&2
-  echo "         net.ipv4.neigh.default.gc_thresh1=4096 gc_thresh2=16384 gc_thresh3=32768 (sysctl -w, as root)" >&2
-fi
+# IPv6 sandboxes fill the IPv6 table the same way.
+for family in ipv4 ipv6; do
+  if thresh3="$(sysctl -n "net.${family}.neigh.default.gc_thresh3" 2>/dev/null)" && [ "${thresh3}" -le 1024 ]; then
+    echo "warning: net.${family}.neigh.default.gc_thresh3=${thresh3}; above about 1000 sandboxes on this host set" >&2
+    echo "         net.${family}.neigh.default.gc_thresh1=4096 gc_thresh2=16384 gc_thresh3=32768 (sysctl -w, as root)" >&2
+  fi
+done
 
 # 2.5 Enable Proxy ARP/NDP on kind nodes for gVisor loopback pod-to-pod networking
 echo "Enabling Proxy ARP/NDP on kind nodes..."
@@ -227,6 +233,41 @@ done
 echo "Connecting local registry to cluster network..."
 if [ "$(docker inspect -f='{{json .NetworkSettings.Networks.kind}}' "${reg_name}")" = "null" ]; then
   docker network connect "kind" "${reg_name}"
+fi
+
+# 4.5 CoreDNS forwards to the node's resolver, which kind points at an IPv4
+# address. Pods of an ipv6 cluster have no IPv4 route, so run a forwarder on the
+# kind network that pods reach over IPv6 and that forwards to Docker's resolver.
+# Docker's resolver returns no AAAA record for ${reg_name}, which atelet pulls
+# from, so CoreDNS serves that name itself.
+if [[ "${IP_FAMILY}" == "ipv6" ]]; then
+  if [ "$(docker inspect -f '{{.State.Running}}' "${dns_name}" 2>/dev/null || true)" != "true" ]; then
+    echo "Starting DNS forwarder '${dns_name}'..."
+    docker rm -f "${dns_name}" >/dev/null 2>&1 || true
+    docker create --restart=always --label created-by=agent-substrate \
+      --network kind --name "${dns_name}" "${dns_image}" -conf /Corefile >/dev/null
+    printf '.:53 {\n    errors\n    forward . /etc/resolv.conf\n    cache 30\n}\n' \
+      > "${ROOT}/bin/kind-dns.Corefile"
+    docker cp "${ROOT}/bin/kind-dns.Corefile" "${dns_name}:/Corefile"
+    docker start "${dns_name}" >/dev/null
+  fi
+  dns_ip6="$(docker inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' "${dns_name}")"
+  reg_ip6="$(docker inspect -f '{{.NetworkSettings.Networks.kind.GlobalIPv6Address}}' "${reg_name}")"
+  echo "Pointing CoreDNS at ${dns_name} (${dns_ip6}) and adding ${reg_name}..."
+  kubectl --context="${KUBECTL_CONTEXT}" -n kube-system get configmap coredns \
+      -o jsonpath='{.data.Corefile}' \
+    | awk -v upstream="[${dns_ip6}]:53" -v entry="${reg_ip6} ${reg_name}" '
+        /^ *forward \. \/etc\/resolv\.conf/ {
+          print "    hosts {\n       " entry "\n       fallthrough\n    }"
+          n += sub(/\/etc\/resolv\.conf/, upstream)
+        }
+        {print}
+        END {exit n != 1}' \
+    | kubectl --context="${KUBECTL_CONTEXT}" -n kube-system create configmap coredns \
+        --from-file=Corefile=/dev/stdin --dry-run=client -o yaml \
+    | kubectl --context="${KUBECTL_CONTEXT}" replace -f -
+  kubectl --context="${KUBECTL_CONTEXT}" -n kube-system rollout restart deployment/coredns
+  kubectl --context="${KUBECTL_CONTEXT}" -n kube-system rollout status deployment/coredns --timeout=120s
 fi
 
 # 5. Document the local registry in kube-public ConfigMap
