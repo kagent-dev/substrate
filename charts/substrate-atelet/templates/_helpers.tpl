@@ -30,6 +30,16 @@ substrate release references.
 {{- end -}}
 {{- end -}}
 
+{{/* The app label is reserved for the atelet DaemonSet selector. */}}
+{{- define "substrate.podLabels" -}}
+{{- with .Values.podLabels -}}
+{{- if hasKey . "app" -}}
+{{- fail "podLabels must not set app: it is the selector label of the atelet DaemonSet" -}}
+{{- end -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
+
 {{/* OTLP endpoint a signal exports to. Copied from the substrate chart. */}}
 {{- define "substrate.otel.signalEndpoint" -}}
 {{- $signal := index . 0 -}}
