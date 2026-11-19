@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.ate.dev/substrate/cmd/ateworker-microvm/internal/kata"
+	"go.ate.dev/substrate/internal/ateworker/actornet"
 	"go.ate.dev/substrate/internal/imagecache"
 	"go.ate.dev/substrate/internal/proto/ateworkerpb"
 	"go.ate.dev/substrate/internal/roottest"
@@ -61,7 +62,7 @@ func failedRestoreRootfs(t *testing.T, actorUID string, overlays bool) *ateworke
 		// t.TempDir can remove the bundle.
 		t.Cleanup(func() { _ = imagecache.UnmountAllUnder(dirs.GetOciBundleDir()) })
 	}
-	if _, err := (&AteWorkerService{}).buildActorContainers(actorUID, dirs, containers); err != nil {
+	if _, err := (&AteWorkerService{families: actornet.Families{IPv4: true, IPv6: true}}).buildActorContainers(actorUID, dirs, containers); err != nil {
 		t.Fatalf("buildActorContainers: %v", err)
 	}
 	return dirs

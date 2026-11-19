@@ -234,11 +234,15 @@ func do(ctx context.Context) error {
 		return fmt.Errorf("while delegating the worker cgroup: %w", err)
 	}
 
-	tunnel, err := atunnel.Start(ctx, *tunnelConfig, actornet.ActorHTTPUpstream)
+	families, err := actornet.PodFamilies(register.ParsePodIPs(*podIPs))
 	if err != nil {
 		return err
 	}
-	ateworkerService := NewService(*podUID, *chBinary, *guestDebug, *maxActors, tunnel, actorLogger, bootID)
+	tunnel, err := atunnel.Start(ctx, *tunnelConfig, families.HTTPUpstream())
+	if err != nil {
+		return err
+	}
+	ateworkerService := NewService(*podUID, *chBinary, *guestDebug, *maxActors, families, tunnel, actorLogger, bootID)
 	ateworkerService.throttleMemory = cgroup.PSIEnabled(cgroup.Root)
 	if !ateworkerService.throttleMemory {
 		slog.WarnContext(ctx, "Kernel has no cgroup memory pressure (PSI), so actor cgroups get no memory limit and an actor over its booking can restart the worker")
@@ -362,6 +366,9 @@ const (
 type AteWorkerService struct {
 	ateworkerpb.UnimplementedWorkerServer
 
+	// families are the IP families each sandbox carries, those of this pod.
+	families actornet.Families
+
 	// Serializes lifecycle RPCs per actor.
 	locks *actorlock.Locks
 	// Tracks lifecycle RPCs for shutdown cancellation and draining.
@@ -420,8 +427,9 @@ type AteWorkerService struct {
 var _ ateworkerpb.WorkerServer = (*AteWorkerService)(nil)
 
 // NewService creates a new AteWorkerService.
-func NewService(podUID, chBinary string, guestDebug bool, maxActors int, tunnel *atunnel.Tunnel, actorLogger *actorlog.ActorLogger, bootID string) *AteWorkerService {
+func NewService(podUID, chBinary string, guestDebug bool, maxActors int, families actornet.Families, tunnel *atunnel.Tunnel, actorLogger *actorlog.ActorLogger, bootID string) *AteWorkerService {
 	s := &AteWorkerService{
+		families:       families,
 		locks:          actorlock.New(),
 		inFlight:       actorlock.NewInFlight(),
 		actors:         map[string]*hostedActor{},

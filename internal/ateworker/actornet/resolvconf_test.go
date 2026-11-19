@@ -28,14 +28,24 @@ func TestSandboxResolvConf(t *testing.T) {
 	pod := "nameserver 10.96.0.10\n" +
 		"search ate-demo.svc.cluster.local svc.cluster.local cluster.local\n" +
 		"options ndots:5\n"
-
-	got := string(SandboxResolvConf("169.254.17.1", []byte(pod)))
-
-	want := "nameserver 169.254.17.1\n" +
-		"search ate-demo.svc.cluster.local svc.cluster.local cluster.local\n" +
+	rest := "search ate-demo.svc.cluster.local svc.cluster.local cluster.local\n" +
 		"options ndots:5\n"
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("actor resolv.conf mismatch (-want +got):\n%s", diff)
+
+	for _, tc := range []struct {
+		name        string
+		nameservers []string
+		want        string
+	}{
+		{"IPv4", []string{"169.254.17.1"}, "nameserver 169.254.17.1\n" + rest},
+		{"IPv6", []string{"fd00:a7e:17::1"}, "nameserver fd00:a7e:17::1\n" + rest},
+		{"dual-stack", []string{"169.254.17.1", "fd00:a7e:17::1"}, "nameserver 169.254.17.1\nnameserver fd00:a7e:17::1\n" + rest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(SandboxResolvConf(tc.nameservers, []byte(pod)))
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("actor resolv.conf mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -43,7 +53,7 @@ func TestSandboxResolvConf(t *testing.T) {
 // only a nameserver line resolves public names but not cluster ones.
 func TestSandboxResolvConfKeepsSearchAndOptions(t *testing.T) {
 	pod := "search svc.cluster.local\nnameserver 10.96.0.10\nnameserver 10.96.0.11\noptions ndots:5 timeout:1\n"
-	got := string(SandboxResolvConf("169.254.17.1", []byte(pod)))
+	got := string(SandboxResolvConf([]string{"169.254.17.1"}, []byte(pod)))
 
 	if strings.Contains(got, "10.96.0.10") || strings.Contains(got, "10.96.0.11") {
 		t.Errorf("a pod resolver survived into the actor's file, so its DNS would bypass atunnel:\n%s", got)
@@ -118,14 +128,14 @@ func TestWriteRootfsHosts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rootfs, "etc", "hosts"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteRootfsHosts(rootfs, SandboxHosts("actor", "169.254.17.2")); err != nil {
+	if err := WriteRootfsHosts(rootfs, SandboxHosts("actor", []string{"169.254.17.2", "fd00:a7e:17::2"})); err != nil {
 		t.Fatalf("WriteRootfsHosts: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(rootfs, "etc", "hosts"))
 	if err != nil {
 		t.Fatalf("reading what was written: %v", err)
 	}
-	want := "# Agent Substrate-managed hosts file.\n127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n169.254.17.2\tactor\n"
+	want := "# Agent Substrate-managed hosts file.\n127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n169.254.17.2\tactor\nfd00:a7e:17::2\tactor\n"
 	if string(got) != want {
 		t.Errorf("wrote %q, want %q", got, want)
 	}

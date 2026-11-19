@@ -92,6 +92,7 @@ func (s *AteWorkerService) hostActor(ctx context.Context, attribution resources.
 	// The tap and atunnel share a namespace; the guest owns the other end.
 	session, err := actornet.ServeSandbox(ctx, actornet.SandboxNetworkConfig{
 		ActorUID:   uid,
+		Families:   s.families,
 		EgressPort: s.tunnel.EgressPort,
 		DNSPolicy:  s.tunnel.ActorEgressPolicy(attribution),
 	}, s.tunnel.Egress, s.tunnel.DNSRelay)

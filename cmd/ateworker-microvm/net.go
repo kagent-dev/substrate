@@ -31,9 +31,9 @@ import (
 const (
 	// gatewayMAC is deliberately FIXED (locally administered), unlike
 	// ateworker-gvisor where a random veth MAC is fine. A CH snapshot freezes the
-	// guest kernel's ARP cache, including the entry for the gateway
-	// 169.254.17.1; restoring against a tap with a fresh random MAC would
-	// blackhole guest egress until that entry expired.
+	// guest kernel's neighbor cache, including the entries for the gateway's
+	// addresses; restoring against a tap with a fresh random MAC would
+	// blackhole guest egress until those entries expired.
 	gatewayMAC = "02:a8:1e:00:00:01"
 
 	// actorGuestMAC is the FIXED MAC for the guest's eth0 (the CH virtio-net).
@@ -49,9 +49,9 @@ const (
 
 var gatewayHWAddr = actornet.MustParseMAC(gatewayMAC)
 
-// setupActorTap creates the guest's tap with a fixed gateway address and MAC.
+// setupActorTap creates the guest's tap with fixed gateway addresses and MAC.
 // Returns the FDs cloud-hypervisor adopts on boot or restore.
-func setupActorTap(ctx context.Context, actorNetNS netns.Handle, name string, queuePairs int) ([]*os.File, error) {
+func setupActorTap(ctx context.Context, actorNetNS netns.Handle, name string, queuePairs int, families actornet.Families) ([]*os.File, error) {
 	var fds []*os.File
 	err := netns.Do(ctx, actorNetNS, func(ctx context.Context) error {
 		if old, lerr := netlink.LinkByName(name); lerr == nil {
@@ -80,8 +80,10 @@ func setupActorTap(ctx context.Context, actorNetNS netns.Handle, name string, qu
 		if err := netlink.LinkSetHardwareAddr(link, gatewayHWAddr); err != nil {
 			return fmt.Errorf("setting the gateway MAC on tap %q: %w", name, err)
 		}
-		if err := netlink.AddrReplace(link, actornet.HostVethAddr); err != nil {
-			return fmt.Errorf("assigning the gateway address to tap %q: %w", name, err)
+		for _, addr := range families.GatewayAddrs() {
+			if err := netlink.AddrReplace(link, addr); err != nil {
+				return fmt.Errorf("assigning the gateway address %s to tap %q: %w", addr, name, err)
+			}
 		}
 		if err := netlink.LinkSetUp(link); err != nil {
 			return fmt.Errorf("bringing up tap %q: %w", name, err)

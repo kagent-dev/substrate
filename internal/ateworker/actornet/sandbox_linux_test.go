@@ -33,6 +33,9 @@ import (
 
 	"github.com/google/nftables"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/net/dns/dnsmessage"
+
+	"go.ate.dev/substrate/internal/atunnel/dns"
 	"go.ate.dev/substrate/internal/nodepath"
 
 	"go.ate.dev/substrate/internal/netns"
@@ -40,6 +43,135 @@ import (
 )
 
 const testEgressPort = 15001
+
+var dualStack = Families{IPv4: true, IPv6: true}
+
+// testFamilies are the sandbox shapes every family-dependent test covers.
+var testFamilies = []struct {
+	name     string
+	families Families
+}{
+	{"ipv4", Families{IPv4: true}},
+	{"ipv6", Families{IPv6: true}},
+	{"dual", dualStack},
+}
+
+func TestPodFamilies(t *testing.T) {
+	for _, tc := range []struct {
+		podIPs  []string
+		want    Families
+		wantErr bool
+	}{
+		{podIPs: []string{"10.0.0.1"}, want: Families{IPv4: true}},
+		{podIPs: []string{"fd00::1"}, want: Families{IPv6: true}},
+		{podIPs: []string{"10.0.0.1", "fd00::1"}, want: dualStack},
+		{podIPs: []string{"::ffff:10.0.0.1"}, want: Families{IPv4: true}},
+		{podIPs: nil, wantErr: true},
+		{podIPs: []string{"not-an-ip"}, wantErr: true},
+	} {
+		got, err := PodFamilies(tc.podIPs)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("PodFamilies(%q) = %+v, %v; want %+v, error %v", tc.podIPs, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
+func TestSetupSandboxNetworkNeedsAFamily(t *testing.T) {
+	if _, err := SetupSandboxNetwork(context.Background(), SandboxNetworkConfig{ActorUID: "no-family", EgressPort: testEgressPort}); err == nil {
+		t.Fatal("SetupSandboxNetwork with no IP family succeeded")
+	}
+}
+
+// The actor's resolv.conf names the gateway in each of its families, so the
+// relay must answer on every one of them, over UDP and TCP. A nil policy
+// refuses every name, so the answer is NXDOMAIN and the upstream sees no
+// query. TCP still connects to it for each client.
+func TestSandboxDNSAnswersOnEveryGatewayAddress(t *testing.T) {
+	roottest.Require(t, "creates network namespaces")
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { upstream.Close() })
+	go func() {
+		for {
+			c, err := upstream.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { c.Close() })
+		}
+	}()
+	relay, err := dns.NewRelayForUpstreams([]string{upstream.Addr().String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 0x5ad, RecursionDesired: true})
+	if err := b.StartQuestions(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName("example.com."), Type: dnsmessage.TypeAAAA, Class: dnsmessage.ClassINET}); err != nil {
+		t.Fatal(err)
+	}
+	query, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range testFamilies {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			session, err := ServeSandbox(ctx, SandboxNetworkConfig{
+				ActorUID: "dns-" + tc.name, Veth: true, Families: tc.families, EgressPort: testEgressPort,
+			}, nil, relay)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = session.Close(context.Background()) })
+
+			for _, nameserver := range tc.families.gatewayIPs() {
+				for _, network := range []string{"udp", "tcp"} {
+					var answer []byte
+					if err := netns.Do(ctx, session.Network.RuntimeNetNS, func(context.Context) error {
+						c, err := net.DialTimeout(network, net.JoinHostPort(nameserver, "53"), 5*time.Second)
+						if err != nil {
+							return err
+						}
+						defer c.Close()
+						_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+						msg := query
+						if network == "tcp" {
+							msg = append([]byte{byte(len(query) >> 8), byte(len(query))}, query...)
+						}
+						if _, err := c.Write(msg); err != nil {
+							return err
+						}
+						buf := make([]byte, 512)
+						n, err := c.Read(buf)
+						if err != nil {
+							return err
+						}
+						answer = buf[:n]
+						if network == "tcp" {
+							answer = answer[2:]
+						}
+						return nil
+					}); err != nil {
+						t.Fatalf("querying %s over %s: %v", nameserver, network, err)
+					}
+					var p dnsmessage.Parser
+					h, err := p.Start(answer)
+					if err != nil {
+						t.Fatalf("parsing the answer from %s over %s: %v", nameserver, network, err)
+					}
+					if h.ID != 0x5ad || h.RCode != dnsmessage.RCodeNameError {
+						t.Errorf("%s over %s answered id %#x rcode %v, want id 0x5ad NXDOMAIN", nameserver, network, h.ID, h.RCode)
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestSandboxSessionDialerAfterClose(t *testing.T) {
 	session := &SandboxSession{}
@@ -55,7 +187,7 @@ func TestSandboxSessionDialerAfterClose(t *testing.T) {
 func TestSandboxSessionDialerConcurrentClose(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
 	session, err := ServeSandbox(context.Background(), SandboxNetworkConfig{
-		ActorUID: "concurrent-close", EgressPort: testEgressPort,
+		ActorUID: "concurrent-close", Families: dualStack, EgressPort: testEgressPort,
 	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +222,14 @@ func TestSandboxSessionDialerConcurrentClose(t *testing.T) {
 
 func TestSetupSandboxNetwork(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
+	for _, tc := range testFamilies {
+		t.Run(tc.name, func(t *testing.T) { testSetupSandboxNetwork(t, tc.families) })
+	}
+}
+
+func testSetupSandboxNetwork(t *testing.T, families Families) {
 	ctx := context.Background()
+	actorAddr := net.JoinHostPort(families.ActorIP(), "80")
 
 	type actor struct {
 		net  *SandboxNetwork
@@ -98,7 +237,7 @@ func TestSetupSandboxNetwork(t *testing.T) {
 	}
 	actors := map[string]*actor{}
 	for _, uid := range []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"} {
-		n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: uid, Veth: true, EgressPort: testEgressPort})
+		n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: uid, Veth: true, Families: families, EgressPort: testEgressPort})
 		if err != nil {
 			t.Fatalf("SetupSandboxNetwork(%s): %v", uid, err)
 		}
@@ -111,7 +250,7 @@ func TestSetupSandboxNetwork(t *testing.T) {
 		// The actor's app, bound where a real one binds, inside its namespace.
 		var lis net.Listener
 		if err := netns.Do(ctx, n.RuntimeNetNS, func(context.Context) error {
-			l, err := net.Listen("tcp", net.JoinHostPort(ActorVethIP, "80"))
+			l, err := net.Listen("tcp", actorAddr)
 			lis = l
 			return err
 		}); err != nil {
@@ -128,7 +267,7 @@ func TestSetupSandboxNetwork(t *testing.T) {
 	// Reaching each actor is a matter of which namespace the dial is made from.
 	for uid, a := range actors {
 		client := &http.Client{Transport: &http.Transport{DialContext: netns.Dialer(a.net.RuntimeNetNS)}, Timeout: 5 * time.Second}
-		resp, err := client.Get((&url.URL{Scheme: "http", Host: net.JoinHostPort(ActorVethIP, "80")}).String())
+		resp, err := client.Get((&url.URL{Scheme: "http", Host: actorAddr}).String())
 		if err != nil {
 			t.Fatalf("reaching actor %s: %v", uid, err)
 		}
@@ -141,8 +280,59 @@ func TestSetupSandboxNetwork(t *testing.T) {
 
 	// Sandbox addresses must not be reachable from the worker namespace.
 	direct := &http.Client{Timeout: 2 * time.Second}
-	if _, err := direct.Get("http://" + net.JoinHostPort(ActorVethIP, "80")); err == nil {
+	if _, err := direct.Get("http://" + actorAddr); err == nil {
 		t.Error("the worker namespace reached an actor directly; addresses are not isolated")
+	}
+
+	// The actor has addresses and a default route in its families only.
+	for _, a := range actors {
+		if err := netns.Do(ctx, a.net.RuntimeNetNS, func(context.Context) error {
+			eth0, err := netlink.LinkByName(ActorVethName)
+			if err != nil {
+				return err
+			}
+			for _, f := range []struct {
+				family int
+				want   bool
+				addr   string
+			}{
+				{netlink.FAMILY_V4, families.IPv4, ActorVethIP},
+				{netlink.FAMILY_V6, families.IPv6, ActorVethIPv6},
+			} {
+				addrs, err := netlink.AddrList(eth0, f.family)
+				if err != nil {
+					return err
+				}
+				var found bool
+				for _, addr := range addrs {
+					// The kernel adds an IPv6 link-local address of its own.
+					if addr.IP.To4() == nil && addr.IP.IsLinkLocalUnicast() {
+						continue
+					}
+					if addr.IP.String() != f.addr {
+						t.Errorf("unexpected address %s on the actor's %s", addr.IP, ActorVethName)
+					}
+					found = true
+				}
+				if found != f.want {
+					t.Errorf("actor address %s present = %v, want %v", f.addr, found, f.want)
+				}
+				routes, err := netlink.RouteList(eth0, f.family)
+				if err != nil {
+					return err
+				}
+				var defaultRoute bool
+				for _, r := range routes {
+					defaultRoute = defaultRoute || (r.Gw != nil && (r.Dst == nil || r.Dst.IP.IsUnspecified()))
+				}
+				if defaultRoute != f.want {
+					t.Errorf("family %d default route present = %v, want %v", f.family, defaultRoute, f.want)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("inspecting the actor's interface: %v", err)
+		}
 	}
 }
 
@@ -150,33 +340,43 @@ func TestActorEgressIsFailClosedWithoutAtunnel(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
 	ctx := context.Background()
 
-	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{
-		ActorUID: "33333333-3333-3333-3333-333333333333", Veth: true, EgressPort: testEgressPort,
-	})
-	if err != nil {
-		t.Fatalf("SetupSandboxNetwork: %v", err)
-	}
-	t.Cleanup(func() { CleanupSandboxNetwork(n) })
-
-	for _, destination := range []string{"93.184.216.34:443", "93.184.216.34:8080"} {
-		if err := netns.Do(ctx, n.RuntimeNetNS, func(context.Context) error {
-			c, err := net.DialTimeout("tcp", destination, 3*time.Second)
+	for _, tc := range testFamilies {
+		t.Run(tc.name, func(t *testing.T) {
+			n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{
+				ActorUID: "33333333-3333-3333-3333-333333333333", Veth: true, Families: tc.families, EgressPort: testEgressPort,
+			})
 			if err != nil {
-				return err
+				t.Fatalf("SetupSandboxNetwork: %v", err)
 			}
-			c.Close()
-			return nil
-		}); err == nil {
-			t.Errorf("the actor reached %s with no atunnel listening; egress is not fail-closed", destination)
-		}
+			t.Cleanup(func() { CleanupSandboxNetwork(n) })
+
+			for _, destination := range []string{"93.184.216.34:443", "93.184.216.34:8080", "[2001:db8::1]:443"} {
+				if err := netns.Do(ctx, n.RuntimeNetNS, func(context.Context) error {
+					c, err := net.DialTimeout("tcp", destination, 3*time.Second)
+					if err != nil {
+						return err
+					}
+					c.Close()
+					return nil
+				}); err == nil {
+					t.Errorf("the actor reached %s with no atunnel listening; egress is not fail-closed", destination)
+				}
+			}
+		})
 	}
 }
 
 func TestIngressCrossesThePairWhileEgressIsCaptured(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
+	for _, tc := range testFamilies {
+		t.Run(tc.name, func(t *testing.T) { testIngressCrossesThePair(t, tc.families) })
+	}
+}
+
+func testIngressCrossesThePair(t *testing.T, families Families) {
 	ctx := context.Background()
 
-	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: "44444444-4444-4444-4444-444444444444", Veth: true, EgressPort: testEgressPort})
+	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: "44444444-4444-4444-4444-444444444444", Veth: true, Families: families, EgressPort: testEgressPort})
 	if err != nil {
 		t.Fatalf("SetupSandboxNetwork: %v", err)
 	}
@@ -184,7 +384,7 @@ func TestIngressCrossesThePairWhileEgressIsCaptured(t *testing.T) {
 
 	var app net.Listener
 	if err := netns.Do(ctx, n.RuntimeNetNS, func(context.Context) error {
-		l, e := net.Listen("tcp", net.JoinHostPort(ActorVethIP, "80"))
+		l, e := net.Listen("tcp", net.JoinHostPort(families.ActorIP(), "80"))
 		app = l
 		return e
 	}); err != nil {
@@ -203,7 +403,7 @@ func TestIngressCrossesThePairWhileEgressIsCaptured(t *testing.T) {
 	}()
 
 	dial := netns.Dialer(n.GatewayNetNS)
-	c, err := dial(ctx, "tcp", net.JoinHostPort(ActorVethIP, "80"))
+	c, err := dial(ctx, "tcp", net.JoinHostPort(families.ActorIP(), "80"))
 	if err != nil {
 		t.Fatalf("ingress dial: %v", err)
 	}
@@ -216,7 +416,7 @@ func TestIngressCrossesThePairWhileEgressIsCaptured(t *testing.T) {
 	// An unopened port must be refused, not redirected to atunnel.
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	if c2, e := dial(cctx, "tcp", net.JoinHostPort(ActorVethIP, "81")); e == nil {
+	if c2, e := dial(cctx, "tcp", net.JoinHostPort(families.ActorIP(), "81")); e == nil {
 		c2.Close()
 		t.Error("a port with no listener was accepted, so ingress is not reaching the sandbox")
 	}
@@ -229,6 +429,7 @@ func TestSetupSandboxNetworkWithoutVeth(t *testing.T) {
 
 	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{
 		ActorUID:   "77777777-7777-7777-7777-777777777777",
+		Families:   dualStack,
 		EgressPort: testEgressPort,
 	})
 	if err != nil {
@@ -261,7 +462,7 @@ func TestSetupSucceedsOverALeftoverNamespace(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
 	ctx := context.Background()
 	const uid = "aaaaaaaa-0000-0000-0000-00000000000a"
-	cfg := SandboxNetworkConfig{ActorUID: uid, Veth: true, EgressPort: testEgressPort}
+	cfg := SandboxNetworkConfig{ActorUID: uid, Veth: true, Families: dualStack, EgressPort: testEgressPort}
 
 	first, err := SetupSandboxNetwork(ctx, cfg)
 	if err != nil {
@@ -300,14 +501,14 @@ func TestActorUDPHasNowhereToGoBeyondTheNamespacePair(t *testing.T) {
 	ctx := context.Background()
 
 	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{
-		ActorUID: "bbbbbbbb-0000-0000-0000-00000000000b", Veth: true, EgressPort: testEgressPort,
+		ActorUID: "bbbbbbbb-0000-0000-0000-00000000000b", Veth: true, Families: dualStack, EgressPort: testEgressPort,
 	})
 	if err != nil {
 		t.Fatalf("SetupSandboxNetwork: %v", err)
 	}
 	t.Cleanup(func() { CleanupSandboxNetwork(n) })
 
-	for _, destination := range []string{"93.184.216.34:443", "93.184.216.34:53"} {
+	for _, destination := range []string{"93.184.216.34:443", "93.184.216.34:53", "[2001:db8::1]:443", "[2001:db8::1]:53"} {
 		if err := netns.Do(ctx, n.GatewayNetNS, func(context.Context) error {
 			c, err := net.Dial("udp", destination)
 			if err != nil {
@@ -326,6 +527,7 @@ func TestCleanupClosesEachDescriptorOnce(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
 	network, err := SetupSandboxNetwork(context.Background(), SandboxNetworkConfig{
 		ActorUID:   "close-once",
+		Families:   dualStack,
 		EgressPort: 15001,
 	})
 	if err != nil {
@@ -359,7 +561,7 @@ func TestSessionCloseWaitsForServingToStop(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
 	egress := &slowEgress{release: make(chan struct{})}
 	session, err := ServeSandbox(context.Background(), SandboxNetworkConfig{
-		ActorUID: "close-waits", EgressPort: testEgressPort,
+		ActorUID: "close-waits", Families: dualStack, EgressPort: testEgressPort,
 	}, egress, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -392,7 +594,7 @@ func TestSessionCloseReportsAWaitItCouldNotFinish(t *testing.T) {
 	egress := &slowEgress{release: make(chan struct{})}
 	defer close(egress.release)
 	session, err := ServeSandbox(context.Background(), SandboxNetworkConfig{
-		ActorUID: "close-deadline", EgressPort: testEgressPort,
+		ActorUID: "close-deadline", Families: dualStack, EgressPort: testEgressPort,
 	}, egress, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -412,9 +614,8 @@ func TestSessionCloseReportsAWaitItCouldNotFinish(t *testing.T) {
 // the node's own setting is.
 func TestSandboxNamespacesDoNotForward(t *testing.T) {
 	roottest.Require(t, "creates network namespaces")
-	ctx := context.Background()
 
-	for _, tc := range []struct {
+	for _, shape := range []struct {
 		name string
 		uid  string
 		veth bool
@@ -422,68 +623,85 @@ func TestSandboxNamespacesDoNotForward(t *testing.T) {
 		{"veth", "cccccccc-0000-0000-0000-00000000000c", true},
 		{"tap", "dddddddd-0000-0000-0000-00000000000d", false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: tc.uid, Veth: tc.veth, EgressPort: testEgressPort})
-			if err != nil {
-				t.Fatalf("SetupSandboxNetwork: %v", err)
-			}
-			t.Cleanup(func() { CleanupSandboxNetwork(n) })
+		for _, tc := range testFamilies {
+			t.Run(shape.name+"/"+tc.name, func(t *testing.T) { testSandboxDoesNotForward(t, shape.uid, shape.veth, tc.families) })
+		}
+	}
+}
 
-			for _, ns := range []netns.Handle{n.RuntimeNetNS, n.GatewayNetNS} {
-				if err := netns.Do(ctx, ns, func(context.Context) error {
-					for _, key := range []string{
-						"net/ipv4/conf/all/forwarding",
-						"net/ipv4/conf/default/forwarding",
-					} {
-						b, err := os.ReadFile("/proc/sys/" + key)
-						if err != nil {
-							return err
-						}
-						if got := strings.TrimSpace(string(b)); got != "0" {
-							t.Errorf("%s = %s in the sandbox namespace, want 0", key, got)
-						}
-					}
-					return nil
-				}); err != nil {
-					t.Fatalf("reading forwarding sysctls: %v", err)
-				}
-			}
+func testSandboxDoesNotForward(t *testing.T, uid string, veth bool, families Families) {
+	ctx := context.Background()
+	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: uid, Veth: veth, Families: families, EgressPort: testEgressPort})
+	if err != nil {
+		t.Fatalf("SetupSandboxNetwork: %v", err)
+	}
+	t.Cleanup(func() { CleanupSandboxNetwork(n) })
 
-			c, err := nftables.New(nftables.WithNetNSFd(int(n.GatewayNetNS)))
+	for _, ns := range []netns.Handle{n.RuntimeNetNS, n.GatewayNetNS} {
+		if err := netns.Do(ctx, ns, func(context.Context) error {
+			for _, key := range []string{
+				"net/ipv4/conf/all/forwarding",
+				"net/ipv4/conf/default/forwarding",
+			} {
+				b, err := os.ReadFile("/proc/sys/" + key)
+				if err != nil {
+					return err
+				}
+				if got := strings.TrimSpace(string(b)); got != "0" {
+					t.Errorf("%s = %s in the sandbox namespace, want 0", key, got)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("reading forwarding sysctls: %v", err)
+		}
+	}
+
+	c, err := nftables.New(nftables.WithNetNSFd(int(n.GatewayNetNS)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chains, err := c.ListChains()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropping := map[nftables.TableFamily]bool{}
+	// The subnet accept, the rejected prefixes and the non-TCP
+	// reject, plus the ICMPv6 accept for IPv6.
+	wantDisallowedEgressRules := map[nftables.TableFamily]int{
+		nftables.TableFamilyIPv4: 3,
+		nftables.TableFamilyIPv6: 8,
+	}
+	redirecting := map[nftables.TableFamily]bool{}
+	for _, ch := range chains {
+		if ch.Hooknum != nil && *ch.Hooknum == *nftables.ChainHookForward &&
+			ch.Policy != nil && *ch.Policy == nftables.ChainPolicyDrop {
+			dropping[ch.Table.Family] = true
+		}
+		if ch.Type == nftables.ChainTypeNAT && ch.Name == "prerouting" {
+			redirecting[ch.Table.Family] = true
+		}
+		if ch.Name == "disallowed-egress" {
+			rules, err := c.GetRules(ch.Table, ch)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("getting disallowed-egress rules: %v", err)
 			}
-			chains, err := c.ListChains()
-			if err != nil {
-				t.Fatal(err)
+			if want := wantDisallowedEgressRules[ch.Table.Family]; len(rules) != want {
+				t.Errorf("disallowed-egress in family %v has %d rules, want %d", ch.Table.Family, len(rules), want)
 			}
-			dropping := map[nftables.TableFamily]bool{}
-			var foundDisallowedEgress bool
-			for _, ch := range chains {
-				if ch.Hooknum != nil && *ch.Hooknum == *nftables.ChainHookForward &&
-					ch.Policy != nil && *ch.Policy == nftables.ChainPolicyDrop {
-					dropping[ch.Table.Family] = true
-				}
-				if ch.Table.Family == nftables.TableFamilyIPv4 && ch.Name == "disallowed-egress" {
-					foundDisallowedEgress = true
-					rules, err := c.GetRules(ch.Table, ch)
-					if err != nil {
-						t.Fatalf("getting disallowed-egress rules: %v", err)
-					}
-					if len(rules) != 3 {
-						t.Errorf("disallowed-egress has %d rules, want 3", len(rules))
-					}
-				}
-			}
-			for _, family := range []nftables.TableFamily{nftables.TableFamilyIPv4, nftables.TableFamilyIPv6} {
-				if !dropping[family] {
-					t.Errorf("no forward-hook chain with a drop policy for family %v", family)
-				}
-			}
-			if !foundDisallowedEgress {
-				t.Error("no disallowed-egress chain found in IPv4 table")
-			}
-		})
+			delete(wantDisallowedEgressRules, ch.Table.Family)
+		}
+	}
+	for _, family := range []nftables.TableFamily{nftables.TableFamilyIPv4, nftables.TableFamilyIPv6} {
+		if !dropping[family] {
+			t.Errorf("no forward-hook chain with a drop policy for family %v", family)
+		}
+		if want := family == nftables.TableFamilyIPv4 && families.IPv4 || family == nftables.TableFamilyIPv6 && families.IPv6; redirecting[family] != want {
+			t.Errorf("NAT prerouting chain for family %v present = %v, want %v", family, redirecting[family], want)
+		}
+	}
+	for family := range wantDisallowedEgressRules {
+		t.Errorf("no disallowed-egress chain found for family %v", family)
 	}
 }
 
@@ -506,6 +724,7 @@ func TestSandboxNamespacesDoNotInheritNodeSettings(t *testing.T) {
 	}
 	// IPv6 reads these only from the link's own copy.
 	perLinkV6 := map[string]string{
+		"disable_ipv6":     "0",
 		"forwarding":       "0",
 		"accept_ra":        "0",
 		"accept_redirects": "0",
@@ -519,7 +738,7 @@ func TestSandboxNamespacesDoNotInheritNodeSettings(t *testing.T) {
 		{"tap", "b0b0b0b0-0000-0000-0000-00000000000b", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: tc.uid, Veth: tc.veth, EgressPort: testEgressPort})
+			n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{ActorUID: tc.uid, Veth: tc.veth, Families: dualStack, EgressPort: testEgressPort})
 			if err != nil {
 				t.Fatalf("SetupSandboxNetwork: %v", err)
 			}
@@ -592,7 +811,7 @@ func TestGatewayDoesNotRouteActorTrafficOverAStrayLink(t *testing.T) {
 	ctx := context.Background()
 
 	n, err := SetupSandboxNetwork(ctx, SandboxNetworkConfig{
-		ActorUID: "eeeeeeee-0000-0000-0000-00000000000e", Veth: true, EgressPort: testEgressPort,
+		ActorUID: "eeeeeeee-0000-0000-0000-00000000000e", Veth: true, Families: dualStack, EgressPort: testEgressPort,
 	})
 	if err != nil {
 		t.Fatalf("SetupSandboxNetwork: %v", err)

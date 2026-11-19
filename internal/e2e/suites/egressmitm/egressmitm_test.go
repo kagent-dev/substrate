@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -146,12 +147,13 @@ func TestActorEgressMITMTrust(t *testing.T) {
 	}
 
 	// The gateway dials the name the SNI claims.
-	bySNI := fetchUntilReached(t, ctx, rc, id, passthroughOrigin, "pem", originRoots, "dial="+url.QueryEscape(unreachableAddress))
+	unreachable := unreachableAddress(passthrough.ClusterIP)
+	bySNI := fetchUntilReached(t, ctx, rc, id, passthroughOrigin, "pem", originRoots, "dial="+url.QueryEscape(unreachable))
 	switch {
 	case bySNI.Error != "":
-		t.Errorf("TLS passthrough to %s dialed at %s failed: %s — the gateway dialed the actor's address instead of resolving the SNI", passthroughOrigin, unreachableAddress, bySNI.Error)
+		t.Errorf("TLS passthrough to %s dialed at %s failed: %s — the gateway dialed the actor's address instead of resolving the SNI", passthroughOrigin, unreachable, bySNI.Error)
 	case bySNI.Status != "200":
-		t.Errorf("passthrough fetch %s dialed at %s: status %s, want 200", passthroughOrigin, unreachableAddress, bySNI.Status)
+		t.Errorf("passthrough fetch %s dialed at %s: status %s, want 200", passthroughOrigin, unreachable, bySNI.Status)
 	}
 
 	// Each name is an origin's fully qualified alias: only the wrong-port rule
@@ -189,10 +191,18 @@ func originSpec(name string) e2e.ServerPod {
 	})
 }
 
+// unreachableAddress returns an address in a reserved block of clusterIP's
+// family, which an actor of that family can dial: 240/4 for IPv4 and the
+// discard prefix 100::/64 for IPv6. A gateway that dialed it instead of the
+// resolved SNI would reach nothing.
+func unreachableAddress(clusterIP string) string {
+	if net.ParseIP(clusterIP).To4() != nil {
+		return "240.0.0.1:443"
+	}
+	return "[100::1]:443"
+}
+
 const (
-	// unreachableAddress is in the reserved 240/4 block: a gateway that dialed
-	// it instead of the resolved SNI would reach nothing.
-	unreachableAddress = "240.0.0.1:443"
 	// systemRoot is the common name of a WebPKI root atelet's image ships.
 	systemRoot = "ISRG Root X1"
 )
