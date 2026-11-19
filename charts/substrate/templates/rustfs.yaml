@@ -69,10 +69,12 @@ spec:
         app: rustfs
     spec:
       serviceAccountName: {{ include "substrate.fullname" (list "rustfs" .) }}
+{{- if include "substrate.pinIDs" . }}
       securityContext:
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001
+{{- end }}
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
       - name: rustfs

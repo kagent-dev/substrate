@@ -241,6 +241,14 @@ definition so the fallback cannot drift between pods.
 {{- ((.Values.global).imagePullPolicy) | default "IfNotPresent" -}}
 {{- end -}}
 
+{{/*
+Empty on OpenShift, whose restricted-v2 SCC assigns each pod's UID and fsGroup
+and refuses IDs outside the namespace's range.
+*/}}
+{{- define "substrate.pinIDs" -}}
+{{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}true{{ end -}}
+{{- end -}}
+
 {{/* Object storage settings shared by object-store plugins. */}}
 {{- define "substrate.storage.env" -}}
 - name: ATE_STORAGE_BACKEND
