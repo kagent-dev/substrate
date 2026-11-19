@@ -16,18 +16,27 @@ package install
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"helm.sh/helm/v4/pkg/cli/values"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
+
+// profileFS holds the built-in profiles, one config file each.
+//
+//go:embed profiles/*.yaml
+var profileFS embed.FS
 
 // Config describes an installation. Install, upgrade and uninstall read it
 // from the file passed to --config.
@@ -35,6 +44,17 @@ type Config struct {
 	Postgres    Postgres    `json:"postgres,omitzero"`
 	ObjectStore ObjectStore `json:"objectStore,omitzero"`
 	MicroVM     MicroVM     `json:"microvm,omitzero"`
+	// ImageRegistry is a registry to pull every image kubectl ate installs
+	// from, like myregistry.azurecr.io. It must hold the images under their
+	// usual paths. Empty keeps each image's own registry.
+	ImageRegistry string `json:"imageRegistry,omitempty"`
+	// StorageClass is the StorageClass of the bundled PostgreSQL and RustFS
+	// volumes. Empty uses the cluster's default.
+	StorageClass string `json:"storageClass,omitempty"`
+	// OTelEndpoint is an existing OTLP collector that atelet and the control
+	// plane export traces, metrics and logs to. Empty leaves the charts' otel
+	// values as they are.
+	OTelEndpoint string `json:"otelEndpoint,omitempty"`
 	// Timeout bounds each wait for workloads to become ready.
 	Timeout metav1.Duration `json:"timeout,omitzero"`
 	// Releases holds Helm values for the releases.
@@ -181,19 +201,38 @@ func DefaultConfig() Config {
 	}
 }
 
-// ReadConfig decodes a config from r and fills unset fields from
-// DefaultConfig. dir resolves relative ValuesFiles.
-func ReadConfig(r io.Reader, dir string) (Config, error) {
+// Profiles lists the built-in profiles. Each is a config file that ReadConfig
+// and ProfileConfig layer a config over.
+func Profiles() []string {
+	entries, err := profileFS.ReadDir("profiles")
+	if err != nil {
+		panic(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, strings.TrimSuffix(e.Name(), ".yaml"))
+	}
+	return names
+}
+
+// ReadConfig decodes a config from r and fills unset fields from the profile,
+// then from DefaultConfig. An empty profile is none. dir resolves relative
+// ValuesFiles.
+func ReadConfig(r io.Reader, dir string, profile string) (Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
 	}
-	cfg := DefaultConfig()
 	if len(bytes.TrimSpace(data)) == 0 {
 		return Config{}, errors.New("config is empty")
 	}
-	if err := yaml.UnmarshalStrict(data, &cfg); err != nil {
+	var user map[string]any
+	if err := yaml.UnmarshalStrict(data, &user); err != nil {
 		return Config{}, fmt.Errorf("while decoding config: %w", err)
+	}
+	cfg, err := layerConfig(profile, user)
+	if err != nil {
+		return Config{}, err
 	}
 	for _, rv := range cfg.Releases.all() {
 		for i, f := range rv.ValuesFiles {
@@ -205,7 +244,80 @@ func ReadConfig(r io.Reader, dir string) (Config, error) {
 	return cfg, cfg.validate()
 }
 
+// ProfileConfig returns DefaultConfig with the profile's settings. An empty
+// profile is DefaultConfig.
+func ProfileConfig(profile string) (Config, error) {
+	cfg, err := layerConfig(profile, nil)
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, cfg.validate()
+}
+
+// layerConfig decodes user over the profile over DefaultConfig. Maps merge
+// and lists replace, as in Helm values.
+func layerConfig(profile string, user map[string]any) (Config, error) {
+	var base map[string]any
+	if profile != "" {
+		data, err := profileFS.ReadFile("profiles/" + profile + ".yaml")
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid profile %q: must be one of %v", profile, Profiles())
+		}
+		if err := yaml.UnmarshalStrict(data, &base); err != nil {
+			return Config{}, fmt.Errorf("while decoding profile %s: %w", profile, err)
+		}
+	}
+	data, err := json.Marshal(mergeValues(base, user))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg := DefaultConfig()
+	if err := decodeStrict(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("while decoding config: %w", err)
+	}
+	return cfg, nil
+}
+
+// validateImageRegistry checks that s is empty or a registry host.
+func validateImageRegistry(s string) error {
+	if s == "" {
+		return nil
+	}
+	// Image references read a first component without a dot or a port as a
+	// Docker Hub namespace.
+	if !strings.ContainsAny(s, ".:") || strings.ContainsFunc(s, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
+		return fmt.Errorf("invalid imageRegistry %q: must be a registry host like myregistry.azurecr.io", s)
+	}
+	return nil
+}
+
+// ValidateStorageClass checks that s is empty or a valid StorageClass name.
+func ValidateStorageClass(s string) error {
+	if s == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(s); len(errs) > 0 {
+		return fmt.Errorf("invalid StorageClass name %q: %s", s, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// ValidateOTelEndpoint checks that s is empty or an http or https URL.
+func ValidateOTelEndpoint(s string) error {
+	if s == "" {
+		return nil
+	}
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid OTLP endpoint %q: must be a URL like http://otel-collector:4317", s)
+	}
+	return nil
+}
+
 func (c Config) validate() error {
+	if err := validateImageRegistry(c.ImageRegistry); err != nil {
+		return err
+	}
 	switch c.Postgres.Type {
 	case PostgresBundled, PostgresExternal:
 	default:
@@ -213,6 +325,12 @@ func (c Config) validate() error {
 	}
 	if err := c.ObjectStore.validate(); err != nil {
 		return err
+	}
+	if err := ValidateStorageClass(c.StorageClass); err != nil {
+		return fmt.Errorf("storageClass: %w", err)
+	}
+	if err := ValidateOTelEndpoint(c.OTelEndpoint); err != nil {
+		return fmt.Errorf("otelEndpoint: %w", err)
 	}
 	if c.MicroVM.Enabled && c.ObjectStore.Type != ObjectStoreBundled && c.MicroVM.AssetBucket == "" {
 		return errors.New("microvm with an s3 or gcs objectStore needs microvm.assetBucket")
@@ -223,12 +341,30 @@ func (c Config) validate() error {
 	return nil
 }
 
+// registryValues returns the Helm values that pull a release's images from
+// ImageRegistry.
+func (c Config) registryValues() map[string]any {
+	if c.ImageRegistry == "" {
+		return nil
+	}
+	return map[string]any{"global": map[string]any{"imageRegistry": c.ImageRegistry}}
+}
+
 func (r *Releases) all() []*ReleaseValues {
 	return []*ReleaseValues{&r.All, &r.PodCert, &r.Atelet, &r.Substrate}
 }
 
-// userValues returns each release's values, keyed by release name: All's
-// files and values, then the release's own.
+// otelValues returns the Helm values that point r at OTelEndpoint.
+func (c Config) otelValues(r release) map[string]any {
+	if c.OTelEndpoint == "" || (r != ateletRelease && r != substrateRelease) {
+		return nil
+	}
+	return map[string]any{"otel": map[string]any{"endpoint": c.OTelEndpoint}}
+}
+
+// userValues returns each release's values, keyed by release name:
+// ImageRegistry's and OTelEndpoint's, All's files and values, then the
+// release's own.
 func (c Config) userValues() (map[string]map[string]any, error) {
 	all, err := c.Releases.All.read()
 	if err != nil {
@@ -244,7 +380,7 @@ func (c Config) userValues() (map[string]map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		user[r.name] = mergeValues(all, own)
+		user[r.name] = mergeValues(c.registryValues(), c.otelValues(r), all, own)
 	}
 	return user, nil
 }

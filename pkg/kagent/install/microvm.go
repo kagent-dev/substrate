@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -34,9 +35,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/yaml"
 
 	atev1 "go.ate.dev/substrate/api/infra/k8s/ate/v1"
+	"go.ate.dev/substrate/internal/deviceplugin"
 	"go.ate.dev/substrate/internal/portforward"
 	ateinstall "go.ate.dev/substrate/manifests/ate-install"
 	"go.ate.dev/substrate/pkg/kagent/microvmassets"
@@ -343,4 +346,26 @@ func uploadFile(ctx context.Context, b assetBucket, object, p string) error {
 	}
 	defer f.Close()
 	return b.put(ctx, object, f)
+}
+
+// checkKVM waits for a node to advertise ate.dev/kvm, which microVM workers
+// request. atelet advertises it on the nodes it runs on that have /dev/kvm.
+func (in *Installer) checkKVM(ctx context.Context, progress func(string)) (string, error) {
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		nodes, err := in.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, n := range nodes.Items {
+			if q, ok := n.Status.Allocatable[deviceplugin.ResourceKVM]; ok && !q.IsZero() {
+				return true, nil
+			}
+		}
+		progress(fmt.Sprintf("waiting for %s on %d nodes", deviceplugin.ResourceKVM, len(nodes.Items)))
+		return false, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("no node advertises %s, so microVM workers can't schedule; atelet's nodes need /dev/kvm: %w", deviceplugin.ResourceKVM, err)
+	}
+	return deviceplugin.ResourceKVM + " advertised", nil
 }

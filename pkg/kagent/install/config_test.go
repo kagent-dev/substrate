@@ -34,6 +34,7 @@ func TestReadConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
+		profile string
 		want    Config
 		wantErr string
 	}{
@@ -67,7 +68,29 @@ releases:
 				c.Releases.Substrate.ValuesFiles = []string{"/cfg/db.yaml"}
 			}),
 		},
+		{name: "storage class", in: "storageClass: fast\n", want: withDefaults(func(c *Config) { c.StorageClass = "fast" })},
+		{name: "bad storage class", in: "storageClass: Premium_SSD\n", wantErr: "invalid StorageClass name"},
+		{name: "profile", in: "{}", profile: "aks", want: withDefaults(func(c *Config) { c.StorageClass = "managed-csi-premium" })},
+		{name: "config wins over the profile", in: "storageClass: fast\n", profile: "aks", want: withDefaults(func(c *Config) { c.StorageClass = "fast" })},
+		{
+			name:    "profile without bundled volumes",
+			in:      "postgres: external\nobjectStore: s3\n",
+			profile: "aks",
+			want: withDefaults(func(c *Config) {
+				c.Postgres, c.ObjectStore = Postgres{Type: PostgresExternal}, ObjectStore{Type: ObjectStoreS3}
+				c.StorageClass = "managed-csi-premium"
+			}),
+		},
 		{name: "empty", in: "", wantErr: "config is empty"},
+		{name: "bad profile", in: "{}", profile: "eks", wantErr: "invalid profile"},
+		{name: "profile in the config", in: "profile: aks\n", wantErr: "profile"},
+		{name: "image registry", in: "imageRegistry: r.azurecr.io\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "r.azurecr.io" })},
+		{name: "image registry with port", in: "imageRegistry: localhost:5001\n", want: withDefaults(func(c *Config) { c.ImageRegistry = "localhost:5001" })},
+		{name: "image registry with path", in: "imageRegistry: r.azurecr.io/substrate\n", wantErr: "invalid imageRegistry"},
+		{name: "image registry without domain", in: "imageRegistry: myregistry\n", wantErr: "invalid imageRegistry"},
+		{name: "image registry with space", in: "imageRegistry: 'r.azurecr.io '\n", wantErr: "invalid imageRegistry"},
+		{name: "otel endpoint", in: "otelEndpoint: http://collector:4317\n", want: withDefaults(func(c *Config) { c.OTelEndpoint = "http://collector:4317" })},
+		{name: "otel endpoint without scheme", in: "otelEndpoint: collector:4317\n", wantErr: "invalid OTLP endpoint"},
 		{name: "unknown field", in: "postgress: external\n", wantErr: "postgress"},
 		{name: "unknown release", in: "releases: {crds: {values: {a: 1}}}\n", wantErr: "crds"},
 		{name: "bad postgres", in: "postgres: cloud\n", wantErr: "invalid postgres"},
@@ -104,7 +127,7 @@ releases:
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ReadConfig(strings.NewReader(tc.in), "/cfg")
+			got, err := ReadConfig(strings.NewReader(tc.in), "/cfg", tc.profile)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("ReadConfig() error = %v, want it to contain %q", err, tc.wantErr)
@@ -152,6 +175,48 @@ func TestConfigUserValues(t *testing.T) {
 		"substrate-podcert": img("r", "all"),
 		"substrate-atelet":  img("r", "atelet-file"),
 		"substrate":         img("s", "substrate"),
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestProfileConfig(t *testing.T) {
+	for _, p := range append(Profiles(), "") {
+		if _, err := ProfileConfig(p); err != nil {
+			t.Errorf("ProfileConfig(%q): %v", p, err)
+		}
+	}
+	if _, err := ProfileConfig("eks"); err == nil || !strings.Contains(err.Error(), "invalid profile") {
+		t.Errorf("ProfileConfig(eks) error = %v, want invalid profile", err)
+	}
+}
+
+func TestConfigUserValuesRegistryAndOTel(t *testing.T) {
+	registry := func(r string) map[string]any {
+		return map[string]any{"global": map[string]any{"imageRegistry": r}}
+	}
+	otel := func(endpoint string) map[string]any {
+		return map[string]any{"endpoint": endpoint}
+	}
+	substrateValues := registry("mirror.example.com")
+	substrateValues["otel"] = otel("http://other:4317")
+	c := Config{
+		ImageRegistry: "r.azurecr.io",
+		OTelEndpoint:  "http://collector:4317",
+		Releases:      Releases{Substrate: ReleaseValues{Values: substrateValues}},
+	}
+	got, err := c.userValues()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The release's own values win, and podcert gets no otel.
+	atelet := registry("r.azurecr.io")
+	atelet["otel"] = otel("http://collector:4317")
+	want := map[string]map[string]any{
+		"substrate-podcert": registry("r.azurecr.io"),
+		"substrate-atelet":  atelet,
+		"substrate":         substrateValues,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("userValues() mismatch (-want +got):\n%s", diff)
