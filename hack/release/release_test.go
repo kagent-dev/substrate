@@ -133,7 +133,7 @@ func TestDraftReleaseArtifactNotes(t *testing.T) {
 			if strings.Contains(notes, "## Images") != tc.artifacts || strings.Contains(notes, "## kubectl-ate") != tc.artifacts {
 				t.Fatalf("incorrect artifact notes:\n%s", notes)
 			}
-			if strings.Contains(notes, "## Helm charts") != (tc.repo == "kagent-dev/substrate") {
+			if strings.Contains(notes, "## Helm charts") != (tc.repo == "kagent-dev/substrate") || strings.Contains(notes, "- `substrate-atelet`") != (tc.repo == "kagent-dev/substrate") {
 				t.Fatalf("incorrect chart notes:\n%s", notes)
 			}
 			if tc.artifacts {
