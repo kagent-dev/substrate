@@ -216,6 +216,10 @@ spec:
         - --client-ca-certs=/run/podidentity.podcert.ate.dev/trust-bundle.pem
         - '--herder-allowed-spiffe-id=spiffe://cluster.local/ns/{{ .Release.Namespace }}/sa/{{ include "substrate.fullname" (list "ate-api-server" .) }}'
         - --ateapi-ca-file=/run/servicedns.podcert.ate.dev/trust-bundle.pem
+        # atelet defaults to api.ate-system.svc; pass the chart-resolved Service
+        # so a renamed or relocated install dials its own API.
+        - "--ateapi-address=k8s:///{{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc:443"
+        - "--ateapi-server-name={{ include "substrate.fullname" (list "api" .) }}.{{ .Release.Namespace }}.svc"
 {{- with .Values.atelet.extraArgs }}
 {{ toYaml . | indent 8 }}
 {{- end }}

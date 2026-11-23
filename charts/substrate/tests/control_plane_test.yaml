@@ -116,6 +116,18 @@ tests:
         key: cloud.google.com/compute-class
         operator: Exists
         effect: NoSchedule
+- it: points atelet at the release's API Service
+  template: atelet.yaml
+  documentSelector:
+    path: kind
+    value: DaemonSet
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --ateapi-address=k8s:///custom-api.custom-system.svc:443
+  - contains:
+      path: spec.template.spec.containers[0].args
+      content: --ateapi-server-name=custom-api.custom-system.svc
 - it: schedules atelet on every node by default
   template: atelet.yaml
   documentSelector:
