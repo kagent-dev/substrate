@@ -180,7 +180,7 @@ fi
 if [[ "${REPO}" == "kagent-dev/substrate" ]]; then
   notes+=$'\n\n## Helm charts\n\n'
   notes+="Charts are published at \`oci://${RELEASE_IMAGE_REPO}/helm\` with version \`${tag#v}\`:"
-  notes+=$'\n\n- `substrate-crds`\n- `substrate`\n- `substrate-podcert`'
+  notes+=$'\n\n- `substrate-crds`\n- `substrate`\n- `substrate-podcert`\n- `substrate-atelet`'
 fi
 
 # GitHub only lists first-time contributors; list everyone, as v0.1.0 did.
