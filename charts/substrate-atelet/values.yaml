@@ -61,6 +61,10 @@ atelet:
   nodeSelector: {}
   extraArgs: []
   extraEnv: []
+  # Added to the atelet pod's volumes and its container's volumeMounts, such
+  # as a host file a credential provider reads.
+  extraVolumes: []
+  extraVolumeMounts: []
   resources:
     requests:
       cpu: 50m
@@ -93,6 +97,13 @@ otel:
   logs:
     enabled: true
     endpoint: ""
+
+# A PodMonitor that scrapes atelet's /metrics endpoint. It needs the
+# Prometheus Operator CRDs, or apiVersion azmonitoring.coreos.com/v1 for Azure
+# Managed Prometheus.
+podMonitors:
+  enabled: false
+  apiVersion: monitoring.coreos.com/v1
 
 # Values under `global` are visible to this chart and to every subchart.
 global:

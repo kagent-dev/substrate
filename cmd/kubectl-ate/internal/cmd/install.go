@@ -34,6 +34,7 @@ import (
 
 var (
 	configPath    string
+	profile       string
 	chartDir      string
 	noTUI         bool
 	upgradeDryRun bool
@@ -58,6 +59,9 @@ const configHelp = `--config takes a YAML file, or - for stdin:
   microvm:
     enabled: true
     assetBucket: my-assets # for s3 or gcs
+  imageRegistry: my.azurecr.io # pull every image from it
+  storageClass: fast       # bundled volumes; empty for the default
+  otelEndpoint: http://otel-collector:4317 # your OTLP collector
   timeout: 10m             # each wait for workloads
   releases:                # Helm values
     all:                   # every release except substrate-crds
@@ -71,7 +75,8 @@ const configHelp = `--config takes a YAML file, or - for stdin:
     substrate:             # substrate
       values:
         otel:
-          endpoint: http://otel-collector:4317
+          traces:
+            samplingRatio: 0.1
 
 A release's own valuesFiles and values win over the ones in all.`
 
@@ -94,9 +99,25 @@ described in charts/substrate/README.md and set postgres.type to external.
 To store snapshots in a bucket, set objectStore.type to s3 or gcs and set
 objectStore.bucket. GCS also needs objectStore.gcs.transferServiceAccount.
 
+storageClass sets the StorageClass of the bundled PostgreSQL and RustFS
+volumes when they are created.
+
+imageRegistry pulls every image install deploys, including the bundled
+PostgreSQL's, from that registry. It must hold the images under their usual
+paths.
+
+otelEndpoint points atelet and the control plane at an OTLP collector you
+already run, for traces, metrics and logs. Install doesn't deploy one.
+
+--profile names a config built into kubectl ate. The config from --config is
+layered over it, so its settings win. Maps merge and lists replace, as in Helm
+values. The aks profile sets storageClass to managed-csi-premium.
+
 microvm.enabled downloads the Kata and Cloud Hypervisor guest assets for each
 node architecture, caches them under the user cache directory, uploads them to
 the object store, and applies the microvm SandboxConfig. Upgrade restages them.
+Install also checks that a node advertises ate.dev/kvm, which atelet does on
+nodes with /dev/kvm.
 
 ` + configHelp,
 	Example: `  kubectl ate install -c install.yaml
@@ -112,7 +133,7 @@ the object store, and applies the microvm SandboxConfig. Upgrade restages them.
 		}
 		defer closeTerminal(tty)
 		if useTUI(cmd, tty) && configPath == "" {
-			if err := tui.Wizard(cmd.ErrOrStderr(), &opts.Config); err != nil {
+			if err := tui.Wizard(cmd.ErrOrStderr(), &opts.Config, profile == ""); err != nil {
 				return err
 			}
 		}
@@ -131,9 +152,9 @@ docs/reference/version-skew-policy.md upgrades after atelet.
 
 Upgrade doesn't reuse the values a release was installed with. Each
 release's values come from the chart and the config, the same way install
-sets them, so pass the config you installed with, changed as needed.
-It refuses downgrades, skipped minor releases, and CRD changes that would
-strand stored objects.
+sets them, so pass the config and --profile you installed with, changed as
+needed. It refuses downgrades, skipped minor releases, and CRD changes that
+would strand stored objects.
 
 --dry-run prints each release's manifest diff and changes nothing.`,
 	Args: cobra.NoArgs,
@@ -183,9 +204,9 @@ data.`,
 	},
 }
 
-// options reads the config and finds the terminal to read keys and answers
-// from. Without --config the config is install.DefaultConfig. The terminal is
-// nil when there is none. Close it with closeTerminal.
+// options reads the config, layered over --profile, and finds the terminal to
+// read keys and answers from. Without --config the config is the profile's.
+// The terminal is nil when there is none. Close it with closeTerminal.
 func options(cmd *cobra.Command) (install.Options, *os.File, error) {
 	var opts install.Options
 	if chartDir != "" {
@@ -194,13 +215,15 @@ func options(cmd *cobra.Command) (install.Options, *os.File, error) {
 	var err error
 	switch configPath {
 	case "":
-		opts.Config = install.DefaultConfig()
+		if opts.Config, err = install.ProfileConfig(profile); err != nil {
+			return opts, nil, err
+		}
 	case "-":
-		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".")
+		opts.Config, err = install.ReadConfig(cmd.InOrStdin(), ".", profile)
 	default:
 		var f *os.File
 		if f, err = os.Open(configPath); err == nil {
-			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath))
+			opts.Config, err = install.ReadConfig(f, filepath.Dir(configPath), profile)
 			f.Close()
 		}
 	}
@@ -339,6 +362,7 @@ func init() {
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd, uninstallCmd} {
 		c.Flags().StringVarP(&configPath, "config", "c", "", "Install config file, or - for stdin")
 		c.Flags().BoolVar(&noTUI, "no-tui", false, "Print plain progress lines instead of the interactive view")
+		c.Flags().StringVar(&profile, "profile", "", fmt.Sprintf("Built-in config to layer the config over, one of %v", install.Profiles()))
 	}
 	for _, c := range []*cobra.Command{installCmd, upgradeCmd} {
 		c.Flags().StringVar(&chartDir, "chart-dir", "", "Load charts from this directory instead of the ones built into kubectl ate")
