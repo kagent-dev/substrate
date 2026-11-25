@@ -55,6 +55,12 @@ Object storage is set under `objectStore` instead of `rustfs` and
 | `objectStore.pathStyle` | `false` | Address buckets by path rather than by virtual host |
 | `objectStore.credentialsSecret` | `""` | Secret with `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` keys. Empty uses the SDK's default credential chain |
 
+Set `atelet.serviceAccount.annotations` and `atelet.serviceAccount.labels` to
+add metadata to the chart-managed ServiceAccount, for example to configure
+workload identity for the node object-store plugin. Restart existing atelet
+pods after changing an identity annotation so the identity provider can inject
+credentials into newly created pods.
+
 Set `substrateReleaseName` to the substrate release's name. It defaults to
 `substrate`. atelet's objects take their names from it, because the substrate
 release grants permissions to the atelet ServiceAccount by name. atelet also
