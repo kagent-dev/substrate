@@ -47,7 +47,7 @@ releases:
         - --snapshot-detach-delay=30s
   substrate:
     valuesFiles:
-    - internal/e2e/suites/credentials/values.yaml
+    - internal/e2e/suites/kagentcredentials/values.yaml
     - internal/e2e/suites/parking/values.yaml
     values:
       atenetRouter:
