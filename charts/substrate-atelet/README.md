@@ -61,6 +61,10 @@ release grants permissions to the atelet ServiceAccount by name. atelet also
 uses it to reach that release's API server. Names other than `substrate`
 prefix each object with the release name, for example `team-atelet`.
 
+`metrics.podMonitor` takes the same keys as in the substrate chart and renders
+atelet's `PodMonitor`. The substrate chart renders that monitor only while
+it renders atelet.
+
 ## Existing installs
 
 Upgrading the substrate release with `atelet.enabled=false` deletes atelet.

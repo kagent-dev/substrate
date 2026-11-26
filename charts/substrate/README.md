@@ -112,6 +112,9 @@ See `values.yaml` for the full set; the important keys:
 | `otel.metrics.endpoint` | `""` | OTLP endpoint for metrics, overriding `otel.endpoint` |
 | `otel.logs.enabled` | `true` | Enable OTLP actor events from ateapi and the ateworkers, plus the router access log. Actor events go to stdout when OTLP logs are disabled |
 | `otel.logs.endpoint` | `""` | OTLP endpoint for logs, overriding `otel.endpoint` |
+| `metrics.podMonitor.enabled` | `false` | Render a Prometheus Operator `PodMonitor` for each workload that serves metrics. Requires the `monitoring.coreos.com/v1` CRDs |
+| `metrics.podMonitor.interval` | `""` | Scrape interval. Empty leaves the Prometheus default |
+| `metrics.podMonitor.labels` | `{}` | Labels on every `PodMonitor`, such as the ones a `podMonitorSelector` matches |
 
 ## Router timeouts
 

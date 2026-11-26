@@ -1,5 +1,5 @@
 {{/*
-Copyright 2026 Google LLC
+Copyright 2026 The Agent Substrate Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ and no two agree on the port name:
 
   ate-controller serves controller-runtime's own metrics server. Its
   ctrl.Options sets no Metrics field, and only BindAddress "0" disables that
-  server, so it binds the default :8080 — the port its pod already declares as
+  server, so it binds the default :8080, which its pod already declares as
   `metrics`. This endpoint carries the controller_runtime_* and workqueue_*
   families that docs/metrics/substrate.yaml lists under
   bridged_metric_families.
@@ -43,12 +43,14 @@ collected.
 
 A PodMonitor addresses a NAMED container port, so the name is per workload: one
 shared name would match some pods and silently miss the others. The pod label
-is per workload too — each carries a bare `app: <component>` except the
+is per workload too: each carries a bare `app: <component>` except the
 credential provider, whose label is the substrate.fullname helper's output and
 so depends on the release name.
 
 podcertificate-controller gets no monitor: it emits no metrics, which
-docs/metrics/substrate.yaml states under blind_spots.
+docs/metrics/substrate.yaml states under blind_spots. atelet and the credential
+provider get one only when the chart renders them. With atelet.enabled=false,
+the substrate-atelet chart renders atelet's monitor under the same name.
 
 One object per workload rather than one selecting several: an interval and a
 relabeling are a component's own, and the atelet is a DaemonSet whose series
@@ -56,14 +58,15 @@ are per node.
 */}}
 {{- if .Values.metrics.podMonitor.enabled }}
 {{- $components := list
-  (dict "app" "ate-api-server" "ports" (list "prometheus"))
-  (dict "app" "ate-controller" "ports" (list "metrics"))
-  (dict "app" "atelet" "ports" (list "prometheus"))
-  (dict "app" "atenet-egress" "ports" (list "metrics" "stats"))
-  (dict "app" "atenet-router" "ports" (list "metrics" "gw-metrics"))
-  (dict "app" "k8s-credential-provider" "ports" (list "metrics") "fullnameLabel" true)
+  (dict "app" "ate-api-server" "ports" (list "prometheus") "enabled" true)
+  (dict "app" "ate-controller" "ports" (list "metrics") "enabled" true)
+  (dict "app" "atelet" "ports" (list "prometheus") "enabled" .Values.atelet.enabled)
+  (dict "app" "atenet-egress" "ports" (list "metrics" "stats") "enabled" true)
+  (dict "app" "atenet-router" "ports" (list "metrics" "gw-metrics") "enabled" true)
+  (dict "app" "k8s-credential-provider" "ports" (list "metrics") "fullnameLabel" true "enabled" .Values.credentialProvider.enabled)
 }}
 {{- range $components }}
+{{- if .enabled }}
 {{- $label := .app }}
 {{- if .fullnameLabel }}
 {{- $label = include "substrate.fullname" (list .app $) }}
@@ -94,5 +97,6 @@ spec:
     interval: {{ . }}
     {{- end }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

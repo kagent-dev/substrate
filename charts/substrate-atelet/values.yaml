@@ -69,6 +69,16 @@ atelet:
       cpu: "2"
       memory: 1Gi
 
+# Prometheus Operator PodMonitor for atelet's metrics port.
+metrics:
+  podMonitor:
+    # Requires the monitoring.coreos.com/v1 CRDs.
+    enabled: false
+    # Scrape interval. Empty leaves Prometheus' own default.
+    interval: ""
+    # Labels on the PodMonitor, such as the ones a podMonitorSelector matches.
+    labels: {}
+
 # Object storage credentials/settings for the node object-store plugin.
 objectStorePlugin:
   extraEnv: []
