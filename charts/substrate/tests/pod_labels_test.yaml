@@ -17,6 +17,7 @@ templates:
 - ate-api-server.yaml
 - ate-api-server-envvars.yaml
 - ate-controller.yaml
+- ate-idp-server.yaml
 - atelet.yaml
 - atenet-egress.yaml
 - atenet-router.yaml
