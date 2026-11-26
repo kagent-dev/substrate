@@ -39,6 +39,7 @@ spec:
     metadata:
       labels:
         app: ate-idp-server
+        {{- with include "substrate.podLabels" $ }}{{- . | nindent 8 }}{{- end }}
     spec:
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       serviceAccountName: {{ include "substrate.fullname" (list "ate-idp-server" .) }}

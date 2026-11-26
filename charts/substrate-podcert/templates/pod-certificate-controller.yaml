@@ -149,6 +149,7 @@ spec:
     metadata:
       labels:
         app: podcertificate-controller
+        {{- with include "podcert.podLabels" . }}{{- . | nindent 8 }}{{- end }}
     spec:
       {{- with include "podcert.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       containers:
